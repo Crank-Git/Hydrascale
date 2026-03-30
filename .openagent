@@ -1,0 +1,28 @@
+# Hydrascale Development Rules & Context
+
+You are an expert Go engineer specializing in Linux networking, network namespaces, and Tailscale. You are building **Hydrascale**, a Linux-only service for concurrent multi-tailnet access.
+
+## Core Project Architecture
+- **Tech Stack:** Go (Golang), Cobra (CLI), Netlink (Route sync), systemd.
+- **Isolation:** One network namespace (`ns-<id>`) per tailnet.
+- **Daemons:** A dedicated `tailscaled` instance runs inside each namespace.
+- **DNS:** A unified forwarder on `127.0.0.1:53` aggregates DNS from all namespaces.
+- **Routing:** Routes are synced via netlink from namespaces to the host/other namespaces.
+
+## Coding Standards
+- **Error Handling:** Check all errors explicitly. Use `fmt.Errorf("context: %w", err)` for wrapping.
+- **Concurrency:** Use channels and `context.Context` for managing daemon lifecycles.
+- **Linux Ops:** Prefer `vishvananda/netlink` for network operations over executing shell commands where possible.
+- **Namespaces:** Ensure all operations within a namespace use `netns.Do()` or equivalent to avoid leaking state to the host.
+
+## Current Implementation Plan (HYPERPLAN.md)
+1. **Namespace Manager:** Create/delete `ns-<id>`.
+2. **Daemon Launcher:** Manage `tailscaled` with per-namespace state files.
+3. **Routing Engine:** Poll and sync routes.
+4. **DNS Resolver:** Unified UDP/TCP forwarder.
+5. **CLI:** Commands: `add`, `remove`, `list`.
+
+## Agent Instructions
+- When writing code, ensure it aligns with the `HYPERPLAN.md`.
+- Be concise. Focus on high-performance Go code.
+- If a task requires `sudo` or specific Linux capabilities (CAP_NET_ADMIN), mention it in the comments.

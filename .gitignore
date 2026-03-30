@@ -1,0 +1,12 @@
+node_modules/                                                        
+__pycache__/                                                         
+*.pyc                                                                
+.env                                                                 
+dist/                                                                
+build/                                                               
+.pytest_cache/                                                       
+.vscode/settings.json  # Keep settings out, use local configs in src/
+.idea/                                                               
+.DS_Store                                                            
+mypy_cache/                                                          
+htmlcov/                                                             
