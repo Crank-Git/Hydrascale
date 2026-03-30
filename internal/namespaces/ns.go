@@ -6,6 +6,48 @@ import (
 	"strings"
 )
 
+// Manager defines the interface for network namespace operations.
+type Manager interface {
+	Create(tailnetID string) error
+	Delete(nsName string) error
+	List() ([]string, error)
+	GetName(tailnetID string) string
+	GetTailnetID(nsName string) string
+}
+
+// RealManager implements Manager using real system calls.
+type RealManager struct{}
+
+// NewRealManager returns a new RealManager.
+func NewRealManager() *RealManager {
+	return &RealManager{}
+}
+
+// GetName returns the namespace name for a given tailnet ID.
+func (m *RealManager) GetName(tailnetID string) string {
+	return GetNamespaceName(tailnetID)
+}
+
+// GetTailnetID returns the tailnet ID from a namespace name.
+func (m *RealManager) GetTailnetID(nsName string) string {
+	return GetTailnetFromNamespace(nsName)
+}
+
+// Create creates a new network namespace for the given tailnet ID.
+func (m *RealManager) Create(tailnetID string) error {
+	return CreateNamespace(tailnetID)
+}
+
+// Delete deletes the network namespace with the given name.
+func (m *RealManager) Delete(nsName string) error {
+	return DeleteNamespace(nsName)
+}
+
+// List returns a list of all Hydrascale network namespaces.
+func (m *RealManager) List() ([]string, error) {
+	return ListNamespaces()
+}
+
 // GetNamespaceName returns the namespace name for a given tailnet ID.
 // Format: ns-<tailnet-id> as per HYPERPLAN.md specification.
 func GetNamespaceName(tailnetID string) string {
@@ -13,7 +55,6 @@ func GetNamespaceName(tailnetID string) string {
 }
 
 // CreateNamespace creates a new network namespace for the given tailnet ID.
-// It follows the naming convention: ns-<tailnet-id>.
 func CreateNamespace(tailnetID string) error {
 	namespaceName := GetNamespaceName(tailnetID)
 
