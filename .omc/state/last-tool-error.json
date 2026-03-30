@@ -1,7 +1,0 @@
-{
-  "tool_name": "Read",
-  "tool_input_preview": "{\"file_path\":\"/home/e/.claude/projects/-home-e-development-Hydrascale/707ad332-b76d-41de-b65a-a06438226fda/tool-results/ba0c8c3uy.txt\"}",
-  "error": "File content (35129 tokens) exceeds maximum allowed tokens (10000). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
-  "timestamp": "2026-03-30T15:19:29.263Z",
-  "retry_count": 1
-}
