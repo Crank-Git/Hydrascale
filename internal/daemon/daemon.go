@@ -107,6 +107,11 @@ func StopDaemon(namespaceName string, tailnetID string) error {
 
 	pidData, err := os.ReadFile(pidPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// No PID file means daemon is already stopped
+			fmt.Printf("tailscaled for %s already stopped (no PID file)\n", tailnetID)
+			return nil
+		}
 		return fmt.Errorf("failed to read PID file for %s: %w", tailnetID, err)
 	}
 
