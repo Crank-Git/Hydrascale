@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// validIDPattern restricts tailnet IDs to safe characters.
+// Prevents path traversal and shell argument issues.
+var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
 // DefaultConfigPath is the default location for the Hydrascale config file.
 const DefaultConfigPath = "/var/lib/hydrascale/config.yaml"
@@ -57,6 +62,21 @@ func LoadConfig(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Validate tailnet IDs
+	seen := make(map[string]bool, len(cfg.Tailnets))
+	for _, tn := range cfg.Tailnets {
+		if tn.ID == "" {
+			return nil, fmt.Errorf("tailnet ID cannot be empty")
+		}
+		if !validIDPattern.MatchString(tn.ID) {
+			return nil, fmt.Errorf("invalid tailnet ID %q: must match [a-zA-Z0-9._-], start with alphanumeric, max 63 chars", tn.ID)
+		}
+		if seen[tn.ID] {
+			return nil, fmt.Errorf("duplicate tailnet ID %q", tn.ID)
+		}
+		seen[tn.ID] = true
 	}
 
 	// Auto-migrate v1 to v2

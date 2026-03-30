@@ -183,16 +183,33 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 }
 
 // Apply executes a list of actions. Each action runs independently.
-// Failed actions increment the per-tailnet failure counter.
+// Failure counting is per-tailnet per-cycle: only clear on a full cycle
+// with zero failures for that tailnet.
 func (r *Reconciler) Apply(actions []Action) {
+	// Track which tailnets had failures in this cycle
+	cycleFailures := make(map[string]bool)
+
 	for _, action := range actions {
 		err := r.executeAction(action)
 		if err != nil {
 			r.emit("action_failed", action.TailnetID, fmt.Sprintf("%s: %v", action.Type, err))
-			r.recordFailure(action.TailnetID)
+			cycleFailures[action.TailnetID] = true
 		} else {
 			r.emit("action_ok", action.TailnetID, string(action.Type))
-			r.clearFailure(action.TailnetID)
+		}
+	}
+
+	// Update failure counts: increment for tailnets with failures,
+	// clear only for tailnets where ALL actions succeeded this cycle.
+	tailnetsSeen := make(map[string]bool)
+	for _, action := range actions {
+		tailnetsSeen[action.TailnetID] = true
+	}
+	for id := range tailnetsSeen {
+		if cycleFailures[id] {
+			r.recordFailure(id)
+		} else {
+			r.clearFailure(id)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -173,6 +174,55 @@ func TestSaveConfig_SetsVersion(t *testing.T) {
 	}
 	if loaded.Version != 2 {
 		t.Errorf("Version = %d, want 2", loaded.Version)
+	}
+}
+
+func TestLoadConfig_InvalidTailnetID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"path traversal", "../../etc/passwd"},
+		{"spaces", "has spaces"},
+		{"empty", ""},
+		{"slash", "foo/bar"},
+		{"starts with dot", ".hidden"},
+		{"starts with dash", "-bad"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := fmt.Sprintf("version: 2\ntailnets:\n  - id: %q\n", tt.id)
+			tmp := writeTemp(t, content)
+			_, err := LoadConfig(tmp)
+			if err == nil {
+				t.Errorf("expected error for tailnet ID %q", tt.id)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_DuplicateTailnetID(t *testing.T) {
+	tmp := writeTemp(t, `
+version: 2
+tailnets:
+  - id: "dupe"
+  - id: "dupe"
+`)
+	_, err := LoadConfig(tmp)
+	if err == nil {
+		t.Fatal("expected error for duplicate tailnet ID")
+	}
+}
+
+func TestLoadConfig_ValidTailnetIDs(t *testing.T) {
+	ids := []string{"team-prod", "devops", "my.tailnet", "test_123", "a"}
+	for _, id := range ids {
+		content := fmt.Sprintf("version: 2\ntailnets:\n  - id: %q\n", id)
+		tmp := writeTemp(t, content)
+		_, err := LoadConfig(tmp)
+		if err != nil {
+			t.Errorf("valid ID %q rejected: %v", id, err)
+		}
 	}
 }
 

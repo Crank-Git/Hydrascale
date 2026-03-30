@@ -88,11 +88,18 @@ func ListNamespaces() ([]string, error) {
 		return nil, fmt.Errorf("failed to list namespaces: %v", err)
 	}
 
-	nameArray := strings.Fields(string(output))
+	// ip netns list outputs "ns-foo (id: 0)" per line.
+	// Take only the first field per line to avoid junk tokens.
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var result []string
-	for _, ns := range nameArray {
-		if ns != "default" && len(ns) > 0 {
-			result = append(result, ns)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		name := strings.Fields(line)[0]
+		if name != "default" && len(name) > 0 {
+			result = append(result, name)
 		}
 	}
 
