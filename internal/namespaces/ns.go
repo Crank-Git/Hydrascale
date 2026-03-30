@@ -6,6 +6,48 @@ import (
 	"strings"
 )
 
+// Manager defines the interface for network namespace operations.
+type Manager interface {
+	Create(tailnetID string) error
+	Delete(nsName string) error
+	List() ([]string, error)
+	GetName(tailnetID string) string
+	GetTailnetID(nsName string) string
+}
+
+// RealManager implements Manager using real system calls.
+type RealManager struct{}
+
+// NewRealManager returns a new RealManager.
+func NewRealManager() *RealManager {
+	return &RealManager{}
+}
+
+// GetName returns the namespace name for a given tailnet ID.
+func (m *RealManager) GetName(tailnetID string) string {
+	return GetNamespaceName(tailnetID)
+}
+
+// GetTailnetID returns the tailnet ID from a namespace name.
+func (m *RealManager) GetTailnetID(nsName string) string {
+	return GetTailnetFromNamespace(nsName)
+}
+
+// Create creates a new network namespace for the given tailnet ID.
+func (m *RealManager) Create(tailnetID string) error {
+	return CreateNamespace(tailnetID)
+}
+
+// Delete deletes the network namespace with the given name.
+func (m *RealManager) Delete(nsName string) error {
+	return DeleteNamespace(nsName)
+}
+
+// List returns a list of all Hydrascale network namespaces.
+func (m *RealManager) List() ([]string, error) {
+	return ListNamespaces()
+}
+
 // GetNamespaceName returns the namespace name for a given tailnet ID.
 // Format: ns-<tailnet-id> as per HYPERPLAN.md specification.
 func GetNamespaceName(tailnetID string) string {
@@ -13,7 +55,6 @@ func GetNamespaceName(tailnetID string) string {
 }
 
 // CreateNamespace creates a new network namespace for the given tailnet ID.
-// It follows the naming convention: ns-<tailnet-id>.
 func CreateNamespace(tailnetID string) error {
 	namespaceName := GetNamespaceName(tailnetID)
 
@@ -47,11 +88,18 @@ func ListNamespaces() ([]string, error) {
 		return nil, fmt.Errorf("failed to list namespaces: %v", err)
 	}
 
-	nameArray := strings.Fields(string(output))
+	// ip netns list outputs "ns-foo (id: 0)" per line.
+	// Take only the first field per line to avoid junk tokens.
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var result []string
-	for _, ns := range nameArray {
-		if ns != "default" && len(ns) > 0 {
-			result = append(result, ns)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		name := strings.Fields(line)[0]
+		if name != "default" && len(name) > 0 {
+			result = append(result, name)
 		}
 	}
 

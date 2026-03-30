@@ -16,7 +16,7 @@ func TestParseCIDR(t *testing.T) {
 		{"10.0.0.0/8", net.IPv4(10, 0, 0, 0), 8, false},
 		{"2001:db8::/32", net.ParseIP("2001:db8::"), 32, false},
 		{"invalid", nil, 0, true},
-		{"192.168.1.0/33", nil, 0, true}, // invalid mask
+		{"192.168.1.0/33", nil, 0, true},
 	}
 
 	for _, tt := range tests {
@@ -47,11 +47,29 @@ func TestGetDefaultRoute(t *testing.T) {
 	}
 }
 
+func TestGetDefaultRoute_IPv6(t *testing.T) {
+	routes := []Route{
+		{Network: "::/0"},
+	}
+	if got := GetDefaultRoute(routes); got != "::/0" {
+		t.Errorf("GetDefaultRoute() = %q, want %q", got, "::/0")
+	}
+}
+
+func TestGetDefaultRoute_None(t *testing.T) {
+	routes := []Route{
+		{Network: "192.168.1.0/24"},
+	}
+	if got := GetDefaultRoute(routes); got != "" {
+		t.Errorf("GetDefaultRoute() = %q, want empty", got)
+	}
+}
+
 func TestHasExitNode(t *testing.T) {
 	// No exit node - all natural routes
 	routes := []Route{
 		{Network: "192.168.1.0/24", Natural: true},
-		{Network: "0.0.0.0/0", Natural: true}, // default route
+		{Network: "0.0.0.0/0", Natural: true},
 	}
 	if got := HasExitNode(routes); got {
 		t.Errorf("HasExitNode() = %v, want false", got)
@@ -60,10 +78,16 @@ func TestHasExitNode(t *testing.T) {
 	// Has exit node - non-natural route that's not default
 	routes = []Route{
 		{Network: "192.168.1.0/24", Natural: true},
-		{Network: "0.0.0.0/0", Natural: true},   // default route
-		{Network: "10.0.0.0/8", Natural: false}, // exit node route
+		{Network: "0.0.0.0/0", Natural: true},
+		{Network: "10.0.0.0/8", Natural: false},
 	}
 	if got := HasExitNode(routes); !got {
 		t.Errorf("HasExitNode() = %v, want true", got)
+	}
+}
+
+func TestHasExitNode_Empty(t *testing.T) {
+	if HasExitNode(nil) {
+		t.Error("HasExitNode(nil) = true, want false")
 	}
 }

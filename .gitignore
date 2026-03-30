@@ -8,5 +8,6 @@ build/
 .vscode/settings.json  # Keep settings out, use local configs in src/
 .idea/                                                               
 .DS_Store                                                            
-mypy_cache/                                                          
-htmlcov/                                                             
+mypy_cache/
+htmlcov/
+.omc/
