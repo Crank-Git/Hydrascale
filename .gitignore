@@ -11,6 +11,7 @@ build/
 mypy_cache/
 htmlcov/
 .omc/
+.openagent
 .openagent/
 .sisyphus/
 CLAUDE.md
