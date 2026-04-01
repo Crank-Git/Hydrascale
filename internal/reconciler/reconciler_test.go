@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,7 @@ func (m *mockNS) TeardownVeth(nsName string) error {
 }
 
 type mockDaemon struct {
+	mu        sync.Mutex
 	healthy   map[string]bool // tailnetID -> healthy
 	startErr  map[string]error
 	stopErr   error
@@ -84,6 +86,8 @@ func newMockDaemon() *mockDaemon {
 }
 
 func (m *mockDaemon) Start(tailnetID, nsName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if err, ok := m.startErr[tailnetID]; ok && err != nil {
 		return err
 	}
@@ -92,6 +96,8 @@ func (m *mockDaemon) Start(tailnetID, nsName string) error {
 }
 
 func (m *mockDaemon) Stop(nsName, tailnetID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.stopErr != nil {
 		return m.stopErr
 	}
@@ -100,6 +106,8 @@ func (m *mockDaemon) Stop(nsName, tailnetID string) error {
 }
 
 func (m *mockDaemon) CheckHealth(nsName, tailnetID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.healthErr != nil {
 		return false, m.healthErr
 	}
