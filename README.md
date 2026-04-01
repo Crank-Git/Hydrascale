@@ -1,299 +1,181 @@
 # Hydrascale
 
-Hydrascale is a Linux-only Go service that lets a single user run multiple Tailscale tailnets simultaneously. It achieves isolation by creating one network namespace per tailnet and launching a dedicated `tailscaled` instance inside that namespace. A unified DNS resolver aggregates all tailnet DNS servers, and routes are synced via `netlink`.
+Run multiple Tailscale tailnets simultaneously on a single Linux machine.
 
-## Features
+## What It Does
 
-- Run multiple isolated Tailscale tailnets on a single machine
-- Network namespace-based isolation for security and separation
-- Unified DNS resolver for seamless name resolution across all tailnets
-- Automatic route synchronization using netlink
-- Systemd service integration for easy deployment
-- CLI interface for managing tailnets
-- Automatic restart of crashed daemons
+Hydrascale lets a single Linux host participate in multiple Tailscale tailnets at the same time. It creates an isolated network namespace for each tailnet and launches a dedicated `tailscaled` instance inside it, so traffic from one tailnet never leaks into another. Overlapping IP ranges, independent firewall rules, and separate routing tables all work out of the box because every tailnet gets its own network stack.
+
+You declare the tailnets you want in a YAML config file and Hydrascale continuously reconciles the running system toward that desired state. Add a tailnet to the config and it appears; remove it and Hydrascale tears down the namespace, stops the daemon, and cleans up routes. A unified DNS resolver aggregates name resolution across all active tailnets so you can reach any peer by hostname regardless of which tailnet it belongs to.
+
+The reconciler runs as a control loop: on each tick it reads the config, inspects the live system, computes a diff, and applies the minimum set of actions needed. Tailnets that fail repeatedly are placed into an error state and skipped until explicitly reset, preventing a single broken tailnet from disrupting the rest. The event log records every action for debugging and future API use.
+
+## Requirements
+
+- **Linux** (network namespaces are a Linux kernel feature)
+- **Go 1.24+** (for building from source)
+- **Root or CAP_NET_ADMIN** capability
+- **Tailscale installed** (`tailscaled` and `tailscale` commands available in `$PATH`)
+
+## Install
+
+### Binary Download
+
+Download a pre-built binary from the [GitHub Releases](https://github.com/yourorg/hydrascale/releases) page:
+
+```bash
+tar xzf hydrascale_*.tar.gz
+sudo install hydrascale /usr/local/bin/
+```
+
+### Build from Source
+
+```bash
+go install hydrascale/cmd/hydrascale@latest
+```
+
+Or clone and build manually:
+
+```bash
+git clone https://github.com/yourorg/hydrascale.git
+cd hydrascale
+go build -o hydrascale ./cmd/hydrascale
+sudo install hydrascale /usr/local/bin/
+```
+
+## Quick Start
+
+1. Create a config file at `/var/lib/hydrascale/config.yaml`:
+
+```yaml
+version: 2
+tailnets:
+  - id: corp-prod
+    auth_key: tskey-auth-xxxxx   # optional, for unattended auth
+  - id: homelab
+    exit_node: exit-us.example.com
+resolver:
+  mode: unified
+reconciler:
+  interval: 10s
+```
+
+2. Apply the config (one-shot):
+
+```bash
+sudo hydrascale apply
+```
+
+3. Or run as a daemon with continuous reconciliation:
+
+```bash
+sudo hydrascale serve
+```
+
+## Config Reference
+
+```yaml
+# Config schema version (auto-migrated from v1 if omitted)
+version: 2
+
+# List of tailnets to manage
+tailnets:
+  - id: "corp-prod"              # unique identifier (alphanumeric, dots, hyphens, underscores; max 63 chars)
+    exit_node: "node1.example.com" # optional exit node hostname
+    auth_key: "tskey-auth-xxxxx"   # optional auth key for unattended setup
+
+# DNS resolver settings
+resolver:
+  mode: unified                  # aggregates DNS across all tailnets
+  bind_address: "127.0.0.1:53"  # optional, defaults to 127.0.0.1:53
+
+# Reconciler settings
+reconciler:
+  interval: 10s                  # how often the control loop runs (Go duration)
+```
+
+## CLI Commands
+
+```
+hydrascale add <id>        Add a tailnet to config and reconcile
+hydrascale remove <id>     Remove a tailnet from config and reconcile
+hydrascale list            List all configured tailnets
+hydrascale switch <id>     Switch the default namespace for direct tailscale CLI usage
+hydrascale diff            Show what would change without applying
+hydrascale apply           One-shot reconciliation (apply config to system)
+hydrascale status          Show desired vs actual state for all tailnets
+hydrascale serve           Start daemon mode (continuous reconciliation loop)
+```
+
+Use `--config <path>` on any command to override the default config location (`/var/lib/hydrascale/config.yaml`).
+
+## Daemon Mode
+
+### systemd Setup
+
+```bash
+sudo mkdir -p /var/lib/hydrascale
+sudo cp contrib/hydrascale.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hydrascale
+```
+
+The provided unit file (`contrib/hydrascale.service`) runs Hydrascale with minimal privileges using ambient capabilities and systemd sandboxing.
+
+### SIGHUP Reload
+
+The daemon re-reads the config file on every reconciliation tick, so config changes take effect within one interval. A future release will add explicit SIGHUP handling for immediate reload.
+
+### Graceful Shutdown
+
+Sending SIGINT or SIGTERM causes the daemon to cancel the reconciliation loop and exit cleanly. Namespaces and daemons are left running so tailnet connectivity is preserved across restarts.
+
+### Monitoring
+
+```bash
+sudo systemctl status hydrascale
+sudo journalctl -u hydrascale -f
+```
 
 ## Architecture
 
 ```
-┌───────────────────────┐
-│   hydrascale CLI      │  (Cobra)
-└────────▲───────────────┘
-         │
-add/remove/list     ──►  Service (systemd)
-         │                     │
-         ▼                     ▼
-┌───────────────────────┐  ┌──────────────────────────┐
-│ Namespace Manager     │  │ Tailscale Daemon Launcher│
-│ (ip netns)            │  │   (tailscaled per ns)     │
-└────────▲───────────────┘  └──────────────▲─────────────┘
-         │                            │
-         ▼                            ▼
-┌───────────────────────┐  ┌──────────────────────────┐
-│ Routing & Policy Engine │ │ DNS Unified Resolver     │
-│ (netlink, route sync)  │ │ (UDP/TCP forwarder)     │
-└────────▲───────────────┘  └──────────────────────────┘
-         │                            │
-         ▼                            ▼
-Namespace‑specific routes & DNS  |  Global /etc/resolv.conf (optional)
+                      +-----------------------+
+                      |    config.yaml        |
+                      |  (desired state)      |
+                      +-----------+-----------+
+                                  |
+                                  v
+                      +-----------+-----------+
+                      |     Reconciler        |
+                      |  load config          |
+                      |  query actual state   |
+                      |  compute diff         |
+                      |  apply actions        |
+                      +-+--------+----------+-+
+                        |        |          |
+               +--------+   +---+---+   +--+--------+
+               v             v           v
+    +----------+--+  +------+------+  +-+----------+
+    |  Namespace  |  |   Daemon    |  |  Routing   |
+    |  Manager    |  |   Manager   |  |  Manager   |
+    | (ip netns)  |  | (tailscaled)|  | (netlink)  |
+    +-------------+  +-------------+  +------------+
+          |                |                |
+          v                v                v
+    ns-corp-prod     tailscaled         route sync
+    ns-homelab       per namespace      per namespace
 ```
 
-## Installation
-
-### Prerequisites
-
-- Linux operating system (network namespaces require Linux)
-- Tailscale installed (`tailscaled` and `tailscale` commands available)
-- Root privileges or CAP_NET_ADMIN capability
-- Go 1.22+ (for building from source)
-
-### Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/yourorg/hydrascale.git
-cd hydrascale
-
-# Build the binary
-go build -o hydrascale ./cmd/hydrascale
-
-# Install to /usr/local/bin (requires sudo)
-sudo install hydrascale /usr/local/bin/
-```
-
-### Using Pre-built Binary
-
-Download the latest release from the releases page and install it:
-
-```bash
-sudo install hydrascale /usr/local/bin/
-```
-
-## Configuration
-
-Hydrascale uses a YAML configuration file located at `/var/lib/hydrascale/config.yaml` by default.
-
-### Example Configuration
-
-```yaml
-tailnets:
-  - id: "team-prod"
-    exit_node: "node1.example.com"   # optional
-  - id: "devops"
-    exit_node: null
-resolver:
-  mode: unified   # only one mode in this release
-```
-
-### Configuration Options
-
-- `tailnets`: List of tailnet configurations
-  - `id`: Unique identifier for the tailnet (matches your Tailscale tailnet name)
-  - `exit_node`: Optional exit node hostname for this tailnet
-- `resolver`: DNS resolver configuration
-  - `mode`: DNS resolver mode (currently only "unified" is supported)
-
-## Usage
-
-### CLI Commands
-
-Hydrascale provides a command-line interface for managing tailnets:
-
-```bash
-# Show help
-hydrascale --help
-
-# Add a new tailnet
-hydrascale add <tailnet-id>
-
-# Remove a tailnet
-hydrascale remove <tailnet-id>
-
-# List all configured tailnets
-hydrascale list
-
-# Switch default namespace (for direct tailscale CLI usage)
-hydrascale switch <tailnet-id>
-
-# Start Hydrascale in daemon mode
-hydrascale serve
-```
-
-### Examples
-
-```bash
-# Add two tailnets
-hydrascale add team-prod
-hydrascale add devops
-
-# List configured tailnets
-hydrascale list
-# Output:
-# Listing tailnets:
-#   - team-prod
-#   - devops
-
-# Remove a tailnet
-hydrascale remove devops
-
-# Check status via systemd
-sudo systemctl status hydrascale
-```
-
-## Running as a Service
-
-Hydrascale is designed to run as a systemd service for production use.
-
-### Installation
-
-1. Copy the binary to `/usr/local/bin/`:
-   ```bash
-   sudo install hydrascale /usr/local/bin/
-   ```
-
-2. Create the systemd user and group:
-   ```bash
-   sudo useradd --system --no-create-home --shell /usr/false hydrascale
-   ```
-
-3. Create the configuration directory:
-   ```bash
-   sudo mkdir -p /var/lib/hydrascale
-   sudo chown hydrascale:hydrascale /var/lib/hydrascale
-   ```
-
-4. Install the systemd service file:
-   ```bash
-   sudo cp dist/hydrascale.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   ```
-
-5. Configure your tailnets by editing `/var/lib/hydrascale/config.yaml`:
-   ```yaml
-   tailnets:
-     - id: "team-prod"
-       exit_node: "node1.example.com"
-     - id: "devops"
-       exit_node: null
-   resolver:
-     mode: unified
-   ```
-
-6. Enable and start the service:
-   ```bash
-   sudo systemctl enable hydrascale
-   sudo systemctl start hydrascale
-   ```
-
-### Service Management
-
-```bash
-# Check status
-sudo systemctl status hydrascale
-
-# View logs
-sudo journalctl -u hydrascale -f
-
-# Stop the service
-sudo systemctl stop hydrascale
-
-# Restart the service
-sudo systemctl restart hydrascale
-```
-
-## How It Works
-
-### Network Namespaces
-
-Each tailnet runs in its own network namespace (`ns-<tailnet-id>`), providing complete network isolation. This ensures that:
-
-- Each tailnet has its own network interfaces, routing tables, and firewall rules
-- Traffic from one tailnet cannot interfere with another
-- Each tailnet can have overlapping IP ranges without conflicts
-
-### Tailscale Daemon Management
-
-For each tailnet, Hydrascale:
-
-1. Creates a network namespace using `ip netns add`
-2. Launches `tailscaled` inside that namespace using `ip netns exec`
-3. Manages the daemon lifecycle (start, stop, restart)
-4. Synchronizes routes from the daemon to the namespace using netlink
-
-### DNS Resolution
-
-Hydrascale provides a unified DNS resolver that:
-
-- Listens on 127.0.0.1:53 for DNS queries
-- Forwards queries to the appropriate tailnet's DNS server based on the domain
-- Uses round-robin load balancing when multiple tailnets could handle a domain
-- Falls back to public DNS servers (8.8.8.8, 8.8.4.4) for non-tailscale domains
-
-### Route Synchronization
-
-Hydrascale monitors each tailscaled daemon for route changes and:
-
-- Synchronizes routes to the appropriate network namespace using `ip netns exec route add`
-- Handles default routes and exit node detection
-- Cleans up routes when tailnets are removed
-
-## Security Considerations
-
-### Privileges
-
-Hydrascale requires the following capabilities:
-- `CAP_NET_ADMIN`: For network namespace and route management
-- `CAP_SYS_PTRACE`: For monitoring daemon processes
-
-When running as a service, it's recommended to:
-- Run as a dedicated unprivileged user (`hydrascale`)
-- Use ambient capabilities to limit the privilege set
-- Consider additional security measures like AppArmor or SELinux profiles
-
-### Isolation
-
-Network namespaces provide strong isolation between tailnets:
-- Each tailnet has its own network stack
-- No direct communication between namespaces without explicit configuration
-- Firewall rules in one namespace don't affect others
-
-## Development
-
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test ./... -cover
-```
-
-### Building for Development
-
-```bash
-# Build with debug information
-go build -gcflags="all=-N -l" -o hydrascale ./cmd/hydrascale
-
-# Run the CLI directly
-./hydrascale --help
-```
-
-## Future Enhancements
-
-See HYPERPLAN.md for planned enhancements including:
-
-- Seccomp/SELinux hardening profiles
-- Optional per-namespace DNS stub for enhanced isolation
-- Web UI/dashboard for monitoring and management
-- Metrics and structured logging for observability
-- Improved exit node handling and routing policies
+Each reconciliation cycle:
+1. **Load** desired state from `config.yaml`
+2. **Query** actual state: which namespaces exist, which daemons are healthy, which routes are installed
+3. **Diff** desired vs actual to produce a list of actions (create/delete namespace, start/stop daemon, sync routes)
+4. **Apply** actions in order; track per-tailnet failure counts
+5. After 3 consecutive failures, a tailnet enters **error state** and is skipped until reset
+
+The reconciler acquires a file lock before each cycle to prevent concurrent mutations.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgements
-
-- Built with [Tailscale](https://tailscale.com)
-- Uses [Cobra](https://github.com/spf13/cobra) for CLI functionality
-- Uses [miekg/dns](https://github.com/miekg/dns) for DNS resolution
+MIT License. See [LICENSE](LICENSE) for details.

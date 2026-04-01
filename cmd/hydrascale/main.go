@@ -106,16 +106,44 @@ func diffCmd() *cobra.Command {
 }
 
 func applyCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply config changes (one-shot reconciliation)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+			if dryRun {
+				// Dry run: show diff without applying
+				r := newReconciler()
+				desired, err := r.DesiredState()
+				if err != nil {
+					return err
+				}
+				actual, err := r.ActualState()
+				if err != nil {
+					return err
+				}
+				actions := r.Diff(desired, actual)
+
+				if len(actions) == 0 {
+					fmt.Println("No changes needed (dry run).")
+					return nil
+				}
+
+				fmt.Printf("%d action(s) would be taken (dry run):\n", len(actions))
+				for _, a := range actions {
+					fmt.Printf("  %s\n", a)
+				}
+				return nil
+			}
+
 			r := newReconciler()
-			// Reset all error states for a fresh apply
 			r.ResetAllErrors()
 			return r.Reconcile()
 		},
 	}
+	cmd.Flags().Bool("dry-run", false, "Show planned actions without executing")
+	return cmd
 }
 
 func statusCmd() *cobra.Command {
@@ -133,6 +161,7 @@ func statusCmd() *cobra.Command {
 				return err
 			}
 			errors := r.ErrorStates()
+			lastErrors := r.LastErrors()
 
 			if len(desired) == 0 && len(actual) == 0 {
 				fmt.Println("No tailnets configured.")
@@ -140,8 +169,8 @@ func statusCmd() *cobra.Command {
 			}
 
 			fmt.Println("Tailnet Status:")
-			fmt.Printf("  %-20s %-15s %-10s %-10s\n", "ID", "NAMESPACE", "DAEMON", "STATE")
-			fmt.Printf("  %-20s %-15s %-10s %-10s\n", "----", "---------", "------", "-----")
+			fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "ID", "NAMESPACE", "DAEMON", "STATE", "ERROR")
+			fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "----", "---------", "------", "-----", "-----")
 
 			for id := range desired {
 				nsName := namespaces.GetNamespaceName(id)
@@ -165,13 +194,18 @@ func statusCmd() *cobra.Command {
 					state = "ERROR"
 				}
 
-				fmt.Printf("  %-20s %-15s %-10s %-10s\n", id, nsName, daemonStatus, state)
+				errMsg := ""
+				if le, ok := lastErrors[id]; ok && le != "" {
+					errMsg = le
+				}
+
+				fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", id, nsName, daemonStatus, state, errMsg)
 			}
 
 			// Show extra tailnets not in config
 			for id, s := range actual {
 				if _, wanted := desired[id]; !wanted {
-					fmt.Printf("  %-20s %-15s %-10s %-10s\n", id, s.NsName, "orphan", "removing")
+					fmt.Printf("  %-20s %-15s %-10s %-12s\n", id, s.NsName, "orphan", "removing")
 				}
 			}
 
@@ -320,27 +354,30 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			// Start DNS resolver
+			// Start DNS forwarder (retained for graceful shutdown)
 			bindAddr := cfg.Resolver.BindAddress
 			if bindAddr == "" {
 				bindAddr = dns.DefaultBindAddress
 			}
-			go func() {
-				if err := dns.StartResolver(cfg.Resolver.Mode, bindAddr); err != nil {
-					fmt.Fprintf(os.Stderr, "DNS resolver error: %v\n", err)
+			forwarder, fwdErr := dns.NewForwarder(nil, 5*time.Second, bindAddr)
+			if fwdErr != nil {
+				fmt.Fprintf(os.Stderr, "DNS forwarder init warning: %v (starting without DNS)\n", fwdErr)
+			} else {
+				if err := forwarder.Start(); err != nil {
+					fmt.Fprintf(os.Stderr, "DNS forwarder start error: %v\n", err)
 				}
-			}()
+			}
 
 			// Set up context with signal handling
 			ctx, cancel := context.WithCancel(context.Background())
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-			go func() {
-				<-sigChan
-				fmt.Println("\nShutting down Hydrascale...")
-				cancel()
-			}()
+			// SIGINT/SIGTERM for shutdown
+			stopChan := make(chan os.Signal, 1)
+			signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
+
+			// SIGHUP for config reload
+			reloadChan := make(chan os.Signal, 1)
+			signal.Notify(reloadChan, syscall.SIGHUP)
 
 			interval := cfg.Reconciler.Interval
 			if interval == 0 {
@@ -357,9 +394,47 @@ func serveCmd() *cobra.Command {
 				interval,
 			)
 
+			// Set up JSON event logging if configured
+			if cfg.EventLog != "" {
+				if err := r.SetEventLog(cfg.EventLog); err != nil {
+					fmt.Fprintf(os.Stderr, "Event log warning: %v (continuing without file logging)\n", err)
+				}
+			}
+
+			// Handle SIGHUP in a goroutine
+			go func() {
+				for range reloadChan {
+					fmt.Println("Config reload triggered by SIGHUP")
+					if err := r.Reconcile(); err != nil {
+						fmt.Fprintf(os.Stderr, "SIGHUP reconcile error: %v\n", err)
+					}
+				}
+			}()
+
+			// Handle stop signals
+			go func() {
+				<-stopChan
+				fmt.Println("\nShutting down Hydrascale...")
+				cancel()
+			}()
+
 			if err := r.Loop(ctx); err != nil {
 				return err
 			}
+
+			// Graceful shutdown: stop all daemons
+			fmt.Println("Stopping all tailnet daemons...")
+			if err := r.Shutdown(); err != nil {
+				fmt.Fprintf(os.Stderr, "Shutdown warning: %v\n", err)
+			}
+
+			// Stop DNS forwarder
+			if forwarder != nil {
+				forwarder.Stop()
+			}
+
+			// Close event log
+			r.Close()
 
 			fmt.Println("Hydrascale stopped.")
 			return nil

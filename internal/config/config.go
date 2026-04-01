@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -49,6 +50,7 @@ type Config struct {
 	Resolver   ResolverConfig   `yaml:"resolver"`
 	Reconciler ReconcilerConfig `yaml:"reconciler,omitempty"`
 	Mesh       Mesh             `yaml:"mesh,omitempty"`
+	EventLog   string           `yaml:"event_log,omitempty"`
 }
 
 // LoadConfig reads and parses a YAML configuration file.
@@ -115,6 +117,16 @@ func DefaultConfig() *Config {
 			RawInterval: "10s",
 		},
 	}
+}
+
+// ResolveAuthKey returns the auth key for a tailnet, checking env var first, then config.
+// Env var format: HYDRASCALE_AUTHKEY_<ID> where ID is uppercased with dashes replaced by underscores.
+func ResolveAuthKey(tailnetID string, configKey string) string {
+	envKey := "HYDRASCALE_AUTHKEY_" + strings.ToUpper(strings.ReplaceAll(tailnetID, "-", "_"))
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return configKey
 }
 
 // SaveConfig writes the config to disk atomically (temp file + rename).

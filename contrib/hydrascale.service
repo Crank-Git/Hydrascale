@@ -1,0 +1,21 @@
+[Unit]
+Description=Hydrascale - Multi-Tailnet Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hydrascale serve
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=/var/lib/hydrascale
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hydrascale /run/netns
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

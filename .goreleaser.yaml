@@ -1,0 +1,27 @@
+version: 2
+
+project_name: hydrascale
+
+builds:
+  - main: ./cmd/hydrascale
+    binary: hydrascale
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - format: tar.gz
+
+changelog:
+  use: git
+
+release:
+  github:
+    owner: Crank-Git
+    name: Hydrascale

@@ -226,6 +226,32 @@ func TestLoadConfig_ValidTailnetIDs(t *testing.T) {
 	}
 }
 
+func TestResolveAuthKey_EnvOverride(t *testing.T) {
+	t.Setenv("HYDRASCALE_AUTHKEY_MY_TAILNET", "env-key-123")
+	got := ResolveAuthKey("my-tailnet", "config-key-456")
+	if got != "env-key-123" {
+		t.Errorf("ResolveAuthKey = %q, want %q (env should override config)", got, "env-key-123")
+	}
+}
+
+func TestResolveAuthKey_ConfigFallback(t *testing.T) {
+	// Ensure no env var is set
+	t.Setenv("HYDRASCALE_AUTHKEY_FALLBACK_NET", "")
+	os.Unsetenv("HYDRASCALE_AUTHKEY_FALLBACK_NET")
+	got := ResolveAuthKey("fallback-net", "config-key-789")
+	if got != "config-key-789" {
+		t.Errorf("ResolveAuthKey = %q, want %q (should fall back to config)", got, "config-key-789")
+	}
+}
+
+func TestResolveAuthKey_Neither(t *testing.T) {
+	os.Unsetenv("HYDRASCALE_AUTHKEY_EMPTY_NET")
+	got := ResolveAuthKey("empty-net", "")
+	if got != "" {
+		t.Errorf("ResolveAuthKey = %q, want empty string", got)
+	}
+}
+
 // writeTemp creates a temp file with the given content and returns its path.
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()

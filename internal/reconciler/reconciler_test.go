@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hydrascale/internal/config"
+	"hydrascale/internal/namespaces"
 	"hydrascale/internal/routing"
 )
 
@@ -53,14 +54,19 @@ func (m *mockNS) List() ([]string, error) {
 }
 
 func (m *mockNS) GetName(tailnetID string) string {
-	return "ns-" + tailnetID
+	return namespaces.GetNamespaceName(tailnetID)
 }
 
 func (m *mockNS) GetTailnetID(nsName string) string {
-	if len(nsName) > 3 && nsName[:3] == "ns-" {
-		return nsName[3:]
-	}
-	return ""
+	return namespaces.GetTailnetFromNamespace(nsName)
+}
+
+func (m *mockNS) SetupVeth(nsName string, index int) error {
+	return nil
+}
+
+func (m *mockNS) TeardownVeth(nsName string) error {
+	return nil
 }
 
 type mockDaemon struct {
@@ -104,10 +110,16 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 	return "/tmp/test-" + tailnetID + ".sock"
 }
 
+func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey string) error {
+	return nil
+}
+
 type mockRouting struct {
-	routes  map[string][]routing.Route
-	pollErr error
-	syncErr error
+	routes   map[string][]routing.Route
+	pollErr  error
+	syncErr  error
+	listErr  error
+	listResp []string
 }
 
 func newMockRouting() *mockRouting {
@@ -127,6 +139,13 @@ func (m *mockRouting) SyncRoutes(nsName string, routes []routing.Route) error {
 	}
 	m.routes[nsName] = routes
 	return nil
+}
+
+func (m *mockRouting) ListRoutes(nsName string) ([]string, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.listResp, nil
 }
 
 // --- Helper ---
@@ -183,9 +202,10 @@ func TestDiff_CreateAll(t *testing.T) {
 
 	actions := r.Diff(desired, actual)
 
-	// Each tailnet should get: create_ns + start_daemon + sync_routes = 3 actions
-	if len(actions) != 9 {
-		t.Errorf("len(actions) = %d, want 9 (3 tailnets x 3 actions)", len(actions))
+	// Two-phase reconcile: new tailnets get create_ns + start_daemon only (no sync_routes).
+	// Route sync happens on the next cycle once daemons are healthy.
+	if len(actions) != 6 {
+		t.Errorf("len(actions) = %d, want 6 (3 tailnets x 2 actions: create_ns + start_daemon)", len(actions))
 		for _, a := range actions {
 			t.Logf("  %s", a)
 		}
@@ -411,11 +431,18 @@ func TestReconcile_Converges(t *testing.T) {
 			break
 		}
 	}
-	// The mock starts daemon as healthy after Start(), and ns is created,
-	// so second reconcile should only have sync_routes
-	// (which is still an action, so "no changes needed" won't appear)
-	// This is expected behavior - sync_routes always runs for healthy tailnets
-	_ = found
+	// After first reconcile, mocks mark daemons as healthy. Second reconcile
+	// should find healthy daemons and emit sync_routes actions (not "no changes needed").
+	events := r.Events()
+	hasReconcileComplete := false
+	for _, e := range events {
+		if e.Type == "reconcile_complete" {
+			hasReconcileComplete = true
+		}
+	}
+	if !hasReconcileComplete {
+		t.Error("expected at least one reconcile_complete event")
+	}
 }
 
 func TestLoop_CancelledContext(t *testing.T) {
