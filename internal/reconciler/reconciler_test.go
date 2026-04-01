@@ -422,15 +422,6 @@ func TestReconcile_Converges(t *testing.T) {
 	// Second reconcile should find everything healthy
 	r.Reconcile()
 
-	events := r.Events()
-	// Look for "no changes needed" in the second reconcile
-	found := false
-	for _, e := range events {
-		if e.Type == "reconcile_complete" && e.Message == "no changes needed" {
-			found = true
-			break
-		}
-	}
 	// After first reconcile, mocks mark daemons as healthy. Second reconcile
 	// should find healthy daemons and emit sync_routes actions (not "no changes needed").
 	events := r.Events()
@@ -527,6 +518,73 @@ func TestAcquireLock(t *testing.T) {
 	}
 
 	unlock()
+}
+
+func TestShutdown_StopsAllDaemons(t *testing.T) {
+	cfgPath := writeTestConfig(t, "one", "two", "three")
+	ns := newMockNS()
+	dm := newMockDaemon()
+	rt := newMockRouting()
+
+	// Simulate 3 healthy namespaces
+	for _, id := range []string{"one", "two", "three"} {
+		nsName := ns.GetName(id)
+		ns.namespaces[nsName] = true
+		dm.healthy[id] = true
+	}
+
+	r := newTestReconciler(cfgPath, ns, dm, rt)
+
+	if err := r.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// All daemons should have been stopped
+	for _, id := range []string{"one", "two", "three"} {
+		if dm.healthy[id] {
+			t.Errorf("daemon %s should have been stopped", id)
+		}
+	}
+
+	// Check for shutdown_complete event
+	events := r.Events()
+	found := false
+	for _, e := range events {
+		if e.Type == "shutdown_complete" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected shutdown_complete event")
+	}
+}
+
+func TestLastErrors_TracksErrors(t *testing.T) {
+	cfgPath := writeTestConfig(t, "ok", "fail")
+	ns := newMockNS()
+	dm := newMockDaemon()
+	dm.startErr["fail"] = fmt.Errorf("simulated failure")
+	rt := newMockRouting()
+	r := newTestReconciler(cfgPath, ns, dm, rt)
+
+	actions := []Action{
+		{Type: ActionStartDaemon, TailnetID: "ok", NsName: "ns-ok"},
+		{Type: ActionStartDaemon, TailnetID: "fail", NsName: "ns-fail"},
+	}
+
+	r.Apply(actions)
+
+	lastErrors := r.LastErrors()
+	if _, ok := lastErrors["fail"]; !ok {
+		t.Error("expected LastErrors to contain 'fail'")
+	}
+	if lastErrors["fail"] == "" {
+		t.Error("expected non-empty error message for 'fail'")
+	}
+	if _, ok := lastErrors["ok"]; ok {
+		t.Error("expected LastErrors to NOT contain 'ok'")
+	}
 }
 
 // --- Helpers ---
