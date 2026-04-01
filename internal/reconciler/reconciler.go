@@ -5,6 +5,7 @@ package reconciler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -28,6 +29,7 @@ const (
 	ActionStartDaemon ActionType = "start_daemon"
 	ActionStopDaemon  ActionType = "stop_daemon"
 	ActionSyncRoutes  ActionType = "sync_routes"
+	ActionAuthDaemon  ActionType = "auth_daemon"
 )
 
 // MaxFailures is the number of consecutive failures before a tailnet enters error state.
@@ -38,6 +40,7 @@ type Action struct {
 	Type      ActionType
 	TailnetID string
 	NsName    string
+	AuthKey   string // Used by ActionAuthDaemon
 }
 
 func (a Action) String() string {
@@ -70,9 +73,13 @@ type Reconciler struct {
 	interval   time.Duration
 
 	mu            sync.Mutex
-	failureCounts map[string]int  // tailnetID -> consecutive failure count
-	errorStates   map[string]bool // tailnetID -> true if in error state
+	failureCounts map[string]int    // tailnetID -> consecutive failure count
+	errorStates   map[string]bool   // tailnetID -> true if in error state
+	lastErrors    map[string]string // tailnetID -> last error message
 	events        []Event
+
+	eventLogPath string
+	eventFile    *os.File
 }
 
 // New creates a new Reconciler with the given dependencies.
@@ -85,6 +92,7 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		interval:      interval,
 		failureCounts: make(map[string]int),
 		errorStates:   make(map[string]bool),
+		lastErrors:    make(map[string]string),
 	}
 }
 
@@ -160,9 +168,17 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 		state, exists := actual[id]
 
 		if !exists || !state.NsExists {
+			// Two-phase reconcile: new tailnets only get create+start on first cycle.
+			// Route sync happens on the next cycle once the daemon is healthy.
+			// This avoids a race where SyncRoutes fails because the daemon socket
+			// doesn't exist yet (StartDaemon is non-blocking via cmd.Start()).
 			actions = append(actions, Action{Type: ActionCreateNS, TailnetID: id, NsName: ns})
 			actions = append(actions, Action{Type: ActionStartDaemon, TailnetID: id, NsName: ns})
-			actions = append(actions, Action{Type: ActionSyncRoutes, TailnetID: id, NsName: ns})
+			// If an auth key is available, schedule authorization after daemon start
+			authKey := config.ResolveAuthKey(id, desired[id].AuthKey)
+			if authKey != "" {
+				actions = append(actions, Action{Type: ActionAuthDaemon, TailnetID: id, NsName: ns, AuthKey: authKey})
+			}
 		} else if !state.DaemonHealthy {
 			actions = append(actions, Action{Type: ActionStartDaemon, TailnetID: id, NsName: ns})
 		} else {
@@ -189,11 +205,16 @@ func (r *Reconciler) Apply(actions []Action) {
 	// Track which tailnets had failures in this cycle
 	cycleFailures := make(map[string]bool)
 
+	// Track error messages for LastError reporting
+	cycleErrors := make(map[string]string)
+
 	for _, action := range actions {
 		err := r.executeAction(action)
 		if err != nil {
-			r.emit("action_failed", action.TailnetID, fmt.Sprintf("%s: %v", action.Type, err))
+			errMsg := fmt.Sprintf("%s: %v", action.Type, err)
+			r.emit("action_failed", action.TailnetID, errMsg)
 			cycleFailures[action.TailnetID] = true
+			cycleErrors[action.TailnetID] = errMsg
 		} else {
 			r.emit("action_ok", action.TailnetID, string(action.Type))
 		}
@@ -207,7 +228,7 @@ func (r *Reconciler) Apply(actions []Action) {
 	}
 	for id := range tailnetsSeen {
 		if cycleFailures[id] {
-			r.recordFailure(id)
+			r.recordFailure(id, cycleErrors[id])
 		} else {
 			r.clearFailure(id)
 		}
@@ -224,6 +245,8 @@ func (r *Reconciler) executeAction(action Action) error {
 		return r.dm.Start(action.TailnetID, action.NsName)
 	case ActionStopDaemon:
 		return r.dm.Stop(action.NsName, action.TailnetID)
+	case ActionAuthDaemon:
+		return r.dm.AuthorizeDaemon(action.TailnetID, action.NsName, action.AuthKey)
 	case ActionSyncRoutes:
 		socketPath := r.dm.GetSocketPath(action.TailnetID)
 		routes, err := r.rt.PollStatus(action.NsName, socketPath)
@@ -340,20 +363,108 @@ func (r *Reconciler) Events() []Event {
 	return cp
 }
 
-func (r *Reconciler) recordFailure(tailnetID string) {
+func (r *Reconciler) recordFailure(tailnetID string, errMsg string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.failureCounts[tailnetID]++
+	r.lastErrors[tailnetID] = errMsg
 	if r.failureCounts[tailnetID] >= MaxFailures {
 		r.errorStates[tailnetID] = true
 		log.Printf("tailnet %s entered error state after %d consecutive failures", tailnetID, MaxFailures)
 	}
 }
 
+// LastErrors returns a copy of the last error message for each tailnet.
+func (r *Reconciler) LastErrors() map[string]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make(map[string]string, len(r.lastErrors))
+	for k, v := range r.lastErrors {
+		cp[k] = v
+	}
+	return cp
+}
+
 func (r *Reconciler) clearFailure(tailnetID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.failureCounts[tailnetID] = 0
+}
+
+// SetEventLog opens a JSON event log file for append writing.
+func (r *Reconciler) SetEventLog(path string) error {
+	dir := path
+	if idx := strings.LastIndex(dir, "/"); idx >= 0 {
+		dir = dir[:idx]
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create event log directory: %w", err)
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open event log: %w", err)
+	}
+	r.eventLogPath = path
+	r.eventFile = f
+	return nil
+}
+
+// Close cleans up resources (event log file).
+func (r *Reconciler) Close() {
+	if r.eventFile != nil {
+		r.eventFile.Close()
+		r.eventFile = nil
+	}
+}
+
+// Shutdown gracefully stops all running tailnet daemons.
+// Stops daemons concurrently with a 30-second overall deadline.
+func (r *Reconciler) Shutdown() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	actual, err := r.ActualState()
+	if err != nil {
+		log.Printf("Warning: failed to get actual state during shutdown: %v", err)
+		return err
+	}
+
+	var wg sync.WaitGroup
+	for id, state := range actual {
+		if !state.NsExists {
+			continue
+		}
+		wg.Add(1)
+		go func(tailnetID string, ts *TailnetState) {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				log.Printf("Shutdown timeout for %s", tailnetID)
+				return
+			default:
+			}
+			if err := r.dm.Stop(ts.NsName, tailnetID); err != nil {
+				log.Printf("Failed to stop daemon for %s: %v", tailnetID, err)
+			} else {
+				r.emit("daemon_stopped", tailnetID, "shutdown")
+			}
+		}(id, state)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		r.emit("shutdown_complete", "", "all daemons stopped")
+	case <-ctx.Done():
+		r.emit("shutdown_timeout", "", "30s deadline exceeded")
+	}
+
+	return nil
 }
 
 func (r *Reconciler) emit(eventType, tailnetID, message string) {
@@ -380,6 +491,17 @@ func (r *Reconciler) emit(eventType, tailnetID, message string) {
 	} else {
 		log.Printf("[%s]", eventType)
 	}
+
+	// Write JSON to event log file if configured
+	if r.eventFile != nil {
+		jsonEvent, _ := json.Marshal(map[string]string{
+			"time":    event.Time.Format(time.RFC3339),
+			"type":    event.Type,
+			"tailnet": event.TailnetID,
+			"message": event.Message,
+		})
+		r.eventFile.Write(append(jsonEvent, '\n'))
+	}
 }
 
 // lockPathFor returns the lock file path for a given config path.
@@ -393,7 +515,7 @@ func lockPathFor(configPath string) string {
 
 // acquireLock acquires an exclusive file lock and returns an unlock function.
 func acquireLock(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}

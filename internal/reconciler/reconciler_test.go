@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"hydrascale/internal/config"
+	"hydrascale/internal/namespaces"
 	"hydrascale/internal/routing"
 )
 
@@ -53,17 +55,23 @@ func (m *mockNS) List() ([]string, error) {
 }
 
 func (m *mockNS) GetName(tailnetID string) string {
-	return "ns-" + tailnetID
+	return namespaces.GetNamespaceName(tailnetID)
 }
 
 func (m *mockNS) GetTailnetID(nsName string) string {
-	if len(nsName) > 3 && nsName[:3] == "ns-" {
-		return nsName[3:]
-	}
-	return ""
+	return namespaces.GetTailnetFromNamespace(nsName)
+}
+
+func (m *mockNS) SetupVeth(nsName string, index int) error {
+	return nil
+}
+
+func (m *mockNS) TeardownVeth(nsName string) error {
+	return nil
 }
 
 type mockDaemon struct {
+	mu        sync.Mutex
 	healthy   map[string]bool // tailnetID -> healthy
 	startErr  map[string]error
 	stopErr   error
@@ -78,6 +86,8 @@ func newMockDaemon() *mockDaemon {
 }
 
 func (m *mockDaemon) Start(tailnetID, nsName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if err, ok := m.startErr[tailnetID]; ok && err != nil {
 		return err
 	}
@@ -86,6 +96,8 @@ func (m *mockDaemon) Start(tailnetID, nsName string) error {
 }
 
 func (m *mockDaemon) Stop(nsName, tailnetID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.stopErr != nil {
 		return m.stopErr
 	}
@@ -94,6 +106,8 @@ func (m *mockDaemon) Stop(nsName, tailnetID string) error {
 }
 
 func (m *mockDaemon) CheckHealth(nsName, tailnetID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.healthErr != nil {
 		return false, m.healthErr
 	}
@@ -104,10 +118,16 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 	return "/tmp/test-" + tailnetID + ".sock"
 }
 
+func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey string) error {
+	return nil
+}
+
 type mockRouting struct {
-	routes  map[string][]routing.Route
-	pollErr error
-	syncErr error
+	routes   map[string][]routing.Route
+	pollErr  error
+	syncErr  error
+	listErr  error
+	listResp []string
 }
 
 func newMockRouting() *mockRouting {
@@ -127,6 +147,13 @@ func (m *mockRouting) SyncRoutes(nsName string, routes []routing.Route) error {
 	}
 	m.routes[nsName] = routes
 	return nil
+}
+
+func (m *mockRouting) ListRoutes(nsName string) ([]string, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.listResp, nil
 }
 
 // --- Helper ---
@@ -183,9 +210,10 @@ func TestDiff_CreateAll(t *testing.T) {
 
 	actions := r.Diff(desired, actual)
 
-	// Each tailnet should get: create_ns + start_daemon + sync_routes = 3 actions
-	if len(actions) != 9 {
-		t.Errorf("len(actions) = %d, want 9 (3 tailnets x 3 actions)", len(actions))
+	// Two-phase reconcile: new tailnets get create_ns + start_daemon only (no sync_routes).
+	// Route sync happens on the next cycle once daemons are healthy.
+	if len(actions) != 6 {
+		t.Errorf("len(actions) = %d, want 6 (3 tailnets x 2 actions: create_ns + start_daemon)", len(actions))
 		for _, a := range actions {
 			t.Logf("  %s", a)
 		}
@@ -402,20 +430,18 @@ func TestReconcile_Converges(t *testing.T) {
 	// Second reconcile should find everything healthy
 	r.Reconcile()
 
+	// After first reconcile, mocks mark daemons as healthy. Second reconcile
+	// should find healthy daemons and emit sync_routes actions (not "no changes needed").
 	events := r.Events()
-	// Look for "no changes needed" in the second reconcile
-	found := false
+	hasReconcileComplete := false
 	for _, e := range events {
-		if e.Type == "reconcile_complete" && e.Message == "no changes needed" {
-			found = true
-			break
+		if e.Type == "reconcile_complete" {
+			hasReconcileComplete = true
 		}
 	}
-	// The mock starts daemon as healthy after Start(), and ns is created,
-	// so second reconcile should only have sync_routes
-	// (which is still an action, so "no changes needed" won't appear)
-	// This is expected behavior - sync_routes always runs for healthy tailnets
-	_ = found
+	if !hasReconcileComplete {
+		t.Error("expected at least one reconcile_complete event")
+	}
 }
 
 func TestLoop_CancelledContext(t *testing.T) {
@@ -500,6 +526,73 @@ func TestAcquireLock(t *testing.T) {
 	}
 
 	unlock()
+}
+
+func TestShutdown_StopsAllDaemons(t *testing.T) {
+	cfgPath := writeTestConfig(t, "one", "two", "three")
+	ns := newMockNS()
+	dm := newMockDaemon()
+	rt := newMockRouting()
+
+	// Simulate 3 healthy namespaces
+	for _, id := range []string{"one", "two", "three"} {
+		nsName := ns.GetName(id)
+		ns.namespaces[nsName] = true
+		dm.healthy[id] = true
+	}
+
+	r := newTestReconciler(cfgPath, ns, dm, rt)
+
+	if err := r.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// All daemons should have been stopped
+	for _, id := range []string{"one", "two", "three"} {
+		if dm.healthy[id] {
+			t.Errorf("daemon %s should have been stopped", id)
+		}
+	}
+
+	// Check for shutdown_complete event
+	events := r.Events()
+	found := false
+	for _, e := range events {
+		if e.Type == "shutdown_complete" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected shutdown_complete event")
+	}
+}
+
+func TestLastErrors_TracksErrors(t *testing.T) {
+	cfgPath := writeTestConfig(t, "ok", "fail")
+	ns := newMockNS()
+	dm := newMockDaemon()
+	dm.startErr["fail"] = fmt.Errorf("simulated failure")
+	rt := newMockRouting()
+	r := newTestReconciler(cfgPath, ns, dm, rt)
+
+	actions := []Action{
+		{Type: ActionStartDaemon, TailnetID: "ok", NsName: "ns-ok"},
+		{Type: ActionStartDaemon, TailnetID: "fail", NsName: "ns-fail"},
+	}
+
+	r.Apply(actions)
+
+	lastErrors := r.LastErrors()
+	if _, ok := lastErrors["fail"]; !ok {
+		t.Error("expected LastErrors to contain 'fail'")
+	}
+	if lastErrors["fail"] == "" {
+		t.Error("expected non-empty error message for 'fail'")
+	}
+	if _, ok := lastErrors["ok"]; ok {
+		t.Error("expected LastErrors to NOT contain 'ok'")
+	}
 }
 
 // --- Helpers ---

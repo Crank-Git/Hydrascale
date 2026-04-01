@@ -11,3 +11,8 @@ build/
 mypy_cache/
 htmlcov/
 .omc/
+.openagent/
+.sisyphus/
+CLAUDE.md
+HYPERPLAN.md
+TODOS.md

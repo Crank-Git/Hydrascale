@@ -3,9 +3,11 @@ package routing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -13,6 +15,7 @@ import (
 type Manager interface {
 	PollStatus(nsName, socketPath string) ([]Route, error)
 	SyncRoutes(nsName string, routes []Route) error
+	ListRoutes(nsName string) ([]string, error)
 }
 
 // RealManager implements Manager using real system calls.
@@ -29,6 +32,10 @@ func (m *RealManager) PollStatus(nsName, socketPath string) ([]Route, error) {
 
 func (m *RealManager) SyncRoutes(nsName string, routes []Route) error {
 	return SyncRoutes(nsName, routes)
+}
+
+func (m *RealManager) ListRoutes(nsName string) ([]string, error) {
+	return ListRoutes(nsName)
 }
 
 // Route represents a Tailscale route.
@@ -85,14 +92,83 @@ func parseCIDR(network string) (net.IP, int, error) {
 	return nil, 0, fmt.Errorf("invalid CIDR format: %s", network)
 }
 
-// SyncRoutes synchronizes routes to the specified namespace.
-func SyncRoutes(namespaceName string, routes []Route) error {
-	for _, route := range routes {
-		if err := addRoute(namespaceName, route.Network); err != nil {
-			return fmt.Errorf("failed to add route %s: %w", route.Network, err)
+// ListRoutes returns the route destinations currently configured in the namespace.
+// It parses the output of "ip netns exec <ns> ip route show".
+func ListRoutes(nsName string) ([]string, error) {
+	output, err := exec.Command("ip", "netns", "exec", nsName, "ip", "route", "show").Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list routes in %s: %w", nsName, err)
+	}
+	return parseRouteOutput(string(output)), nil
+}
+
+// parseRouteOutput extracts destination CIDRs from ip route show output.
+// Each line starts with the destination (e.g. "10.0.0.0/8 via 192.168.1.1 dev eth0").
+// Lines starting with "default" are skipped since they aren't CIDR routes we manage.
+func parseRouteOutput(output string) []string {
+	var routes []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		dest := fields[0]
+		// Skip default routes and non-CIDR entries
+		if dest == "default" {
+			continue
+		}
+		// Validate it looks like a CIDR
+		if _, _, err := net.ParseCIDR(dest); err == nil {
+			routes = append(routes, dest)
 		}
 	}
-	return nil
+	return routes
+}
+
+// SyncRoutes synchronizes routes to the specified namespace using a diff-based approach.
+// It compares desired routes against actual routes, adding missing and removing stale ones.
+// Individual failures are collected and returned as a combined error.
+func SyncRoutes(namespaceName string, routes []Route) error {
+	actual, err := ListRoutes(namespaceName)
+	if err != nil {
+		return fmt.Errorf("failed to list current routes: %w", err)
+	}
+
+	// Build sets for diffing
+	desiredSet := make(map[string]bool, len(routes))
+	for _, r := range routes {
+		desiredSet[r.Network] = true
+	}
+	actualSet := make(map[string]bool, len(actual))
+	for _, a := range actual {
+		actualSet[a] = true
+	}
+
+	var errs []error
+
+	// Add missing routes (desired minus actual)
+	for _, r := range routes {
+		if !actualSet[r.Network] {
+			if err := addRoute(namespaceName, r.Network); err != nil {
+				errs = append(errs, fmt.Errorf("failed to add route %s: %w", r.Network, err))
+			}
+		}
+	}
+
+	// Remove stale routes (actual minus desired)
+	for _, a := range actual {
+		if !desiredSet[a] {
+			if err := deleteRoute(namespaceName, a); err != nil {
+				errs = append(errs, fmt.Errorf("failed to delete route %s: %w", a, err))
+			}
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // addRoute adds a single route to the namespace using ip route add.
@@ -119,6 +195,9 @@ func GetDefaultRoute(routes []Route) string {
 }
 
 // HasExitNode checks if any routes indicate an exit node is configured.
+// In Tailscale's status JSON, "natural" routes are the node's own addresses.
+// Non-natural routes that aren't default routes (0.0.0.0/0 or ::/0) indicate
+// advertised subnet routes, which implies an exit node or subnet router.
 func HasExitNode(routes []Route) bool {
 	for _, route := range routes {
 		if !route.Natural && route.Network != "0.0.0.0/0" && route.Network != "::/0" {
