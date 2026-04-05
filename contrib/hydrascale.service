@@ -11,10 +11,10 @@ Restart=on-failure
 RestartSec=5s
 WorkingDirectory=/var/lib/hydrascale
 
-# Minimal sandboxing — iptables-legacy and network namespace management
-# require full privilege on some kernels (e.g. Tegra/Jetson), so we avoid
-# NoNewPrivileges and ProtectSystem=strict which break iptables and netns.
-ProtectHome=yes
+# Note: systemd sandboxing (ProtectSystem, NoNewPrivileges, ProtectHome)
+# is intentionally omitted. Hydrascale requires full access to iptables,
+# network namespaces (/run/netns), and mount propagation to the host.
+# Sandboxing breaks namespace visibility and iptables-legacy on some kernels.
 
 # Logging
 StandardOutput=journal

@@ -63,6 +63,8 @@ func StartDaemon(tailnetID string, namespaceName string) error {
 	}
 
 	socketPath := filepath.Join(stateDir, "tailscaled.sock")
+	// Remove stale socket from previous run
+	os.Remove(socketPath)
 	stateFile := filepath.Join(stateDir, "tailscaled.state")
 
 	args := []string{
@@ -73,11 +75,18 @@ func StartDaemon(tailnetID string, namespaceName string) error {
 		"--statedir=" + stateDir,
 	}
 
+	// Kill any existing daemon before starting a new one
+	cleanupExistingDaemon(tailnetID)
+
 	cmd := exec.Command("ip", args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	// Detach from parent process group so tailscaled survives
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Setpgid detaches the process group; Pdeathsig ensures tailscaled
+	// is killed if hydrascale dies unexpectedly (e.g. SIGKILL).
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:  true,
+		Pdeathsig: syscall.SIGTERM,
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start tailscaled in namespace %q: %w", namespaceName, err)
@@ -230,6 +239,56 @@ func AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 // SocketPath returns the tailscaled socket path for a given tailnet.
 func SocketPath(tailnetID string) string {
 	return filepath.Join(DefaultStateDir, tailnetID, "tailscaled.sock")
+}
+
+// cleanupExistingDaemon kills any running tailscaled for a tailnet before
+// starting a new one. Prevents orphan accumulation on restarts.
+func cleanupExistingDaemon(tailnetID string) {
+	stateDir := filepath.Join(DefaultStateDir, tailnetID)
+	pidPath := filepath.Join(stateDir, "tailscaled.pid")
+
+	pidData, err := os.ReadFile(pidPath)
+	if err != nil {
+		return // no PID file, nothing to clean up
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil {
+		os.Remove(pidPath)
+		return
+	}
+
+	if !validatePID(pid) {
+		os.Remove(pidPath)
+		return
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		os.Remove(pidPath)
+		return
+	}
+
+	log.Printf("Cleaning up existing tailscaled for %s (PID %d)", tailnetID, pid)
+	proc.Signal(syscall.SIGTERM)
+
+	// Wait up to 3 seconds for it to die
+	deadline := time.After(3 * time.Second)
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline:
+			proc.Signal(syscall.SIGKILL)
+			os.Remove(pidPath)
+			return
+		case <-tick.C:
+			if err := proc.Signal(syscall.Signal(0)); err != nil {
+				os.Remove(pidPath)
+				return
+			}
+		}
+	}
 }
 
 // validatePID checks that a PID belongs to a tailscaled process
