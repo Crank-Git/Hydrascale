@@ -290,7 +290,7 @@ func (r *Reconciler) executeAction(action Action) error {
 			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
 		}
 		index := namespaces.VethIndex(nsName)
-		vethGW := fmt.Sprintf("10.200.%d.1", index)
+		vethGW := fmt.Sprintf("10.200.%d.2", index)
 		vethHost, _ := namespaces.VethNames(nsName)
 		r.ha.Sync(action.TailnetID, status, vethGW, vethHost)
 		return nil

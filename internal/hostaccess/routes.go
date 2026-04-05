@@ -182,7 +182,8 @@ func SyncHostRoutes(peers TailnetPeers) error {
 		}
 	}
 	for _, ip := range addV6 {
-		args := []string{"-6", "route", "replace", ip, "via", gw, "dev", vethDev}
+		// IPv6 routes use dev-only (no IPv4 gateway); the kernel resolves next-hop via NDP
+		args := []string{"-6", "route", "replace", ip, "dev", vethDev}
 		if out, e := exec.Command("ip", args...).CombinedOutput(); e != nil {
 			errs = append(errs, fmt.Errorf("ip -6 route replace %s: %w (%s)", ip, e, out))
 		} else {
