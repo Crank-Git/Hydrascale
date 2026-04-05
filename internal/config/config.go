@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -81,6 +82,11 @@ func LoadConfig(path string) (*Config, error) {
 		seen[tn.ID] = true
 	}
 
+	// Validate DNS bind address
+	if err := ValidateBindAddress(cfg.Resolver.BindAddress); err != nil {
+		return nil, err
+	}
+
 	// Auto-migrate v1 to v2
 	if cfg.Version == 0 {
 		cfg.Version = 2
@@ -117,6 +123,27 @@ func DefaultConfig() *Config {
 			RawInterval: "10s",
 		},
 	}
+}
+
+// IsValidID reports whether id is a valid tailnet ID.
+func IsValidID(id string) bool {
+	return validIDPattern.MatchString(id)
+}
+
+// ValidateBindAddress checks that addr is empty or a loopback host:port.
+func ValidateBindAddress(addr string) error {
+	if addr == "" {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid bind_address %q: %w", addr, err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("bind_address must be loopback, got %q", host)
+	}
+	return nil
 }
 
 // ResolveAuthKey returns the auth key for a tailnet, checking env var first, then config.

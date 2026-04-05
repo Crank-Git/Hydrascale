@@ -9,7 +9,6 @@ var (
 	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))            // red
 	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))            // orange
 	dimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // dim gray
-	activeTab    = lipgloss.NewStyle().Bold(true).Underline(true)
 	statusBar    = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("252")).Padding(0, 1)
 
 	// selectedRow highlights the cursor row in the tailnet table.

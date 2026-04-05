@@ -427,6 +427,7 @@ func (r *Reconciler) clearFailure(tailnetID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.failureCounts[tailnetID] = 0
+	delete(r.lastErrors, tailnetID)
 }
 
 // SetEventLog opens a JSON event log file for append writing.
@@ -449,6 +450,8 @@ func (r *Reconciler) SetEventLog(path string) error {
 
 // Close cleans up resources (event log file).
 func (r *Reconciler) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.eventFile != nil {
 		r.eventFile.Close()
 		r.eventFile = nil
@@ -519,6 +522,7 @@ func (r *Reconciler) emit(eventType, tailnetID, message string) {
 		r.events = r.events[1:]
 	}
 	r.events = append(r.events, event)
+	f := r.eventFile
 	r.mu.Unlock()
 
 	// Log to stderr
@@ -531,14 +535,14 @@ func (r *Reconciler) emit(eventType, tailnetID, message string) {
 	}
 
 	// Write JSON to event log file if configured
-	if r.eventFile != nil {
+	if f != nil {
 		jsonEvent, _ := json.Marshal(map[string]string{
 			"time":    event.Time.Format(time.RFC3339),
 			"type":    event.Type,
 			"tailnet": event.TailnetID,
 			"message": event.Message,
 		})
-		r.eventFile.Write(append(jsonEvent, '\n'))
+		f.Write(append(jsonEvent, '\n'))
 	}
 }
 

@@ -1,5 +1,9 @@
 # Hydrascale
 
+<p align="center">
+  <img src="assets/logo.png" alt="Hydrascale Logo" width="300">
+</p>
+
 Run multiple Tailscale tailnets simultaneously on a single Linux machine.
 
 ## What It Does

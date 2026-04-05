@@ -58,7 +58,7 @@ func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 // It uses cmd.Start() to avoid blocking and writes the PID to a file.
 func StartDaemon(tailnetID string, namespaceName string) error {
 	stateDir := filepath.Join(DefaultStateDir, tailnetID)
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		return fmt.Errorf("failed to create state dir: %w", err)
 	}
 
@@ -216,7 +216,8 @@ func AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
-		"tailscale", "--socket="+socketPath, "up", "--authkey="+authKey)
+		"tailscale", "--socket="+socketPath, "up")
+	cmd.Env = append(os.Environ(), "TS_AUTHKEY="+authKey)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tailscale up failed for %s: %v (%s)", tailnetID, err, output)
