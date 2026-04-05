@@ -17,6 +17,21 @@ import (
 // DefaultStateDir is the base directory for per-tailnet state.
 const DefaultStateDir = "/var/lib/hydrascale/state"
 
+// TailscaleStatus represents parsed tailscale status --json output.
+type TailscaleStatus struct {
+	Self           StatusNode            `json:"Self"`
+	Peer           map[string]StatusNode `json:"Peer"`
+	MagicDNSSuffix string                `json:"MagicDNSSuffix"`
+}
+
+// StatusNode represents a node in tailscale status.
+type StatusNode struct {
+	HostName     string   `json:"HostName"`
+	DNSName      string   `json:"DNSName"`
+	TailscaleIPs []string `json:"TailscaleIPs"`
+	Online       bool     `json:"Online"`
+}
+
 // Manager defines the interface for daemon lifecycle operations.
 type Manager interface {
 	Start(tailnetID, nsName string) error
@@ -24,6 +39,7 @@ type Manager interface {
 	CheckHealth(nsName, tailnetID string) (bool, error)
 	GetSocketPath(tailnetID string) string
 	AuthorizeDaemon(tailnetID, nsName, authKey string) error
+	GetStatus(nsName, tailnetID string) (*TailscaleStatus, error)
 }
 
 // RealManager implements Manager using real system calls.
@@ -52,6 +68,34 @@ func (m *RealManager) GetSocketPath(tailnetID string) string {
 
 func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 	return AuthorizeDaemon(tailnetID, nsName, authKey)
+}
+
+func (m *RealManager) GetStatus(nsName, tailnetID string) (*TailscaleStatus, error) {
+	return GetStatus(nsName, tailnetID)
+}
+
+// GetStatus returns parsed tailscale status for a tailnet.
+func GetStatus(namespaceName string, tailnetID string) (*TailscaleStatus, error) {
+	stateDir := filepath.Join(DefaultStateDir, tailnetID)
+	socketPath := filepath.Join(stateDir, "tailscaled.sock")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", namespaceName,
+		"tailscale", "--socket="+socketPath, "status", "--json")
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tailscale status for %s: %w", tailnetID, err)
+	}
+
+	var status TailscaleStatus
+	if err := json.Unmarshal(output, &status); err != nil {
+		return nil, fmt.Errorf("failed to parse status JSON for %s: %w", tailnetID, err)
+	}
+
+	return &status, nil
 }
 
 // StartDaemon launches tailscaled inside a network namespace.

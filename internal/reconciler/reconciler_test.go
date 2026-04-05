@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"hydrascale/internal/config"
+	"hydrascale/internal/daemon"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/routing"
 )
@@ -121,6 +122,10 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 
 func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 	return nil
+}
+
+func (m *mockDaemon) GetStatus(nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
+	return nil, nil
 }
 
 type mockRouting struct {
