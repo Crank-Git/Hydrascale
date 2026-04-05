@@ -33,11 +33,4 @@ checksum:
 
 changelog:
   sort: asc
-  use: github
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - Merge pull request
-      - Merge branch
+  use: github-native
