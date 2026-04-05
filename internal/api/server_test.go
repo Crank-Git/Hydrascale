@@ -129,7 +129,7 @@ func writeTestConfig(t *testing.T, tailnets ...string) string {
 }
 
 func newTestReconciler(cfgPath string) *reconciler.Reconciler {
-	return reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second)
+	return reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil)
 }
 
 // startTestServer starts a Server on a temp socket and returns the server, client, and cleanup func.
@@ -376,7 +376,7 @@ func TestServerShutdownCleanup(t *testing.T) {
 // Verify ReconcileResponse.Message is populated on failure.
 func TestReconcileEndpointError(t *testing.T) {
 	// Use a non-existent config path so Reconcile() returns an error.
-	r := reconciler.New("/nonexistent/config.yaml", newMockNS(), newMockDaemon(), &mockRouting{}, time.Second)
+	r := reconciler.New("/nonexistent/config.yaml", newMockNS(), newMockDaemon(), &mockRouting{}, time.Second, nil)
 	socketPath := filepath.Join(t.TempDir(), "err-api.sock")
 	srv := NewServer(socketPath, r)
 	if err := srv.Start(); err != nil {

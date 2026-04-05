@@ -156,10 +156,10 @@ func VethIndex(nsName string) int {
 	return (v%254) + 1
 }
 
-// vethNames returns a pair of interface names (host, namespace) that fit
+// VethNames returns a pair of interface names (host, namespace) that fit
 // within the Linux 15-character IFNAMSIZ limit.  Format: "vh<hex>" / "vn<hex>"
 // where <hex> is derived from the namespace name.
-func vethNames(nsName string) (host, ns string) {
+func VethNames(nsName string) (host, ns string) {
 	h := sha256.Sum256([]byte(nsName))
 	tag := fmt.Sprintf("%x", h[:6]) // 12 hex chars → "vh" + 12 = 14, fits in 15
 	return "vh" + tag, "vn" + tag
@@ -170,7 +170,7 @@ func vethNames(nsName string) (host, ns string) {
 // Namespace side: vn<hash> with IP 10.200.N.2/30
 // Adds host route: 100.100.100.100 via 10.200.N.2 dev vh<hash>
 func SetupVeth(nsName string, index int) error {
-	hostVeth, nsVeth := vethNames(nsName)
+	hostVeth, nsVeth := VethNames(nsName)
 	hostIP := fmt.Sprintf("10.200.%d.1/30", index)
 	nsIP := fmt.Sprintf("10.200.%d.2/30", index)
 	nsGW := fmt.Sprintf("10.200.%d.2", index)
@@ -260,7 +260,7 @@ func SetupVeth(nsName string, index int) error {
 // TeardownVeth removes the veth pair for a namespace.
 // Deleting the host side automatically removes the peer.
 func TeardownVeth(nsName string) error {
-	hostVeth, _ := vethNames(nsName)
+	hostVeth, _ := VethNames(nsName)
 
 	// Remove iptables rules (best effort)
 	index := VethIndex(nsName)
@@ -293,7 +293,7 @@ func TeardownVeth(nsName string) error {
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
 // All rules are idempotent (check before insert).
 func SetupHostAccess(nsName string, index int) error {
-	_, nsVeth := vethNames(nsName)
+	_, nsVeth := VethNames(nsName)
 	nsIP := fmt.Sprintf("10.200.%d.0/30", index)
 
 	// Masquerade on tailscale0
@@ -337,7 +337,7 @@ func SetupHostAccess(nsName string, index int) error {
 
 // TeardownHostAccess removes namespace-side host access iptables rules and resolv.conf.
 func TeardownHostAccess(nsName string, index int) {
-	_, nsVeth := vethNames(nsName)
+	_, nsVeth := VethNames(nsName)
 	nsIP := fmt.Sprintf("10.200.%d.0/30", index)
 
 	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-o", "tailscale0", "-j", "MASQUERADE").Run()

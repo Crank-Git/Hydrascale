@@ -180,7 +180,7 @@ func writeTestConfig(t *testing.T, tailnets ...string) string {
 }
 
 func newTestReconciler(cfgPath string, ns *mockNS, dm *mockDaemon, rt *mockRouting) *Reconciler {
-	return New(cfgPath, ns, dm, rt, 1*time.Second)
+	return New(cfgPath, ns, dm, rt, 1*time.Second, nil)
 }
 
 // --- Tests ---
