@@ -154,13 +154,21 @@ func VethIndex(nsName string) int {
 	return (v%254) + 1
 }
 
+// vethNames returns a pair of interface names (host, namespace) that fit
+// within the Linux 15-character IFNAMSIZ limit.  Format: "vh<hex>" / "vn<hex>"
+// where <hex> is derived from the namespace name.
+func vethNames(nsName string) (host, ns string) {
+	h := sha256.Sum256([]byte(nsName))
+	tag := fmt.Sprintf("%x", h[:6]) // 12 hex chars → "vh" + 12 = 14, fits in 15
+	return "vh" + tag, "vn" + tag
+}
+
 // SetupVeth creates a veth pair between host and namespace for DNS routing.
-// Host side: veth-<nsName> with IP 10.200.N.1/30
-// Namespace side: veth-<nsName>-ns with IP 10.200.N.2/30
-// Adds host route: 100.100.100.100 via 10.200.N.2 dev veth-<nsName>
+// Host side: vh<hash> with IP 10.200.N.1/30
+// Namespace side: vn<hash> with IP 10.200.N.2/30
+// Adds host route: 100.100.100.100 via 10.200.N.2 dev vh<hash>
 func SetupVeth(nsName string, index int) error {
-	hostVeth := fmt.Sprintf("veth-%s", nsName)
-	nsVeth := fmt.Sprintf("veth-%s-ns", nsName)
+	hostVeth, nsVeth := vethNames(nsName)
 	hostIP := fmt.Sprintf("10.200.%d.1/30", index)
 	nsIP := fmt.Sprintf("10.200.%d.2/30", index)
 	nsGW := fmt.Sprintf("10.200.%d.2", index)
@@ -201,8 +209,37 @@ func SetupVeth(nsName string, index int) error {
 		return fmt.Errorf("failed to bring up %s in namespace: %v (%s)", nsVeth, err, out)
 	}
 
-	// Add host route: 100.100.100.100 via namespace side
-	cmd = exec.Command("ip", "route", "add", "100.100.100.100", "via", nsGW, "dev", hostVeth)
+	// Add default route inside namespace so tailscaled can reach the internet
+	hostGW := fmt.Sprintf("10.200.%d.1", index)
+	cmd = exec.Command("ip", "netns", "exec", nsName, "ip", "route", "add", "default", "via", hostGW, "dev", nsVeth)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to add default route in namespace %s: %v (%s)", nsName, err, out)
+	}
+
+	// Enable IP forwarding on host for this veth
+	cmd = exec.Command("sysctl", "-w", "net.ipv4.conf."+hostVeth+".forwarding=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to enable forwarding on %s: %v (%s)", hostVeth, err, out)
+	}
+
+	// Add iptables FORWARD rules so namespace traffic isn't dropped (e.g. by Docker's DROP policy)
+	cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-i", hostVeth, "-j", "ACCEPT")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to add FORWARD rule for %s: %v (%s)", hostVeth, err, out)
+	}
+	cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to add FORWARD return rule for %s: %v (%s)", hostVeth, err, out)
+	}
+
+	// Add iptables masquerade so namespace traffic can reach the internet
+	cmd = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to add masquerade rule for %s: %v (%s)", nsIP, err, out)
+	}
+
+	// Add host route: 100.100.100.100 via namespace side (replace to handle multiple namespaces)
+	cmd = exec.Command("ip", "route", "replace", "100.100.100.100", "via", nsGW, "dev", hostVeth)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to add route for 100.100.100.100 via %s: %v (%s)", nsGW, err, out)
 	}
@@ -214,10 +251,19 @@ func SetupVeth(nsName string, index int) error {
 // TeardownVeth removes the veth pair for a namespace.
 // Deleting the host side automatically removes the peer.
 func TeardownVeth(nsName string) error {
-	hostVeth := fmt.Sprintf("veth-%s", nsName)
+	hostVeth, _ := vethNames(nsName)
+
+	// Remove iptables rules (best effort)
+	index := VethIndex(nsName)
+	nsIP := fmt.Sprintf("10.200.%d.2/30", index)
+	delFwd1 := exec.Command("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
+	_ = delFwd1.Run()
+	delFwd2 := exec.Command("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+	_ = delFwd2.Run()
+	delNat := exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	_ = delNat.Run()
 
 	// Remove the host route first (best effort)
-	index := VethIndex(nsName)
 	nsGW := fmt.Sprintf("10.200.%d.2", index)
 	delRoute := exec.Command("ip", "route", "del", "100.100.100.100", "via", nsGW, "dev", hostVeth)
 	_ = delRoute.Run() // ignore error if route doesn't exist

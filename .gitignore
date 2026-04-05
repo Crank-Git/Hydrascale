@@ -17,3 +17,6 @@ htmlcov/
 CLAUDE.md
 HYPERPLAN.md
 TODOS.md
+test-config.yaml
+config.yaml
+.hydrascale.lock

@@ -1,0 +1,53 @@
+# Hydrascale example configuration
+# Copy to /etc/hydrascale/config.yaml or ~/.config/hydrascale/config.yaml
+# and edit to match your environment.
+
+# Config format version. Currently only version 2 is supported.
+version: 2
+
+tailnets:
+  # Example 1: Basic tailnet with an inline auth key.
+  # The id must match: [a-zA-Z0-9][a-zA-Z0-9._-]{0,62}
+  # Instead of an inline auth_key you can export the environment variable
+  # HYDRASCALE_AUTHKEY_<ID> (uppercased id), e.g. HYDRASCALE_AUTHKEY_PERSONAL
+  - id: personal
+    auth_key: tskey-auth-xxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  # Example 2: Work tailnet that routes all traffic through an exit node.
+  # exit_node is the hostname (or IP) of the Tailscale node to use as an
+  # exit node inside this tailnet's network namespace.
+  - id: work
+    # No auth_key here; set HYDRASCALE_AUTHKEY_WORK in the environment instead.
+    exit_node: exit-node.tail12345.ts.net
+
+  # Example 3: A secondary personal tailnet using only an environment variable
+  # for the auth key and no exit node.  Useful for separating home-lab devices
+  # from personal devices without a dedicated exit node.
+  - id: homelab
+    # auth_key omitted; export HYDRASCALE_AUTHKEY_HOMELAB before starting.
+
+# DNS resolver settings.
+resolver:
+  # Mode controls how Hydrascale exposes DNS to the host.
+  # "unified" is the only supported mode: a single forwarder listens on
+  # bind_address and fans queries out to the correct per-tailnet resolver.
+  mode: unified
+
+  # Address the DNS forwarder binds to on the host.
+  # Must be reachable by applications that query Tailscale's MagicDNS names.
+  # Default: 127.0.0.53:5354
+  bind_address: "127.0.0.53:5354"
+
+# Reconciler settings.
+reconciler:
+  # How often Hydrascale checks the desired state against the actual state
+  # and applies any necessary changes.
+  # Accepts Go duration strings: 5s, 30s, 1m, etc.
+  # Default: 10s
+  interval: 10s
+
+# Optional path for a JSON-lines event log.
+# Each reconcile action is written as a JSON object with a timestamp, type,
+# tailnet id, and outcome.  The directory must exist and be writable.
+# Omit this key (or leave it empty) to disable file-based event logging.
+# event_log: /var/log/hydrascale/events.json

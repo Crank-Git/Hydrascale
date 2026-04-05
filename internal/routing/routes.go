@@ -123,6 +123,10 @@ func parseRouteOutput(output string) []string {
 		}
 		// Validate it looks like a CIDR
 		if _, _, err := net.ParseCIDR(dest); err == nil {
+			// Skip veth infrastructure routes (10.200.x.0/30) managed by namespace setup
+			if strings.HasPrefix(dest, "10.200.") && strings.HasSuffix(dest, "/30") {
+				continue
+			}
 			routes = append(routes, dest)
 		}
 	}

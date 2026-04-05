@@ -4,18 +4,21 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"hydrascale/internal/api"
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/routing"
+	"hydrascale/internal/tui"
 )
 
 var cfgFile string
@@ -44,6 +47,14 @@ reconciles toward it. GitOps for tailnets.`,
 	rootCmd.AddCommand(diffCmd())
 	rootCmd.AddCommand(applyCmd())
 	rootCmd.AddCommand(statusCmd())
+	rootCmd.AddCommand(execCmd())
+	rootCmd.AddCommand(pingCmd())
+	rootCmd.AddCommand(sshCmd())
+	rootCmd.AddCommand(tailscaleCmd())
+	rootCmd.AddCommand(tuiCmd())
+	rootCmd.AddCommand(wrapCmd())
+	rootCmd.AddCommand(envCmd())
+	rootCmd.AddCommand(installCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -151,6 +162,18 @@ func statusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show desired vs actual state for all tailnets",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Try live data from running daemon first
+			client := api.NewClient(api.DefaultSocketPath)
+			if client.IsAvailable() {
+				resp, err := client.Status()
+				if err == nil {
+					printStatusTable(resp.Desired, resp.Actual, resp.ErrorStates, resp.LastErrors)
+					return nil
+				}
+				// Fall through to standalone mode if API call fails
+			}
+
+			// Standalone mode: read config and inspect live state directly
 			r := newReconciler()
 			desired, err := r.DesiredState()
 			if err != nil {
@@ -160,57 +183,63 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			errors := r.ErrorStates()
-			lastErrors := r.LastErrors()
 
-			if len(desired) == 0 && len(actual) == 0 {
-				fmt.Println("No tailnets configured.")
-				return nil
-			}
-
-			fmt.Println("Tailnet Status:")
-			fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "ID", "NAMESPACE", "DAEMON", "STATE", "ERROR")
-			fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "----", "---------", "------", "-----", "-----")
-
-			for id := range desired {
-				nsName := namespaces.GetNamespaceName(id)
-				daemonStatus := "unknown"
-				state := "desired"
-
-				if s, ok := actual[id]; ok {
-					if s.DaemonHealthy {
-						daemonStatus = "healthy"
-						state = "running"
-					} else {
-						daemonStatus = "down"
-						state = "degraded"
-					}
-				} else {
-					daemonStatus = "absent"
-					state = "pending"
-				}
-
-				if errors[id] {
-					state = "ERROR"
-				}
-
-				errMsg := ""
-				if le, ok := lastErrors[id]; ok && le != "" {
-					errMsg = le
-				}
-
-				fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", id, nsName, daemonStatus, state, errMsg)
-			}
-
-			// Show extra tailnets not in config
-			for id, s := range actual {
-				if _, wanted := desired[id]; !wanted {
-					fmt.Printf("  %-20s %-15s %-10s %-12s\n", id, s.NsName, "orphan", "removing")
-				}
-			}
-
+			printStatusTable(desired, actual, r.ErrorStates(), r.LastErrors())
 			return nil
 		},
+	}
+}
+
+func printStatusTable(
+	desired map[string]config.Tailnet,
+	actual map[string]*reconciler.TailnetState,
+	errorStates map[string]bool,
+	lastErrors map[string]string,
+) {
+	if len(desired) == 0 && len(actual) == 0 {
+		fmt.Println("No tailnets configured.")
+		return
+	}
+
+	fmt.Println("Tailnet Status:")
+	fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "ID", "NAMESPACE", "DAEMON", "STATE", "ERROR")
+	fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "----", "---------", "------", "-----", "-----")
+
+	for id := range desired {
+		nsName := namespaces.GetNamespaceName(id)
+		daemonStatus := "unknown"
+		state := "desired"
+
+		if s, ok := actual[id]; ok {
+			if s.DaemonHealthy {
+				daemonStatus = "healthy"
+				state = "running"
+			} else {
+				daemonStatus = "down"
+				state = "degraded"
+			}
+		} else {
+			daemonStatus = "absent"
+			state = "pending"
+		}
+
+		if errorStates[id] {
+			state = "ERROR"
+		}
+
+		errMsg := ""
+		if le, ok := lastErrors[id]; ok && le != "" {
+			errMsg = le
+		}
+
+		fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", id, nsName, daemonStatus, state, errMsg)
+	}
+
+	// Show extra tailnets not in config
+	for id, s := range actual {
+		if _, wanted := desired[id]; !wanted {
+			fmt.Printf("  %-20s %-15s %-10s %-12s\n", id, s.NsName, "orphan", "removing")
+		}
 	}
 }
 
@@ -401,6 +430,14 @@ func serveCmd() *cobra.Command {
 				}
 			}
 
+			// Start API server
+			apiServer := api.NewServer(api.DefaultSocketPath, r)
+			go func() {
+				if err := apiServer.Start(); err != nil {
+					fmt.Fprintf(os.Stderr, "API server start error: %v\n", err)
+				}
+			}()
+
 			// Handle SIGHUP in a goroutine
 			go func() {
 				for range reloadChan {
@@ -428,6 +465,13 @@ func serveCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Shutdown warning: %v\n", err)
 			}
 
+			// Stop API server
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			if err := apiServer.Shutdown(shutdownCtx); err != nil {
+				fmt.Fprintf(os.Stderr, "API server shutdown warning: %v\n", err)
+			}
+
 			// Stop DNS forwarder
 			if forwarder != nil {
 				forwarder.Stop()
@@ -440,4 +484,343 @@ func serveCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// --- Namespace execution helpers ---
+
+// runInNamespace runs an arbitrary command inside the network namespace that
+// belongs to tailnetID.  When passthrough is true the child process inherits
+// stdin/stdout/stderr from the current process.
+func runInNamespace(tailnetID string, args []string, passthrough bool) error {
+	nsName := namespaces.GetNamespaceName(tailnetID)
+	cmdArgs := append([]string{"netns", "exec", nsName}, args...)
+	c := exec.Command("ip", cmdArgs...)
+	if passthrough {
+		c.Stdin = os.Stdin
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+	}
+	if err := c.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
+}
+
+// runTailscaleInNamespace runs a tailscale sub-command inside the network
+// namespace for tailnetID, pointing it at the correct per-tailnet socket.
+func runTailscaleInNamespace(tailnetID string, tsArgs []string) error {
+	socketPath := daemon.SocketPath(tailnetID)
+	args := append([]string{"tailscale", "--socket=" + socketPath}, tsArgs...)
+	return runInNamespace(tailnetID, args, true)
+}
+
+// --- Passthrough commands ---
+
+func execCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "exec <tailnet-id> -- <command...>",
+		Short: "Run a command inside a tailnet's network namespace",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("exec requires a tailnet-id")
+			}
+			tailnetID := args[0]
+			dashIdx := cmd.ArgsLenAtDash()
+			if dashIdx < 0 {
+				return fmt.Errorf("exec requires a -- separator before the command")
+			}
+			cmdArgs := args[dashIdx:]
+			if len(cmdArgs) == 0 {
+				return fmt.Errorf("exec requires a command after --")
+			}
+			return runInNamespace(tailnetID, cmdArgs, true)
+		},
+	}
+}
+
+func pingCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "ping <tailnet-id> <target>",
+		Short: "Ping a Tailscale peer from within a tailnet's namespace",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTailscaleInNamespace(args[0], append([]string{"ping"}, args[1:]...))
+		},
+	}
+}
+
+func sshCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "ssh <tailnet-id> <target>",
+		Short: "SSH to a Tailscale peer via a tailnet's namespace",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTailscaleInNamespace(args[0], append([]string{"ssh"}, args[1:]...))
+		},
+	}
+}
+
+func tailscaleCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "tailscale <tailnet-id> -- <args...>",
+		Short: "Run an arbitrary tailscale command inside a tailnet's namespace",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("tailscale requires a tailnet-id")
+			}
+			tailnetID := args[0]
+			dashIdx := cmd.ArgsLenAtDash()
+			if dashIdx < 0 {
+				return fmt.Errorf("tailscale requires a -- separator before the arguments")
+			}
+			tsArgs := args[dashIdx:]
+			return runTailscaleInNamespace(tailnetID, tsArgs)
+		},
+	}
+}
+
+func tuiCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "tui",
+		Short: "Open the monitoring TUI (requires running daemon)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return tui.Run(api.DefaultSocketPath)
+		},
+	}
+}
+
+func wrapCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "wrap <service-name> <tailnet-id>",
+		Short: "Generate a systemd drop-in to run a service inside a tailnet namespace",
+		Long: `Generate a systemd drop-in override that runs an existing service inside
+a Hydrascale network namespace. The service will have access to the tailnet's
+network and DNS.
+
+Example:
+  hydrascale wrap nginx personal
+  hydrascale wrap my-app work --apply
+
+This creates /etc/systemd/system/<service>.service.d/hydrascale.conf`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			serviceName := args[0]
+			tailnetID := args[1]
+			apply, _ := cmd.Flags().GetBool("apply")
+
+			nsName := namespaces.GetNamespaceName(tailnetID)
+			socketPath := daemon.SocketPath(tailnetID)
+
+			dropin := fmt.Sprintf(`[Unit]
+After=hydrascale.service
+Requires=hydrascale.service
+
+[Service]
+# Run this service inside the Hydrascale namespace for tailnet %q
+ExecStart=
+ExecStart=/usr/bin/ip netns exec %s ${ORIG_EXEC_START}
+Environment=TAILSCALE_SOCKET=%s
+Environment=HYDRASCALE_TAILNET=%s
+Environment=HYDRASCALE_NAMESPACE=%s
+`, tailnetID, nsName, socketPath, tailnetID, nsName)
+
+			if !apply {
+				fmt.Printf("# Drop-in for %s.service → tailnet %s (namespace %s)\n", serviceName, tailnetID, nsName)
+				fmt.Printf("# Save to: /etc/systemd/system/%s.service.d/hydrascale.conf\n", serviceName)
+				fmt.Printf("# Or re-run with --apply to install automatically.\n")
+				fmt.Printf("#\n")
+				fmt.Printf("# NOTE: After installing, update ExecStart= in the drop-in to match\n")
+				fmt.Printf("# your service's actual ExecStart command prefixed with:\n")
+				fmt.Printf("#   /usr/bin/ip netns exec %s <original-command>\n\n", nsName)
+				fmt.Print(dropin)
+				return nil
+			}
+
+			dropinDir := fmt.Sprintf("/etc/systemd/system/%s.service.d", serviceName)
+			dropinPath := fmt.Sprintf("%s/hydrascale.conf", dropinDir)
+
+			if err := os.MkdirAll(dropinDir, 0755); err != nil {
+				return fmt.Errorf("failed to create drop-in directory: %w", err)
+			}
+			if err := os.WriteFile(dropinPath, []byte(dropin), 0644); err != nil {
+				return fmt.Errorf("failed to write drop-in: %w", err)
+			}
+
+			fmt.Printf("Installed drop-in: %s\n", dropinPath)
+			fmt.Println("NOTE: Edit the ExecStart= line to match your service's command.")
+			fmt.Println("Then run: sudo systemctl daemon-reload && sudo systemctl restart", serviceName)
+			return nil
+		},
+	}
+	cmd.Flags().Bool("apply", false, "Install the drop-in file directly (requires root)")
+	return cmd
+}
+
+func envCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "env <tailnet-id>",
+		Short: "Print shell environment for running commands in a tailnet namespace",
+		Long: `Print shell commands that configure the environment for a tailnet namespace.
+Use with eval to set up your shell:
+
+  eval $(hydrascale env personal)
+  curl http://my-tailscale-host:8080
+
+Or use with any command:
+  hydrascale exec personal -- curl http://my-tailscale-host:8080`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tailnetID := args[0]
+			nsName := namespaces.GetNamespaceName(tailnetID)
+			socketPath := daemon.SocketPath(tailnetID)
+
+			fmt.Printf("export HYDRASCALE_TAILNET=%s\n", tailnetID)
+			fmt.Printf("export HYDRASCALE_NAMESPACE=%s\n", nsName)
+			fmt.Printf("export TAILSCALE_SOCKET=%s\n", socketPath)
+			fmt.Printf("# Run commands in this namespace with:\n")
+			fmt.Printf("#   sudo ip netns exec %s <command>\n", nsName)
+			fmt.Printf("# Or use: hydrascale exec %s -- <command>\n", tailnetID)
+			return nil
+		},
+	}
+}
+
+func installCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install Hydrascale as a systemd service",
+		Long: `Set up Hydrascale for running as a system service:
+  - Creates required directories (/etc/hydrascale, /var/lib/hydrascale, /var/log/hydrascale)
+  - Copies the binary to /usr/local/bin/ (if not already there)
+  - Installs the systemd unit file
+  - Copies example config if none exists
+
+Run with --dry-run to see what would be done without making changes.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+			steps := []struct {
+				desc string
+				fn   func() error
+			}{
+				{
+					desc: "Create /etc/hydrascale",
+					fn:   func() error { return os.MkdirAll("/etc/hydrascale", 0755) },
+				},
+				{
+					desc: "Create /var/lib/hydrascale/state",
+					fn:   func() error { return os.MkdirAll("/var/lib/hydrascale/state", 0750) },
+				},
+				{
+					desc: "Create /var/log/hydrascale",
+					fn:   func() error { return os.MkdirAll("/var/log/hydrascale", 0750) },
+				},
+				{
+					desc: "Install binary to /usr/local/bin/hydrascale",
+					fn: func() error {
+						self, err := os.Executable()
+						if err != nil {
+							return fmt.Errorf("cannot find own binary: %w", err)
+						}
+						if self == "/usr/local/bin/hydrascale" {
+							fmt.Println("  (already in place)")
+							return nil
+						}
+						data, err := os.ReadFile(self)
+						if err != nil {
+							return err
+						}
+						return os.WriteFile("/usr/local/bin/hydrascale", data, 0755)
+					},
+				},
+				{
+					desc: "Install systemd unit",
+					fn: func() error {
+						unit := `[Unit]
+Description=Hydrascale - Multi-Tailnet Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hydrascale serve --config /etc/hydrascale/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=/var/lib/hydrascale
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hydrascale /run/netns /etc/hydrascale /var/log/hydrascale /run/tailscale
+ProtectHome=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hydrascale
+
+[Install]
+WantedBy=multi-user.target
+`
+						return os.WriteFile("/etc/systemd/system/hydrascale.service", []byte(unit), 0644)
+					},
+				},
+				{
+					desc: "Copy example config to /etc/hydrascale/config.yaml (if absent)",
+					fn: func() error {
+						dst := "/etc/hydrascale/config.yaml"
+						if _, err := os.Stat(dst); err == nil {
+							fmt.Println("  (config already exists, skipping)")
+							return nil
+						}
+						// Write a minimal starter config
+						starter := `# Hydrascale configuration
+# See: hydrascale --help and contrib/example-config.yaml for full options.
+version: 2
+
+tailnets: []
+
+resolver:
+  mode: unified
+  bind_address: "127.0.0.53:5354"
+
+reconciler:
+  interval: 10s
+`
+						return os.WriteFile(dst, []byte(starter), 0640)
+					},
+				},
+			}
+
+			for _, step := range steps {
+				if dryRun {
+					fmt.Printf("[dry-run] %s\n", step.desc)
+				} else {
+					fmt.Printf("%s... ", step.desc)
+					if err := step.fn(); err != nil {
+						fmt.Printf("FAILED: %v\n", err)
+						return err
+					}
+					fmt.Println("OK")
+				}
+			}
+
+			if !dryRun {
+				fmt.Println()
+				fmt.Println("Installation complete. Next steps:")
+				fmt.Println("  1. Edit /etc/hydrascale/config.yaml with your tailnets")
+				fmt.Println("  2. sudo systemctl daemon-reload")
+				fmt.Println("  3. sudo systemctl enable --now hydrascale")
+				fmt.Println("  4. sudo hydrascale tui  (to monitor)")
+			}
+
+			return nil
+		},
+	}
+	cmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	return cmd
 }
