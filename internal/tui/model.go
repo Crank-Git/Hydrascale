@@ -776,7 +776,7 @@ func (m model) overlayConfirm(behind string) string {
 	case "disconnect":
 		action = "Disconnect"
 	default:
-		action = strings.Title(m.confirm.action)
+		action = strings.ToUpper(m.confirm.action[:1]) + m.confirm.action[1:]
 	}
 	prompt := warnStyle.Render(fmt.Sprintf("%s tailnet '%s'?", action, m.confirm.tailnetID))
 	hint := dimStyle.Render("(y/n)")
@@ -804,16 +804,3 @@ func truncateVisible(s string, maxWidth int) string {
 	return s
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

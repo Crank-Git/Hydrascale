@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"syscall"
 	"time"
 
@@ -498,6 +499,9 @@ func serveCmd() *cobra.Command {
 // belongs to tailnetID.  When passthrough is true the child process inherits
 // stdin/stdout/stderr from the current process.
 func runInNamespace(tailnetID string, args []string, passthrough bool) error {
+	if !config.IsValidID(tailnetID) {
+		return fmt.Errorf("invalid tailnet ID %q", tailnetID)
+	}
 	nsName := namespaces.GetNamespaceName(tailnetID)
 	cmdArgs := append([]string{"netns", "exec", nsName}, args...)
 	c := exec.Command("ip", cmdArgs...)
@@ -618,6 +622,11 @@ This creates /etc/systemd/system/<service>.service.d/hydrascale.conf`,
 			serviceName := args[0]
 			tailnetID := args[1]
 			apply, _ := cmd.Flags().GetBool("apply")
+
+			validServiceName := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,255}$`)
+			if !validServiceName.MatchString(serviceName) {
+				return fmt.Errorf("invalid service name %q (must be alphanumeric with ._@- only)", serviceName)
+			}
 
 			nsName := namespaces.GetNamespaceName(tailnetID)
 			socketPath := daemon.SocketPath(tailnetID)

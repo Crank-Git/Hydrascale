@@ -180,12 +180,12 @@ func addRoute(namespaceName, destination string) error {
 	if _, _, err := parseCIDR(destination); err != nil {
 		return fmt.Errorf("invalid route destination %s: %w", destination, err)
 	}
-	return exec.Command("ip", "netns", "exec", namespaceName, "route", "add", destination).Run()
+	return exec.Command("ip", "netns", "exec", namespaceName, "ip", "route", "add", destination).Run()
 }
 
 // deleteRoute removes a single route from the namespace.
 func deleteRoute(namespaceName, destination string) error {
-	return exec.Command("ip", "netns", "exec", namespaceName, "route", "del", destination).Run()
+	return exec.Command("ip", "netns", "exec", namespaceName, "ip", "route", "del", destination).Run()
 }
 
 // GetDefaultRoute extracts the default route from Tailscale status.

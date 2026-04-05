@@ -154,7 +154,9 @@ func (f *Forwarder) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		msg := new(dns.Msg)
 		msg.SetReply(r)
 		msg.Rcode = dns.RcodeServerFailure
-		w.WriteMsg(msg)
+		if err := w.WriteMsg(msg); err != nil {
+			log.Printf("dns: write error: %v", err)
+		}
 		return
 	}
 
@@ -183,11 +185,15 @@ func (f *Forwarder) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		msg := new(dns.Msg)
 		msg.SetReply(r)
 		msg.Rcode = dns.RcodeServerFailure
-		w.WriteMsg(msg)
+		if err := w.WriteMsg(msg); err != nil {
+			log.Printf("dns: write error: %v", err)
+		}
 		return
 	}
 
-	w.WriteMsg(resp)
+	if err := w.WriteMsg(resp); err != nil {
+		log.Printf("dns: write error: %v", err)
+	}
 }
 
 // ParseResolvConf reads a resolv.conf file and returns the nameserver addresses.

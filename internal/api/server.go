@@ -65,6 +65,10 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.socketPath, err)
 	}
+	if err := os.Chmod(s.socketPath, 0600); err != nil {
+		ln.Close()
+		return fmt.Errorf("failed to set socket permissions: %w", err)
+	}
 	s.listener = ln
 
 	go func() {
@@ -157,6 +161,7 @@ func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -201,6 +206,7 @@ func (s *Server) handleTailnetRemove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -245,6 +251,7 @@ func (s *Server) handleTailnetConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -265,6 +272,7 @@ func (s *Server) handleTailnetDisconnect(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -284,11 +292,19 @@ func (s *Server) handleConfigDNS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req DNSConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
+	}
+
+	if req.BindAddress != "" {
+		if err := config.ValidateBindAddress(req.BindAddress); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	cfgPath := s.reconciler.ConfigPath()
