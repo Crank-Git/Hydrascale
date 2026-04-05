@@ -223,19 +223,26 @@ func SetupVeth(nsName string, index int) error {
 	}
 
 	// Add iptables FORWARD rules so namespace traffic isn't dropped (e.g. by Docker's DROP policy)
-	cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-i", hostVeth, "-j", "ACCEPT")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to add FORWARD rule for %s: %v (%s)", hostVeth, err, out)
+	// Use -C (check) before -I (insert) to avoid duplicates and errors on retry.
+	if exec.Command("iptables", "-C", "FORWARD", "-i", hostVeth, "-j", "ACCEPT").Run() != nil {
+		cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-i", hostVeth, "-j", "ACCEPT")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to add FORWARD rule for %s: %v (%s)", hostVeth, err, out)
+		}
 	}
-	cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to add FORWARD return rule for %s: %v (%s)", hostVeth, err, out)
+	if exec.Command("iptables", "-C", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run() != nil {
+		cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to add FORWARD return rule for %s: %v (%s)", hostVeth, err, out)
+		}
 	}
 
 	// Add iptables masquerade so namespace traffic can reach the internet
-	cmd = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to add masquerade rule for %s: %v (%s)", nsIP, err, out)
+	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE").Run() != nil {
+		cmd = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to add masquerade rule for %s: %v (%s)", nsIP, err, out)
+		}
 	}
 
 	// Add host route: 100.100.100.100 via namespace side (replace to handle multiple namespaces)
