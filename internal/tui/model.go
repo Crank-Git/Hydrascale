@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"hydrascale/internal/api"
+	"hydrascale/internal/namespaces"
 )
 
 // colWidths defines fixed column widths for the tailnet table.
@@ -536,7 +537,7 @@ func (m model) View() string {
 		for i, id := range keys {
 			selected := i == m.cursor
 
-			nsName := "ns-" + id
+			nsName := namespaces.GetNamespaceName(id)
 			daemonStr := dimStyle.Render("absent")
 			stateStr := dimStyle.Render("pending")
 			errStr := ""

@@ -167,7 +167,7 @@ func statusCmd() *cobra.Command {
 			if client.IsAvailable() {
 				resp, err := client.Status()
 				if err == nil {
-					printStatusTable(resp.Desired, resp.Actual, resp.ErrorStates, resp.LastErrors)
+					printStatusTable(resp.Desired, resp.Actual, resp.ErrorStates, resp.LastErrors, resp.PausedStates)
 					return nil
 				}
 				// Fall through to standalone mode if API call fails
@@ -184,7 +184,7 @@ func statusCmd() *cobra.Command {
 				return err
 			}
 
-			printStatusTable(desired, actual, r.ErrorStates(), r.LastErrors())
+			printStatusTable(desired, actual, r.ErrorStates(), r.LastErrors(), r.PausedStates())
 			return nil
 		},
 	}
@@ -195,6 +195,7 @@ func printStatusTable(
 	actual map[string]*reconciler.TailnetState,
 	errorStates map[string]bool,
 	lastErrors map[string]string,
+	pausedStates map[string]bool,
 ) {
 	if len(desired) == 0 && len(actual) == 0 {
 		fmt.Println("No tailnets configured.")
@@ -225,6 +226,11 @@ func printStatusTable(
 
 		if errorStates[id] {
 			state = "ERROR"
+		}
+
+		if pausedStates[id] {
+			state = "paused"
+			daemonStatus = "stopped"
 		}
 
 		errMsg := ""

@@ -140,13 +140,7 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.reconciler.Reconcile()
-	resp := ReconcileResponse{OK: err == nil}
-	if err != nil {
-		resp.Message = err.Error()
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	s.writeReconcileResponse(w, err)
 }
 
 func (s *Server) writeReconcileResponse(w http.ResponseWriter, err error) {

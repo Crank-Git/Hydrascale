@@ -25,7 +25,7 @@ The reconciler runs as a control loop: on each tick it reads the config, inspect
 
 ### Binary Download
 
-Download a pre-built binary from the [GitHub Releases](https://github.com/yourorg/hydrascale/releases) page:
+Download a pre-built binary from the [GitHub Releases](https://github.com/Crank-Git/Hydrascale/releases) page:
 
 ```bash
 tar xzf hydrascale_*.tar.gz
@@ -41,7 +41,7 @@ go install hydrascale/cmd/hydrascale@latest
 Or clone and build manually:
 
 ```bash
-git clone https://github.com/yourorg/hydrascale.git
+git clone https://github.com/Crank-Git/Hydrascale.git
 cd hydrascale
 go build -o hydrascale ./cmd/hydrascale
 sudo install hydrascale /usr/local/bin/
@@ -91,7 +91,7 @@ tailnets:
 # DNS resolver settings
 resolver:
   mode: unified                  # aggregates DNS across all tailnets
-  bind_address: "127.0.0.1:53"  # optional, defaults to 127.0.0.1:53
+  bind_address: "127.0.0.53:5354"  # optional, defaults to 127.0.0.53:5354
 
 # Reconciler settings
 reconciler:
@@ -130,22 +130,28 @@ Docker sets the default `FORWARD` chain policy to `DROP`, which blocks traffic b
 
 ```
 hydrascale add <id>                   Add a tailnet to config and reconcile
-hydrascale remove <id>                Remove a tailnet from config and reconcile
-hydrascale list                       List all configured tailnets
-hydrascale switch <id>                Switch the default namespace for direct tailscale CLI usage
-hydrascale diff                       Show what would change without applying
 hydrascale apply                      One-shot reconciliation (apply config to system)
-hydrascale status                     Show desired vs actual state for all tailnets
-hydrascale serve                      Start daemon mode (continuous reconciliation loop)
+hydrascale diff                       Show what would change without applying
+hydrascale env <tailnet-id>           Print shell environment for a tailnet namespace
 hydrascale exec <tailnet-id> -- <cmd> Run a command inside a tailnet's network namespace
+hydrascale install                    Install Hydrascale as a systemd service
+hydrascale list                       List all configured tailnets
 hydrascale ping <tailnet-id> <target> Ping a Tailscale peer from within a tailnet's namespace
+hydrascale remove <id>                Remove a tailnet from config and reconcile
+hydrascale serve                      Start daemon mode (continuous reconciliation loop)
 hydrascale ssh  <tailnet-id> <target> SSH to a Tailscale peer via a tailnet's namespace
+hydrascale status                     Show desired vs actual state for all tailnets
+hydrascale switch <id>                Switch the default namespace for direct tailscale CLI usage
 hydrascale tailscale <tailnet-id> -- <args>
                                       Run an arbitrary tailscale command inside a tailnet's namespace
 hydrascale tui                        Open the monitoring TUI (requires running daemon via serve)
+hydrascale wrap <service> <tailnet-id>
+                                      Generate systemd drop-in for namespace isolation
 ```
 
 Use `--config <path>` on any command to override the default config location (`/var/lib/hydrascale/config.yaml`).
+
+If using `hydrascale install` or the systemd service, place the config at `/etc/hydrascale/config.yaml` instead — the systemd unit passes `--config /etc/hydrascale/config.yaml` explicitly.
 
 The namespace-scoped subcommands (`exec`, `ping`, `ssh`, `tailscale`) replace the previous workflow of building raw `ip netns exec` invocations by hand:
 
@@ -161,7 +167,7 @@ sudo hydrascale ping personal Mars
 
 | Variable | Description |
 |---|---|
-| `HYDRASCALE_AUTHKEY_<ID>` | Overrides the `auth_key` field in config for the tailnet whose ID matches `<ID>` (uppercased). Example: `HYDRASCALE_AUTHKEY_PERSONAL=tskey-auth-xxxxx` |
+| `HYDRASCALE_AUTHKEY_<ID>` | Overrides the `auth_key` field in config for the tailnet whose ID matches `<ID>` (uppercased, with dashes replaced by underscores). Example: for tailnet `corp-prod`, set `HYDRASCALE_AUTHKEY_CORP_PROD=tskey-auth-xxxxx`. |
 
 ## API
 
@@ -172,6 +178,12 @@ When running in daemon mode (`serve`), Hydrascale exposes a Unix socket API at `
 | `/api/status` | GET | Current desired and actual state for all tailnets |
 | `/api/events` | GET | Recent reconciler event log |
 | `/api/reconcile` | POST | Trigger an immediate reconciliation cycle |
+| `/api/tailnet/add` | POST | Add a tailnet to config and reconcile |
+| `/api/tailnet/remove` | POST | Remove a tailnet from config and reconcile |
+| `/api/tailnet/connect` | POST | Reset error state and reconnect a tailnet |
+| `/api/tailnet/disconnect` | POST | Stop a tailnet daemon without removing from config |
+| `/api/config/dns` | POST | Update DNS resolver configuration |
+| `/api/config` | GET | Get current config (auth keys redacted) |
 
 ## Daemon Mode
 
@@ -188,11 +200,13 @@ The provided unit file (`contrib/hydrascale.service`) runs Hydrascale with minim
 
 ### SIGHUP Reload
 
-The daemon re-reads the config file on every reconciliation tick, so config changes take effect within one interval. A future release will add explicit SIGHUP handling for immediate reload.
+Sending SIGHUP to the daemon triggers an immediate reconciliation cycle,
+re-reading the config file without waiting for the next tick. When managed
+by systemd, `systemctl reload hydrascale` sends this signal automatically.
 
 ### Graceful Shutdown
 
-Sending SIGINT or SIGTERM causes the daemon to cancel the reconciliation loop and exit cleanly. Namespaces and daemons are left running so tailnet connectivity is preserved across restarts.
+Sending SIGINT or SIGTERM causes the daemon to cancel the reconciliation loop and exit cleanly. The daemon stops all running tailnet daemons concurrently (with a 30-second timeout) and then exits cleanly.
 
 ### Monitoring
 
