@@ -3,25 +3,41 @@ version: 2
 project_name: hydrascale
 
 builds:
-  - main: ./cmd/hydrascale
+  - id: hydrascale
+    main: ./cmd/hydrascale
     binary: hydrascale
-    env:
-      - CGO_ENABLED=0
     goos:
       - linux
     goarch:
       - amd64
       - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
 
 archives:
-  - format: tar.gz
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - contrib/
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
 
 changelog:
-  use: git
-
-release:
-  github:
-    owner: Crank-Git
-    name: Hydrascale
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
