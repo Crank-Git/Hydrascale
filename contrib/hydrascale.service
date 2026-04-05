@@ -11,13 +11,9 @@ Restart=on-failure
 RestartSec=5s
 WorkingDirectory=/var/lib/hydrascale
 
-# Capabilities needed for network namespace management
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
-
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/var/lib/hydrascale /run/netns /etc/hydrascale /var/log/hydrascale /run/tailscale
+# Minimal sandboxing — iptables-legacy and network namespace management
+# require full privilege on some kernels (e.g. Tegra/Jetson), so we avoid
+# NoNewPrivileges and ProtectSystem=strict which break iptables and netns.
 ProtectHome=yes
 
 # Logging
