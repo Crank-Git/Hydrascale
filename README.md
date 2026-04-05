@@ -16,6 +16,10 @@ The reconciler runs as a control loop: on each tick it reads the config, inspect
 - **Go 1.24+** (for building from source)
 - **Root or CAP_NET_ADMIN** capability
 - **Tailscale installed** (`tailscaled` and `tailscale` commands available in `$PATH`)
+- **iproute2** (`ip` command for namespace management)
+- **iptables** (NAT masquerading and forwarding rules)
+- **Kernel network namespace support** (`CONFIG_NET_NS`, standard on all modern kernels)
+- **IP forwarding enabled**: `sudo sysctl -w net.ipv4.ip_forward=1`
 
 ## Install
 
@@ -94,20 +98,80 @@ reconciler:
   interval: 10s                  # how often the control loop runs (Go duration)
 ```
 
+## Networking
+
+### IP Forwarding
+
+Hydrascale requires `net.ipv4.ip_forward=1` on the host so that traffic originating inside a network namespace can reach the internet for Tailscale coordination. Enable it for the current session:
+
+```bash
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+To make it permanent, create `/etc/sysctl.d/99-hydrascale.conf`:
+
+```
+net.ipv4.ip_forward = 1
+```
+
+### Veth Pairs
+
+Each namespace is connected to the host via a veth pair. Interface names are derived from a short hash of the tailnet ID (`vh<hash>` on the host side, `vn<hash>` inside the namespace), keeping names within Linux's 15-character interface name limit. Subnets are allocated from `10.200.N.0/30` where N is an index assigned per tailnet.
+
+### NAT / Masquerade
+
+Hydrascale adds an `iptables` MASQUERADE rule for each namespace so that outbound traffic from the namespace is NATed through the host's default interface and can reach the internet.
+
+### Docker Compatibility
+
+Docker sets the default `FORWARD` chain policy to `DROP`, which blocks traffic between namespaces and the host. Hydrascale detects this and automatically inserts per-namespace `ACCEPT` rules in the `FORWARD` chain so namespace traffic is not silently dropped. No manual iptables configuration is required.
+
 ## CLI Commands
 
 ```
-hydrascale add <id>        Add a tailnet to config and reconcile
-hydrascale remove <id>     Remove a tailnet from config and reconcile
-hydrascale list            List all configured tailnets
-hydrascale switch <id>     Switch the default namespace for direct tailscale CLI usage
-hydrascale diff            Show what would change without applying
-hydrascale apply           One-shot reconciliation (apply config to system)
-hydrascale status          Show desired vs actual state for all tailnets
-hydrascale serve           Start daemon mode (continuous reconciliation loop)
+hydrascale add <id>                   Add a tailnet to config and reconcile
+hydrascale remove <id>                Remove a tailnet from config and reconcile
+hydrascale list                       List all configured tailnets
+hydrascale switch <id>                Switch the default namespace for direct tailscale CLI usage
+hydrascale diff                       Show what would change without applying
+hydrascale apply                      One-shot reconciliation (apply config to system)
+hydrascale status                     Show desired vs actual state for all tailnets
+hydrascale serve                      Start daemon mode (continuous reconciliation loop)
+hydrascale exec <tailnet-id> -- <cmd> Run a command inside a tailnet's network namespace
+hydrascale ping <tailnet-id> <target> Ping a Tailscale peer from within a tailnet's namespace
+hydrascale ssh  <tailnet-id> <target> SSH to a Tailscale peer via a tailnet's namespace
+hydrascale tailscale <tailnet-id> -- <args>
+                                      Run an arbitrary tailscale command inside a tailnet's namespace
+hydrascale tui                        Open the monitoring TUI (requires running daemon via serve)
 ```
 
 Use `--config <path>` on any command to override the default config location (`/var/lib/hydrascale/config.yaml`).
+
+The namespace-scoped subcommands (`exec`, `ping`, `ssh`, `tailscale`) replace the previous workflow of building raw `ip netns exec` invocations by hand:
+
+```bash
+# Before (error-prone)
+sudo ip netns exec ns-personal tailscale --socket=/var/lib/hydrascale/state/personal/tailscaled.sock ping Mars
+
+# After
+sudo hydrascale ping personal Mars
+```
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `HYDRASCALE_AUTHKEY_<ID>` | Overrides the `auth_key` field in config for the tailnet whose ID matches `<ID>` (uppercased). Example: `HYDRASCALE_AUTHKEY_PERSONAL=tskey-auth-xxxxx` |
+
+## API
+
+When running in daemon mode (`serve`), Hydrascale exposes a Unix socket API at `/var/lib/hydrascale/api.sock`. The `tui` and `status` commands connect to this socket when the daemon is running.
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/status` | GET | Current desired and actual state for all tailnets |
+| `/api/events` | GET | Recent reconciler event log |
+| `/api/reconcile` | POST | Trigger an immediate reconciliation cycle |
 
 ## Daemon Mode
 
@@ -175,6 +239,32 @@ Each reconciliation cycle:
 5. After 3 consecutive failures, a tailnet enters **error state** and is skipped until reset
 
 The reconciler acquires a file lock before each cycle to prevent concurrent mutations.
+
+## Troubleshooting
+
+**"bind: address in use" for the API socket**
+A stale socket file was left by a crashed daemon. Delete it and restart:
+```bash
+sudo rm /var/lib/hydrascale/api.sock
+sudo hydrascale serve
+```
+
+**Namespace traffic can't reach the internet**
+IP forwarding is not enabled. Check and enable it:
+```bash
+sudo sysctl net.ipv4.ip_forward          # should print 1
+sudo sysctl -w net.ipv4.ip_forward=1     # enable if not set
+```
+
+**Docker blocking namespace traffic**
+Hydrascale inserts FORWARD ACCEPT rules automatically, but if traffic is still being dropped, inspect the chain:
+```bash
+sudo iptables -L FORWARD -v
+```
+Look for a blanket `DROP` rule positioned before Hydrascale's `ACCEPT` rules and remove or reorder it as needed.
+
+**"name not a valid ifname"**
+This error occurs with older Hydrascale versions that used full tailnet IDs as interface names, which exceed Linux's 15-character limit. Update to the latest release, which uses hash-based veth names (`vh<hash>`/`vn<hash>`) that always fit within the limit.
 
 ## License
 

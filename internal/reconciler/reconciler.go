@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -75,6 +76,7 @@ type Reconciler struct {
 	mu            sync.Mutex
 	failureCounts map[string]int    // tailnetID -> consecutive failure count
 	errorStates   map[string]bool   // tailnetID -> true if in error state
+	pausedStates  map[string]bool   // tailnetID -> true if manually disconnected
 	lastErrors    map[string]string // tailnetID -> last error message
 	events        []Event
 
@@ -92,6 +94,7 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		interval:      interval,
 		failureCounts: make(map[string]int),
 		errorStates:   make(map[string]bool),
+		pausedStates:  make(map[string]bool),
 		lastErrors:    make(map[string]string),
 	}
 }
@@ -158,10 +161,14 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 	for id := range desired {
 		r.mu.Lock()
 		inError := r.errorStates[id]
+		isPaused := r.pausedStates[id]
 		r.mu.Unlock()
 
 		if inError {
 			continue // skip tailnets in error state
+		}
+		if isPaused {
+			continue // skip manually disconnected tailnets
 		}
 
 		ns := r.ns.GetName(id)
@@ -316,12 +323,43 @@ func (r *Reconciler) Loop(ctx context.Context) error {
 	}
 }
 
-// ResetError clears the error state for a tailnet, allowing retries.
+// ConfigPath returns the path to the config file used by this reconciler.
+func (r *Reconciler) ConfigPath() string {
+	return r.configPath
+}
+
+// StopDaemon stops a running tailnet daemon without removing it from config.
+// It also pauses the tailnet so the reconciler won't restart it.
+func (r *Reconciler) StopDaemon(tailnetID string) error {
+	nsName := r.ns.GetName(tailnetID)
+	if err := r.dm.Stop(nsName, tailnetID); err != nil {
+		return fmt.Errorf("failed to stop daemon for %s: %w", tailnetID, err)
+	}
+	r.mu.Lock()
+	r.pausedStates[tailnetID] = true
+	r.mu.Unlock()
+	r.emit("daemon_stopped", tailnetID, "disconnected (paused)")
+	return nil
+}
+
+// PausedStates returns a copy of the paused states map.
+func (r *Reconciler) PausedStates() map[string]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make(map[string]bool, len(r.pausedStates))
+	for k, v := range r.pausedStates {
+		cp[k] = v
+	}
+	return cp
+}
+
+// ResetError clears the error and paused states for a tailnet, allowing retries.
 func (r *Reconciler) ResetError(tailnetID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.errorStates, tailnetID)
 	delete(r.failureCounts, tailnetID)
+	delete(r.pausedStates, tailnetID)
 }
 
 // ResetAllErrors clears all error states. Called by one-shot apply.
@@ -505,12 +543,19 @@ func (r *Reconciler) emit(eventType, tailnetID, message string) {
 }
 
 // lockPathFor returns the lock file path for a given config path.
+// Uses the state directory if writable, otherwise falls back to the config's directory.
 func lockPathFor(configPath string) string {
-	dir := configPath
-	if idx := strings.LastIndex(dir, "/"); idx >= 0 {
-		dir = dir[:idx]
+	stateDir := daemon.DefaultStateDir
+	// Check if we can write to the state directory
+	testPath := filepath.Join(stateDir, ".lock-test")
+	if f, err := os.Create(testPath); err == nil {
+		f.Close()
+		os.Remove(testPath)
+		return filepath.Join(stateDir, ".hydrascale.lock")
 	}
-	return dir + "/.hydrascale.lock"
+	// Fallback: use config file's directory (for tests or non-standard installs)
+	dir := filepath.Dir(configPath)
+	return filepath.Join(dir, ".hydrascale.lock")
 }
 
 // acquireLock acquires an exclusive file lock and returns an unlock function.

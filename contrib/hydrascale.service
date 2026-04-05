@@ -5,17 +5,25 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/hydrascale serve
+ExecStart=/usr/local/bin/hydrascale serve --config /etc/hydrascale/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
 WorkingDirectory=/var/lib/hydrascale
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+
+# Capabilities needed for network namespace management
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/hydrascale /run/netns
+ReadWritePaths=/var/lib/hydrascale /run/netns /etc/hydrascale /var/log/hydrascale /run/tailscale
 ProtectHome=yes
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hydrascale
 
 [Install]
 WantedBy=multi-user.target
