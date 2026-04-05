@@ -252,6 +252,79 @@ func TestResolveAuthKey_Neither(t *testing.T) {
 	}
 }
 
+func TestLoadConfigHostAccess(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+version: 2
+host_access: true
+tailnets:
+  - id: havoc
+    host_access: true
+  - id: personal
+host_dns:
+  mode: hosts
+reconciler:
+  interval: 10s
+`
+	os.WriteFile(path, []byte(content), 0644)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.HostAccess {
+		t.Error("expected global HostAccess to be true")
+	}
+	if cfg.HostDNS.Mode != "hosts" {
+		t.Errorf("expected HostDNS.Mode=hosts, got %q", cfg.HostDNS.Mode)
+	}
+	if cfg.Tailnets[0].HostAccess == nil || !*cfg.Tailnets[0].HostAccess {
+		t.Error("expected havoc HostAccess to be true")
+	}
+	if cfg.Tailnets[1].HostAccess != nil {
+		t.Error("expected personal HostAccess to be nil (inherit global)")
+	}
+	// Test helper methods
+	if !cfg.TailnetHostAccess("havoc") {
+		t.Error("TailnetHostAccess should return true for havoc")
+	}
+	if !cfg.TailnetHostAccess("personal") {
+		t.Error("TailnetHostAccess should return true for personal (inherits global)")
+	}
+	if cfg.EffectiveHostDNSMode() != "hosts" {
+		t.Errorf("expected EffectiveHostDNSMode=hosts, got %q", cfg.EffectiveHostDNSMode())
+	}
+}
+
+func TestLoadConfigHostAccessDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+version: 2
+tailnets:
+  - id: test
+reconciler:
+  interval: 10s
+`
+	os.WriteFile(path, []byte(content), 0644)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.HostAccess {
+		t.Error("expected global HostAccess to default to false")
+	}
+	if cfg.HostDNS.Mode != "" {
+		t.Errorf("expected empty HostDNS.Mode when not set, got %q", cfg.HostDNS.Mode)
+	}
+	if cfg.TailnetHostAccess("test") {
+		t.Error("TailnetHostAccess should return false when global is false")
+	}
+	if cfg.EffectiveHostDNSMode() != "" {
+		t.Errorf("expected empty EffectiveHostDNSMode when no host access, got %q", cfg.EffectiveHostDNSMode())
+	}
+}
+
 // writeTemp creates a temp file with the given content and returns its path.
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()
