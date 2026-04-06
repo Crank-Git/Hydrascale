@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"syscall"
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/reconciler"
@@ -61,7 +62,11 @@ func (s *Server) Start() error {
 		}
 	}
 
+	// Set restrictive umask before creating the socket to prevent a TOCTOU
+	// window where the socket is briefly accessible with default permissions
+	oldUmask := syscall.Umask(0077)
 	ln, err := net.Listen("unix", s.socketPath)
+	syscall.Umask(oldUmask)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.socketPath, err)
 	}

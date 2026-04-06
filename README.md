@@ -6,6 +6,23 @@
 
 <p align="center">Run multiple Tailscale tailnets simultaneously on a single Linux machine.</p>
 
+## Table of Contents
+
+- [What It Does](#what-it-does)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Host Access](#host-access) -- transparent access to all tailnet peers from the host
+- [Config Reference](#config-reference)
+- [Networking](#networking)
+- [CLI Commands](#cli-commands)
+- [Environment Variables](#environment-variables)
+- [API](#api)
+- [Daemon Mode](#daemon-mode)
+- [Architecture](#architecture)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
 ## What It Does
 
 Hydrascale lets a single Linux host participate in multiple Tailscale tailnets at the same time. It creates an isolated network namespace for each tailnet and launches a dedicated `tailscaled` instance inside it, so traffic from one tailnet never leaks into another. Overlapping IP ranges, independent firewall rules, and separate routing tables all work out of the box because every tailnet gets its own network stack.
@@ -80,6 +97,92 @@ sudo hydrascale apply
 sudo hydrascale serve
 ```
 
+## Host Access
+
+By default, each tailnet is fully isolated in its own network namespace. You can only reach tailnet peers through namespace-scoped commands like `hydrascale exec` or `hydrascale ping`. **Host access** changes this: when enabled, the host machine can transparently reach peers on all managed tailnets as if it were directly connected to each one.
+
+```bash
+# Without host access
+sudo hydrascale ping havoc bigboy    # works, but requires the wrapper
+
+# With host access
+ping havoc-bigboy                     # just works
+ssh havoc-mars                        # just works
+curl http://havoc-webserver:8080      # just works
+```
+
+Enable it globally or per-tailnet:
+
+```yaml
+# Global: all tailnets accessible from host
+host_access: true
+
+# Or per-tailnet: only specific tailnets
+tailnets:
+  - id: corp-prod
+    host_access: true     # accessible from host
+  - id: personal
+    host_access: false    # isolated (default)
+```
+
+### How It Works
+
+When host access is enabled for a tailnet, Hydrascale does three things each reconciliation cycle:
+
+1. **Host routes** -- adds routes on the host for each peer's Tailscale IP (both IPv4 and IPv6) via the namespace's veth pair. This lets the kernel route packets to the right namespace.
+
+2. **Namespace masquerade** -- adds an iptables masquerade rule inside the namespace on `tailscale0`. This makes traffic from the host appear as if it originates from the namespace's own Tailscale IP, so `tailscaled` forwards it to the peer normally.
+
+3. **DNS entries** -- writes `/etc/hosts` entries so peers are resolvable by name from the host.
+
+All of this is automatic and fully managed. Routes and DNS entries are synced every reconciliation cycle and cleaned up on shutdown or when host access is disabled.
+
+### Naming Convention
+
+Each peer gets a prefixed hostname: `<tailnet-id>-<hostname>`. This prevents collisions when multiple tailnets have peers with the same name.
+
+| Tailnet | Peer | Host Access Name |
+|---------|------|-----------------|
+| havoc | bigboy | `havoc-bigboy` |
+| havoc | mars | `havoc-mars` |
+| personal | pixel 8a | `personal-pixel-8a` |
+| personal | nas | `personal-nas` |
+
+Hostnames are lowercased and spaces are replaced with dashes.
+
+### DNS Modes
+
+Hydrascale supports two DNS integration modes via the `host_dns.mode` config:
+
+**`hosts` mode (default)** -- Hydrascale manages a clearly marked block in `/etc/hosts`:
+
+```
+# BEGIN HYDRASCALE MANAGED BLOCK - DO NOT EDIT
+100.98.107.70  havoc-mars
+fd7a:115c:a1e0::1  havoc-mars
+100.73.198.12  havoc-bigboy
+# END HYDRASCALE MANAGED BLOCK
+```
+
+This works on every Linux system. The block is updated only when peer data changes (not every cycle) and written atomically. Non-managed entries in `/etc/hosts` are never touched.
+
+**`resolved` mode** -- registers routing domains with `systemd-resolved` via `resolvectl`. Only works on systems with systemd-resolved. No `/etc/hosts` modification.
+
+### Teardown
+
+When host access is disabled for a tailnet (config change or removal), Hydrascale removes:
+- All host routes for that tailnet's peers
+- The namespace-side masquerade and DNS DNAT rules
+- That tailnet's entries from `/etc/hosts` (or systemd-resolved registrations)
+
+On graceful shutdown, all host access state is cleaned up automatically.
+
+### Compatibility Notes
+
+- **Standard Linux distributions**: Full functionality including MagicDNS FQDN resolution via the namespace's DNS forwarder.
+- **Tegra/Jetson** (or kernels missing `xt_connmark`): Host routes and prefixed short names (`havoc-mars`) work fully. MagicDNS FQDN resolution (`mars.taildf854a.ts.net`) may not work due to kernel limitations.
+- **Systems without systemd-resolved**: Use `hosts` mode (the default). The `resolved` mode is unavailable.
+
 ## Config Reference
 
 ```yaml
@@ -140,92 +243,6 @@ Hydrascale adds an `iptables` MASQUERADE rule for each namespace so that outboun
 ### Docker Compatibility
 
 Docker sets the default `FORWARD` chain policy to `DROP`, which blocks traffic between namespaces and the host. Hydrascale detects this and automatically inserts per-namespace `ACCEPT` rules in the `FORWARD` chain so namespace traffic is not silently dropped. No manual iptables configuration is required.
-
-### Host Access
-
-By default, each tailnet is fully isolated in its own network namespace. You can only reach tailnet peers through namespace-scoped commands like `hydrascale exec` or `hydrascale ping`. **Host access** changes this: when enabled, the host machine can transparently reach peers on all managed tailnets as if it were directly connected to each one.
-
-```bash
-# Without host access
-sudo hydrascale ping havoc bigboy    # works, but requires the wrapper
-
-# With host access
-ping havoc-bigboy                     # just works
-ssh havoc-mars                        # just works
-curl http://havoc-webserver:8080      # just works
-```
-
-Enable it globally or per-tailnet:
-
-```yaml
-# Global: all tailnets accessible from host
-host_access: true
-
-# Or per-tailnet: only specific tailnets
-tailnets:
-  - id: corp-prod
-    host_access: true     # accessible from host
-  - id: personal
-    host_access: false    # isolated (default)
-```
-
-#### How It Works
-
-When host access is enabled for a tailnet, Hydrascale does three things each reconciliation cycle:
-
-1. **Host routes** -- adds routes on the host for each peer's Tailscale IP (both IPv4 and IPv6) via the namespace's veth pair. This lets the kernel route packets to the right namespace.
-
-2. **Namespace masquerade** -- adds an iptables masquerade rule inside the namespace on `tailscale0`. This makes traffic from the host appear as if it originates from the namespace's own Tailscale IP, so `tailscaled` forwards it to the peer normally.
-
-3. **DNS entries** -- writes `/etc/hosts` entries so peers are resolvable by name from the host.
-
-All of this is automatic and fully managed. Routes and DNS entries are synced every reconciliation cycle and cleaned up on shutdown or when host access is disabled.
-
-#### Naming Convention
-
-Each peer gets a prefixed hostname: `<tailnet-id>-<hostname>`. This prevents collisions when multiple tailnets have peers with the same name.
-
-| Tailnet | Peer | Host Access Name |
-|---------|------|-----------------|
-| havoc | bigboy | `havoc-bigboy` |
-| havoc | mars | `havoc-mars` |
-| personal | pixel 8a | `personal-pixel-8a` |
-| personal | nas | `personal-nas` |
-
-Hostnames are lowercased and spaces are replaced with dashes.
-
-#### DNS Modes
-
-Hydrascale supports two DNS integration modes via the `host_dns.mode` config:
-
-**`hosts` mode (default)** -- Hydrascale manages a clearly marked block in `/etc/hosts`:
-
-```
-# BEGIN HYDRASCALE MANAGED BLOCK - DO NOT EDIT
-100.98.107.70  havoc-mars
-fd7a:115c:a1e0::1  havoc-mars
-100.73.198.12  havoc-bigboy
-# END HYDRASCALE MANAGED BLOCK
-```
-
-This works on every Linux system. The block is updated only when peer data changes (not every cycle) and written atomically. Non-managed entries in `/etc/hosts` are never touched.
-
-**`resolved` mode** -- registers routing domains with `systemd-resolved` via `resolvectl`. Only works on systems with systemd-resolved. No `/etc/hosts` modification.
-
-#### Teardown
-
-When host access is disabled for a tailnet (config change or removal), Hydrascale removes:
-- All host routes for that tailnet's peers
-- The namespace-side masquerade and DNS DNAT rules
-- That tailnet's entries from `/etc/hosts` (or systemd-resolved registrations)
-
-On graceful shutdown, all host access state is cleaned up automatically.
-
-#### Compatibility Notes
-
-- **Standard Linux distributions**: Full functionality including MagicDNS FQDN resolution via the namespace's DNS forwarder.
-- **Tegra/Jetson** (or kernels missing `xt_connmark`): Host routes and prefixed short names (`havoc-mars`) work fully. MagicDNS FQDN resolution (`mars.taildf854a.ts.net`) may not work due to kernel limitations.
-- **Systems without systemd-resolved**: Use `hosts` mode (the default). The `resolved` mode is unavailable.
 
 ## CLI Commands
 
