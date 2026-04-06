@@ -270,10 +270,17 @@ func AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 
 	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
 		"tailscale", "--socket="+socketPath, "up", "--accept-dns=false")
-	cmd.Env = append(os.Environ(), "TS_AUTHKEY="+authKey)
+	// Minimal environment for the child process to avoid leaking parent env vars
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"TS_AUTHKEY=" + authKey,
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("tailscale up failed for %s: %v (%s)", tailnetID, err, output)
+		// Redact auth key from error output to prevent leaking it in logs
+		sanitized := strings.ReplaceAll(string(output), authKey, "[REDACTED]")
+		return fmt.Errorf("tailscale up failed for %s: %v (%s)", tailnetID, err, sanitized)
 	}
 
 	log.Printf("Authorized tailnet %s in namespace %s", tailnetID, nsName)
