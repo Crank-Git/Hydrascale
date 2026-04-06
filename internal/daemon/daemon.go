@@ -269,7 +269,7 @@ func AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
-		"tailscale", "--socket="+socketPath, "up")
+		"tailscale", "--socket="+socketPath, "up", "--accept-dns=false")
 	cmd.Env = append(os.Environ(), "TS_AUTHKEY="+authKey)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

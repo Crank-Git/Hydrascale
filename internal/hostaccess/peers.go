@@ -33,8 +33,11 @@ func ParsePeers(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHo
 	}
 	result.MagicDNSSuffix = status.MagicDNSSuffix
 	for _, node := range status.Peer {
+		// Sanitize hostname: lowercase, replace spaces with dashes
+		hostname := strings.ToLower(node.HostName)
+		hostname = strings.ReplaceAll(hostname, " ", "-")
 		peer := Peer{
-			Hostname: strings.ToLower(node.HostName),
+			Hostname: hostname,
 			Online:   node.Online,
 		}
 		for _, ip := range node.TailscaleIPs {

@@ -285,11 +285,13 @@ func (r *Reconciler) executeAction(action Action) error {
 			return nil
 		}
 		nsName := r.ns.GetName(action.TailnetID)
+		index := namespaces.VethIndex(nsName)
+		// Ensure namespace-side iptables are set up (idempotent — safe every cycle)
+		namespaces.SetupHostAccess(nsName, index)
 		status, err := r.dm.GetStatus(nsName, action.TailnetID)
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
 		}
-		index := namespaces.VethIndex(nsName)
 		vethGW := fmt.Sprintf("10.200.%d.2", index)
 		vethHost, _ := namespaces.VethNames(nsName)
 		r.ha.Sync(action.TailnetID, status, vethGW, vethHost)
