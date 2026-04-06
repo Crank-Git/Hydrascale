@@ -17,6 +17,7 @@ import (
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/hostaccess"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/routing"
 )
@@ -29,8 +30,9 @@ const (
 	ActionDeleteNS    ActionType = "delete_namespace"
 	ActionStartDaemon ActionType = "start_daemon"
 	ActionStopDaemon  ActionType = "stop_daemon"
-	ActionSyncRoutes  ActionType = "sync_routes"
-	ActionAuthDaemon  ActionType = "auth_daemon"
+	ActionSyncRoutes      ActionType = "sync_routes"
+	ActionSyncHostAccess  ActionType = "sync_host_access"
+	ActionAuthDaemon      ActionType = "auth_daemon"
 )
 
 // MaxFailures is the number of consecutive failures before a tailnet enters error state.
@@ -71,6 +73,7 @@ type Reconciler struct {
 	ns         namespaces.Manager
 	dm         daemon.Manager
 	rt         routing.Manager
+	ha         *hostaccess.Manager
 	interval   time.Duration
 
 	mu            sync.Mutex
@@ -85,12 +88,13 @@ type Reconciler struct {
 }
 
 // New creates a new Reconciler with the given dependencies.
-func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing.Manager, interval time.Duration) *Reconciler {
+func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing.Manager, interval time.Duration, ha *hostaccess.Manager) *Reconciler {
 	return &Reconciler{
 		configPath:    configPath,
 		ns:            ns,
 		dm:            dm,
 		rt:            rt,
+		ha:            ha,
 		interval:      interval,
 		failureCounts: make(map[string]int),
 		errorStates:   make(map[string]bool),
@@ -191,6 +195,10 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 		} else {
 			// Daemon healthy, sync routes
 			actions = append(actions, Action{Type: ActionSyncRoutes, TailnetID: id, NsName: ns})
+			// Sync host access if enabled for this tailnet
+			if cfg, err := config.LoadConfig(r.configPath); err == nil && cfg.TailnetHostAccess(id) {
+				actions = append(actions, Action{Type: ActionSyncHostAccess, TailnetID: id, NsName: ns})
+			}
 		}
 	}
 
@@ -245,7 +253,18 @@ func (r *Reconciler) Apply(actions []Action) {
 func (r *Reconciler) executeAction(action Action) error {
 	switch action.Type {
 	case ActionCreateNS:
-		return r.ns.Create(action.TailnetID)
+		if err := r.ns.Create(action.TailnetID); err != nil {
+			return err
+		}
+		// Set up host access iptables if enabled for this tailnet
+		if cfg, err := config.LoadConfig(r.configPath); err == nil && cfg.TailnetHostAccess(action.TailnetID) {
+			nsName := r.ns.GetName(action.TailnetID)
+			index := namespaces.VethIndex(nsName)
+			if err := namespaces.SetupHostAccess(nsName, index); err != nil {
+				log.Printf("host-access: setup failed for %s: %v", nsName, err)
+			}
+		}
+		return nil
 	case ActionDeleteNS:
 		return r.ns.Delete(action.NsName)
 	case ActionStartDaemon:
@@ -261,6 +280,22 @@ func (r *Reconciler) executeAction(action Action) error {
 			return err
 		}
 		return r.rt.SyncRoutes(action.NsName, routes)
+	case ActionSyncHostAccess:
+		if r.ha == nil {
+			return nil
+		}
+		nsName := r.ns.GetName(action.TailnetID)
+		index := namespaces.VethIndex(nsName)
+		// Ensure namespace-side iptables are set up (idempotent — safe every cycle)
+		namespaces.SetupHostAccess(nsName, index)
+		status, err := r.dm.GetStatus(nsName, action.TailnetID)
+		if err != nil {
+			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
+		}
+		vethGW := fmt.Sprintf("10.200.%d.2", index)
+		vethHost, _ := namespaces.VethNames(nsName)
+		r.ha.Sync(action.TailnetID, status, vethGW, vethHost)
+		return nil
 	default:
 		return fmt.Errorf("unknown action type: %s", action.Type)
 	}
@@ -503,6 +538,10 @@ func (r *Reconciler) Shutdown() error {
 		r.emit("shutdown_complete", "", "all daemons stopped")
 	case <-ctx.Done():
 		r.emit("shutdown_timeout", "", "30s deadline exceeded")
+	}
+
+	if r.ha != nil {
+		r.ha.TeardownAll()
 	}
 
 	return nil

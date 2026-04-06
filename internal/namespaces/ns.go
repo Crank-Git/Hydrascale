@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -154,10 +156,10 @@ func VethIndex(nsName string) int {
 	return (v%254) + 1
 }
 
-// vethNames returns a pair of interface names (host, namespace) that fit
+// VethNames returns a pair of interface names (host, namespace) that fit
 // within the Linux 15-character IFNAMSIZ limit.  Format: "vh<hex>" / "vn<hex>"
 // where <hex> is derived from the namespace name.
-func vethNames(nsName string) (host, ns string) {
+func VethNames(nsName string) (host, ns string) {
 	h := sha256.Sum256([]byte(nsName))
 	tag := fmt.Sprintf("%x", h[:6]) // 12 hex chars → "vh" + 12 = 14, fits in 15
 	return "vh" + tag, "vn" + tag
@@ -168,7 +170,7 @@ func vethNames(nsName string) (host, ns string) {
 // Namespace side: vn<hash> with IP 10.200.N.2/30
 // Adds host route: 100.100.100.100 via 10.200.N.2 dev vh<hash>
 func SetupVeth(nsName string, index int) error {
-	hostVeth, nsVeth := vethNames(nsName)
+	hostVeth, nsVeth := VethNames(nsName)
 	hostIP := fmt.Sprintf("10.200.%d.1/30", index)
 	nsIP := fmt.Sprintf("10.200.%d.2/30", index)
 	nsGW := fmt.Sprintf("10.200.%d.2", index)
@@ -258,7 +260,7 @@ func SetupVeth(nsName string, index int) error {
 // TeardownVeth removes the veth pair for a namespace.
 // Deleting the host side automatically removes the peer.
 func TeardownVeth(nsName string) error {
-	hostVeth, _ := vethNames(nsName)
+	hostVeth, _ := VethNames(nsName)
 
 	// Remove iptables rules (best effort)
 	index := VethIndex(nsName)
@@ -283,4 +285,66 @@ func TeardownVeth(nsName string) error {
 
 	log.Printf("Tore down veth pair for namespace %s", nsName)
 	return nil
+}
+
+// SetupHostAccess adds namespace-side iptables rules for host access:
+// - Masquerade on tailscale0 so host traffic is forwarded to peers
+// - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
+// - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
+// All rules are idempotent (check before insert).
+func SetupHostAccess(nsName string, index int) error {
+	_, nsVeth := VethNames(nsName)
+	nsIP := fmt.Sprintf("10.200.%d.0/30", index)
+
+	// Masquerade on tailscale0
+	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-o", "tailscale0", "-j", "MASQUERADE").Run() != nil {
+		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-o", "tailscale0", "-j", "MASQUERADE")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("host-access: failed to add tailscale0 masquerade in %s: %v (%s)", nsName, err, out)
+		}
+	}
+
+	// DNS DNAT UDP
+	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run() != nil {
+		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("host-access: failed to add DNS DNAT (UDP) in %s: %v (%s)", nsName, err, out)
+		}
+	}
+
+	// DNS DNAT TCP
+	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run() != nil {
+		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("host-access: failed to add DNS DNAT (TCP) in %s: %v (%s)", nsName, err, out)
+		}
+	}
+
+	// /etc/netns/NAME/resolv.conf
+	netnsDir := filepath.Join("/etc/netns", nsName)
+	if err := os.MkdirAll(netnsDir, 0755); err != nil {
+		log.Printf("host-access: failed to create %s: %v", netnsDir, err)
+	} else {
+		resolvPath := filepath.Join(netnsDir, "resolv.conf")
+		if err := os.WriteFile(resolvPath, []byte("nameserver 100.100.100.100\n"), 0644); err != nil {
+			log.Printf("host-access: failed to write %s: %v", resolvPath, err)
+		}
+	}
+
+	log.Printf("Set up host access rules for namespace %s", nsName)
+	return nil
+}
+
+// TeardownHostAccess removes namespace-side host access iptables rules and resolv.conf.
+func TeardownHostAccess(nsName string, index int) {
+	_, nsVeth := VethNames(nsName)
+	nsIP := fmt.Sprintf("10.200.%d.0/30", index)
+
+	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-o", "tailscale0", "-j", "MASQUERADE").Run()
+	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run()
+	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run()
+
+	resolvPath := filepath.Join("/etc/netns", nsName, "resolv.conf")
+	os.Remove(resolvPath)
+	os.Remove(filepath.Join("/etc/netns", nsName))
 }

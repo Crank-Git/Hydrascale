@@ -22,9 +22,15 @@ const DefaultConfigPath = "/var/lib/hydrascale/config.yaml"
 
 // Tailnet represents a single Tailscale tailnet configuration.
 type Tailnet struct {
-	ID       string `yaml:"id"`
-	ExitNode string `yaml:"exit_node,omitempty"`
-	AuthKey  string `yaml:"auth_key,omitempty"`
+	ID         string `yaml:"id"`
+	ExitNode   string `yaml:"exit_node,omitempty"`
+	AuthKey    string `yaml:"auth_key,omitempty"`
+	HostAccess *bool  `yaml:"host_access,omitempty"`
+}
+
+// HostDNSConfig holds DNS configuration for host access.
+type HostDNSConfig struct {
+	Mode string `yaml:"mode,omitempty"` // "hosts" (default) or "resolved"
 }
 
 // Mesh is a stub for forward compatibility with Phase 2 mesh mode.
@@ -47,11 +53,41 @@ type ResolverConfig struct {
 // Config represents the Hydrascale service configuration.
 type Config struct {
 	Version    int              `yaml:"version,omitempty"`
+	HostAccess bool             `yaml:"host_access,omitempty"`
 	Tailnets   []Tailnet        `yaml:"tailnets"`
 	Resolver   ResolverConfig   `yaml:"resolver"`
 	Reconciler ReconcilerConfig `yaml:"reconciler,omitempty"`
 	Mesh       Mesh             `yaml:"mesh,omitempty"`
 	EventLog   string           `yaml:"event_log,omitempty"`
+	HostDNS    HostDNSConfig    `yaml:"host_dns,omitempty"`
+}
+
+// TailnetHostAccess returns whether host access is enabled for a specific tailnet,
+// resolving per-tailnet override against the global default.
+func (c *Config) TailnetHostAccess(tailnetID string) bool {
+	for _, tn := range c.Tailnets {
+		if tn.ID == tailnetID {
+			if tn.HostAccess != nil {
+				return *tn.HostAccess
+			}
+			return c.HostAccess
+		}
+	}
+	return c.HostAccess
+}
+
+// EffectiveHostDNSMode returns the DNS mode to use. Defaults to "hosts" if host_access
+// is enabled for any tailnet and no mode is specified.
+func (c *Config) EffectiveHostDNSMode() string {
+	if c.HostDNS.Mode != "" {
+		return c.HostDNS.Mode
+	}
+	for _, tn := range c.Tailnets {
+		if c.TailnetHostAccess(tn.ID) {
+			return "hosts"
+		}
+	}
+	return ""
 }
 
 // LoadConfig reads and parses a YAML configuration file.

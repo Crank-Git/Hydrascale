@@ -16,6 +16,7 @@ import (
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
+	"hydrascale/internal/hostaccess"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/routing"
@@ -82,7 +83,7 @@ func newReconciler() *reconciler.Reconciler {
 	ns := namespaces.NewRealManager()
 	dm := daemon.NewRealManager()
 	rt := routing.NewRealManager()
-	return reconciler.New(configPath(), ns, dm, rt, 10*time.Second)
+	return reconciler.New(configPath(), ns, dm, rt, 10*time.Second, nil)
 }
 
 // --- Declarative commands ---
@@ -422,12 +423,19 @@ func serveCmd() *cobra.Command {
 
 			fmt.Printf("Hydrascale daemon starting (reconcile every %s)...\n", interval)
 
+			var ha *hostaccess.Manager
+			dnsMode := cfg.EffectiveHostDNSMode()
+			if dnsMode != "" {
+				ha = hostaccess.NewManager(dnsMode, "/etc/hosts")
+			}
+
 			r := reconciler.New(
 				configPath(),
 				namespaces.NewRealManager(),
 				daemon.NewRealManager(),
 				routing.NewRealManager(),
 				interval,
+				ha,
 			)
 
 			// Set up JSON event logging if configured
