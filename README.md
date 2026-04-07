@@ -13,6 +13,7 @@
 - [Install](#install)
 - [Quick Start](#quick-start)
 - [Host Access](#host-access) -- transparent access to all tailnet peers from the host
+- [Headscale / Custom Control Server](#headscale--custom-control-server)
 - [Config Reference](#config-reference)
 - [Networking](#networking)
 - [CLI Commands](#cli-commands)
@@ -183,6 +184,41 @@ On graceful shutdown, all host access state is cleaned up automatically.
 - **Tegra/Jetson** (or kernels missing `xt_connmark`): Host routes and prefixed short names (`havoc-mars`) work fully. MagicDNS FQDN resolution (`mars.taildf854a.ts.net`) may not work due to kernel limitations.
 - **Systems without systemd-resolved**: Use `hosts` mode (the default). The `resolved` mode is unavailable.
 
+## Headscale / Custom Control Server
+
+Hydrascale supports [Headscale](https://github.com/juanfont/headscale) and other Tailscale-compatible control servers via the `control_url` field. This lets you run self-hosted tailnets alongside (or instead of) the official Tailscale coordination server.
+
+Set it per-tailnet or as a global default:
+
+```yaml
+version: 2
+control_url: "https://headscale.example.com"   # global default for all tailnets
+
+tailnets:
+  - id: homelab
+    auth_key: "..."
+    # uses global control_url (Headscale)
+
+  - id: corp-infra
+    control_url: "https://headscale.corp.internal"
+    auth_key: "..."
+    # uses its own Headscale instance
+
+  - id: personal
+    auth_key: "tskey-auth-..."
+    # no control_url = uses default Tailscale coordination server
+```
+
+Per-tailnet `control_url` overrides the global default. Omitting the field (or leaving it empty) uses the standard Tailscale coordination server. This means you can mix Tailscale and Headscale networks on the same host.
+
+### Important Caveats
+
+- **Auth key format**: Headscale auth keys have a different format than Tailscale's `tskey-auth-*` keys. Hydrascale does not validate the key format -- it passes the key directly to `tailscale up` via `TS_AUTHKEY`. Make sure you use the correct key type for your control server.
+
+- **MagicDNS**: Host access DNS resolution (the `100.100.100.100` MagicDNS forwarder) depends on your control server's DNS configuration. Headscale supports MagicDNS, but the domain suffix and behavior may differ from Tailscale's. If host access DNS isn't resolving, check your Headscale DNS configuration.
+
+- **DERP relays**: Tailscale uses its own global DERP relay network for NAT traversal. Headscale can use the same DERP relays, custom DERP servers, or a mix. If you see connectivity issues between peers, verify your Headscale instance's DERP map configuration. Direct connections (via STUN) work independently of the control server.
+
 ## Config Reference
 
 ```yaml
@@ -194,12 +230,17 @@ version: 2
 # (e.g. ping havoc-mars) without using hydrascale exec.
 host_access: false
 
+# Custom control server URL for Headscale (default: empty = use Tailscale)
+# Applied to all tailnets unless overridden per-tailnet. Must be HTTPS.
+# control_url: "https://headscale.example.com"
+
 # List of tailnets to manage
 tailnets:
   - id: "corp-prod"              # unique identifier (alphanumeric, dots, hyphens, underscores; max 63 chars)
     exit_node: "node1.example.com" # optional exit node hostname
     auth_key: "tskey-auth-xxxxx"   # optional auth key for unattended setup
     host_access: true              # optional per-tailnet override (overrides global setting)
+    # control_url: "https://headscale.example.com"  # optional per-tailnet control server override
 
 # DNS resolver settings
 resolver:
