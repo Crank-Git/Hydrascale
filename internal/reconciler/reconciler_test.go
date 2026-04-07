@@ -120,7 +120,7 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 	return "/tmp/test-" + tailnetID + ".sock"
 }
 
-func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey string) error {
+func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 	return nil
 }
 
@@ -597,6 +597,33 @@ func TestLastErrors_TracksErrors(t *testing.T) {
 	}
 	if _, ok := lastErrors["ok"]; ok {
 		t.Error("expected LastErrors to NOT contain 'ok'")
+	}
+}
+
+func TestDiff_ControlURL(t *testing.T) {
+	cfgPath := writeTestConfig(t)
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+
+	desired := map[string]config.Tailnet{
+		"hs": {ID: "hs", AuthKey: "key1", ControlURL: "https://headscale.example.com"},
+	}
+	actual := map[string]*TailnetState{}
+
+	actions := r.Diff(desired, actual)
+
+	var authAction *Action
+	for i := range actions {
+		if actions[i].Type == ActionAuthDaemon {
+			authAction = &actions[i]
+			break
+		}
+	}
+
+	if authAction == nil {
+		t.Fatal("expected ActionAuthDaemon in diff output")
+	}
+	if authAction.ControlURL != "https://headscale.example.com" {
+		t.Errorf("ControlURL = %q, want %q", authAction.ControlURL, "https://headscale.example.com")
 	}
 }
 
