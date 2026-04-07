@@ -121,7 +121,7 @@ func LoadConfig(path string) (*Config, error) {
 		seen[tn.ID] = true
 
 		if err := ValidateControlURL(tn.ControlURL); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("tailnet %q: %w", tn.ID, err)
 		}
 	}
 
