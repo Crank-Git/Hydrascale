@@ -98,7 +98,7 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 	return "/tmp/test-" + tailnetID + ".sock"
 }
 
-func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey string) error { return nil }
+func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error { return nil }
 
 func (m *mockDaemon) GetStatus(nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
 	return nil, nil

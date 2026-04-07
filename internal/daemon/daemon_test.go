@@ -42,6 +42,41 @@ func TestSocketPath(t *testing.T) {
 	}
 }
 
+func TestBuildTailscaleUpArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		socketPath string
+		controlURL string
+		wantArgs   []string
+	}{
+		{
+			name:       "no control URL (standard Tailscale)",
+			socketPath: "/tmp/test.sock",
+			controlURL: "",
+			wantArgs:   []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=false"},
+		},
+		{
+			name:       "with control URL (Headscale)",
+			socketPath: "/tmp/test.sock",
+			controlURL: "https://headscale.example.com",
+			wantArgs:   []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=false", "--login-server=https://headscale.example.com"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildTailscaleUpArgs(tt.socketPath, tt.controlURL)
+			if len(got) != len(tt.wantArgs) {
+				t.Fatalf("buildTailscaleUpArgs() = %v, want %v", got, tt.wantArgs)
+			}
+			for i := range got {
+				if got[i] != tt.wantArgs[i] {
+					t.Errorf("arg[%d] = %q, want %q", i, got[i], tt.wantArgs[i])
+				}
+			}
+		})
+	}
+}
+
 func TestStopDaemon_StalePID(t *testing.T) {
 	// Create a temp state dir with a stale PID file
 	dir := t.TempDir()

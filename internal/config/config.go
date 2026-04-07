@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +27,7 @@ type Tailnet struct {
 	ExitNode   string `yaml:"exit_node,omitempty"`
 	AuthKey    string `yaml:"auth_key,omitempty"`
 	HostAccess *bool  `yaml:"host_access,omitempty"`
+	ControlURL string `yaml:"control_url,omitempty"`
 }
 
 // HostDNSConfig holds DNS configuration for host access.
@@ -54,6 +56,7 @@ type ResolverConfig struct {
 type Config struct {
 	Version    int              `yaml:"version,omitempty"`
 	HostAccess bool             `yaml:"host_access,omitempty"`
+	ControlURL string           `yaml:"control_url,omitempty"`
 	Tailnets   []Tailnet        `yaml:"tailnets"`
 	Resolver   ResolverConfig   `yaml:"resolver"`
 	Reconciler ReconcilerConfig `yaml:"reconciler,omitempty"`
@@ -116,6 +119,15 @@ func LoadConfig(path string) (*Config, error) {
 			return nil, fmt.Errorf("duplicate tailnet ID %q", tn.ID)
 		}
 		seen[tn.ID] = true
+
+		if err := ValidateControlURL(tn.ControlURL); err != nil {
+			return nil, fmt.Errorf("tailnet %q: %w", tn.ID, err)
+		}
+	}
+
+	// Validate global control_url
+	if err := ValidateControlURL(cfg.ControlURL); err != nil {
+		return nil, fmt.Errorf("global %w", err)
 	}
 
 	// Validate DNS bind address
@@ -190,6 +202,32 @@ func ResolveAuthKey(tailnetID string, configKey string) string {
 		return v
 	}
 	return configKey
+}
+
+// ValidateControlURL checks that a control URL is empty or a valid https URL with a host.
+func ValidateControlURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid control_url %q: %w", raw, err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("control_url %q must use https scheme", raw)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("control_url %q has no host", raw)
+	}
+	return nil
+}
+
+// ResolveControlURL returns the per-tailnet control URL if set, otherwise the global default.
+func ResolveControlURL(perTailnet, global string) string {
+	if perTailnet != "" {
+		return perTailnet
+	}
+	return global
 }
 
 // SaveConfig writes the config to disk atomically (temp file + rename).

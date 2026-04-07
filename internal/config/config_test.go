@@ -325,6 +325,87 @@ reconciler:
 	}
 }
 
+func TestLoadConfig_ControlURL(t *testing.T) {
+	tmp := writeTemp(t, `
+version: 2
+control_url: "https://headscale.default.example.com"
+tailnets:
+  - id: "hs-tailnet"
+    control_url: "https://headscale.example.com"
+  - id: "ts-tailnet"
+  - id: "global-default"
+`)
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ControlURL != "https://headscale.default.example.com" {
+		t.Errorf("global ControlURL = %q, want %q", cfg.ControlURL, "https://headscale.default.example.com")
+	}
+	if cfg.Tailnets[0].ControlURL != "https://headscale.example.com" {
+		t.Errorf("hs-tailnet ControlURL = %q, want %q", cfg.Tailnets[0].ControlURL, "https://headscale.example.com")
+	}
+	if cfg.Tailnets[1].ControlURL != "" {
+		t.Errorf("ts-tailnet ControlURL = %q, want empty", cfg.Tailnets[1].ControlURL)
+	}
+}
+
+func TestLoadConfig_InvalidControlURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"no scheme", "headscale.example.com"},
+		{"non-https http", "http://headscale.example.com"},
+		{"ftp scheme", "ftp://headscale.example.com"},
+		{"empty host", "https://"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := fmt.Sprintf("version: 2\ntailnets:\n  - id: test\n    control_url: %q\n", tt.url)
+			tmp := writeTemp(t, content)
+			_, err := LoadConfig(tmp)
+			if err == nil {
+				t.Errorf("expected error for control_url %q", tt.url)
+			}
+		})
+	}
+}
+
+func TestResolveControlURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		perTailnet string
+		global     string
+		want       string
+	}{
+		{"per-tailnet wins", "https://per.example.com", "https://global.example.com", "https://per.example.com"},
+		{"global fallback", "", "https://global.example.com", "https://global.example.com"},
+		{"neither set", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveControlURL(tt.perTailnet, tt.global)
+			if got != tt.want {
+				t.Errorf("ResolveControlURL(%q, %q) = %q, want %q", tt.perTailnet, tt.global, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_InvalidGlobalControlURL(t *testing.T) {
+	tmp := writeTemp(t, `
+version: 2
+control_url: "http://not-https.example.com"
+tailnets:
+  - id: test
+`)
+	_, err := LoadConfig(tmp)
+	if err == nil {
+		t.Fatal("expected error for invalid global control_url")
+	}
+}
+
 // writeTemp creates a temp file with the given content and returns its path.
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()

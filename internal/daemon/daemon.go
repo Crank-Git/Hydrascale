@@ -38,7 +38,7 @@ type Manager interface {
 	Stop(nsName, tailnetID string) error
 	CheckHealth(nsName, tailnetID string) (bool, error)
 	GetSocketPath(tailnetID string) string
-	AuthorizeDaemon(tailnetID, nsName, authKey string) error
+	AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error
 	GetStatus(nsName, tailnetID string) (*TailscaleStatus, error)
 }
 
@@ -66,8 +66,8 @@ func (m *RealManager) GetSocketPath(tailnetID string) string {
 	return SocketPath(tailnetID)
 }
 
-func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey string) error {
-	return AuthorizeDaemon(tailnetID, nsName, authKey)
+func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
+	return AuthorizeDaemon(tailnetID, nsName, authKey, controlURL)
 }
 
 func (m *RealManager) GetStatus(nsName, tailnetID string) (*TailscaleStatus, error) {
@@ -242,9 +242,19 @@ func CheckHealth(namespaceName string, tailnetID string) (bool, error) {
 	return true, nil
 }
 
+// buildTailscaleUpArgs constructs the argument list for `tailscale up`.
+// When controlURL is non-empty, --login-server is appended (for Headscale).
+func buildTailscaleUpArgs(socketPath, controlURL string) []string {
+	args := []string{"tailscale", "--socket=" + socketPath, "up", "--accept-dns=false"}
+	if controlURL != "" {
+		args = append(args, "--login-server="+controlURL)
+	}
+	return args
+}
+
 // AuthorizeDaemon waits for the tailscaled socket to become available,
 // then runs tailscale up with the provided auth key.
-func AuthorizeDaemon(tailnetID, nsName, authKey string) error {
+func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 	socketPath := SocketPath(tailnetID)
 
 	// Poll for socket existence (up to 30s, 500ms intervals)
@@ -268,8 +278,9 @@ func AuthorizeDaemon(tailnetID, nsName, authKey string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
-		"tailscale", "--socket="+socketPath, "up", "--accept-dns=false")
+	tsArgs := buildTailscaleUpArgs(socketPath, controlURL)
+	cmdArgs := append([]string{"netns", "exec", nsName}, tsArgs...)
+	cmd := exec.CommandContext(ctx, "ip", cmdArgs...)
 	// Minimal environment for the child process to avoid leaking parent env vars
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),

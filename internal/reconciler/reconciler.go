@@ -40,10 +40,11 @@ const MaxFailures = 3
 
 // Action represents a single reconciliation action to be executed.
 type Action struct {
-	Type      ActionType
-	TailnetID string
-	NsName    string
-	AuthKey   string // Used by ActionAuthDaemon
+	Type       ActionType
+	TailnetID  string
+	NsName     string
+	AuthKey    string // Used by ActionAuthDaemon
+	ControlURL string // Used by ActionAuthDaemon for custom control servers (e.g. Headscale)
 }
 
 func (a Action) String() string {
@@ -161,6 +162,8 @@ func (r *Reconciler) ActualState() (map[string]*TailnetState, error) {
 func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*TailnetState) []Action {
 	var actions []Action
 
+	cfg, cfgErr := config.LoadConfig(r.configPath)
+
 	// Create/start tailnets that should exist but don't
 	for id := range desired {
 		r.mu.Lock()
@@ -188,7 +191,11 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 			// If an auth key is available, schedule authorization after daemon start
 			authKey := config.ResolveAuthKey(id, desired[id].AuthKey)
 			if authKey != "" {
-				actions = append(actions, Action{Type: ActionAuthDaemon, TailnetID: id, NsName: ns, AuthKey: authKey})
+				var controlURL string
+				if cfgErr == nil {
+					controlURL = config.ResolveControlURL(desired[id].ControlURL, cfg.ControlURL)
+				}
+				actions = append(actions, Action{Type: ActionAuthDaemon, TailnetID: id, NsName: ns, AuthKey: authKey, ControlURL: controlURL})
 			}
 		} else if !state.DaemonHealthy {
 			actions = append(actions, Action{Type: ActionStartDaemon, TailnetID: id, NsName: ns})
@@ -196,7 +203,7 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 			// Daemon healthy, sync routes
 			actions = append(actions, Action{Type: ActionSyncRoutes, TailnetID: id, NsName: ns})
 			// Sync host access if enabled for this tailnet
-			if cfg, err := config.LoadConfig(r.configPath); err == nil && cfg.TailnetHostAccess(id) {
+			if cfgErr == nil && cfg.TailnetHostAccess(id) {
 				actions = append(actions, Action{Type: ActionSyncHostAccess, TailnetID: id, NsName: ns})
 			}
 		}
@@ -272,7 +279,7 @@ func (r *Reconciler) executeAction(action Action) error {
 	case ActionStopDaemon:
 		return r.dm.Stop(action.NsName, action.TailnetID)
 	case ActionAuthDaemon:
-		return r.dm.AuthorizeDaemon(action.TailnetID, action.NsName, action.AuthKey)
+		return r.dm.AuthorizeDaemon(action.TailnetID, action.NsName, action.AuthKey, action.ControlURL)
 	case ActionSyncRoutes:
 		socketPath := r.dm.GetSocketPath(action.TailnetID)
 		routes, err := r.rt.PollStatus(action.NsName, socketPath)
