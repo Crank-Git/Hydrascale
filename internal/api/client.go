@@ -166,6 +166,27 @@ func (c *Client) UpdateDNS(mode, bindAddress string) (*ReconcileResponse, error)
 	return &result, nil
 }
 
+// TailnetDetail calls GET /api/tailnet/{id}/detail and returns live Tailscale status.
+// A non-nil response with a non-empty Error field means the daemon was unreachable.
+func (c *Client) TailnetDetail(id string) (*TailnetDetailResponse, error) {
+	resp, err := c.httpClient.Get("http://localhost/api/tailnet/" + id + "/detail")
+	if err != nil {
+		return nil, fmt.Errorf("detail request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("tailnet %s not found", id)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("detail returned HTTP %d", resp.StatusCode)
+	}
+	var result TailnetDetailResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode detail response: %w", err)
+	}
+	return &result, nil
+}
+
 // GetConfig calls GET /api/config and returns the redacted config.
 func (c *Client) GetConfig() (*ConfigResponse, error) {
 	resp, err := c.httpClient.Get("http://localhost/api/config")

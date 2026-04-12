@@ -370,6 +370,21 @@ func (r *Reconciler) ConfigPath() string {
 	return r.configPath
 }
 
+// GetTailscaleStatus fetches live Tailscale status for a single tailnet by running
+// tailscale status --json inside its network namespace. Returns an error if the
+// tailnet ID is not found in config or if the daemon call fails.
+func (r *Reconciler) GetTailscaleStatus(id string) (*daemon.TailscaleStatus, error) {
+	desired, err := r.DesiredState()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load desired state: %w", err)
+	}
+	if _, ok := desired[id]; !ok {
+		return nil, fmt.Errorf("tailnet %s not found", id)
+	}
+	nsName := r.ns.GetName(id)
+	return r.dm.GetStatus(nsName, id)
+}
+
 // StopDaemon stops a running tailnet daemon without removing it from config.
 // It also pauses the tailnet so the reconciler won't restart it.
 func (r *Reconciler) StopDaemon(tailnetID string) error {

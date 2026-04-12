@@ -2,6 +2,8 @@
 package api
 
 import (
+	"time"
+
 	"hydrascale/internal/config"
 	"hydrascale/internal/reconciler"
 )
@@ -60,4 +62,17 @@ type RedactedConfig struct {
 // ConfigResponse is the JSON response for GET /api/config.
 type ConfigResponse struct {
 	Config RedactedConfig `json:"config"`
+}
+
+// TailnetDetailResponse is the JSON response for GET /api/tailnet/{id}/detail.
+// It contains live data fetched from inside the tailnet's network namespace.
+// Routes and config fields (ExitNode, HostAccess) are NOT included here —
+// the TUI assembles those from the background status poll (m.status).
+// Error is set (with HTTP 200) when the live fetch fails; the TUI renders it inline.
+type TailnetDetailResponse struct {
+	TailscaleIPs []string  `json:"tailscale_ips"`
+	PeerCount    int       `json:"peer_count"`
+	OnlinePeers  int       `json:"online_peers"`
+	FetchedAt    time.Time `json:"fetched_at"`
+	Error        string    `json:"error,omitempty"`
 }

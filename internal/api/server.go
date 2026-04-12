@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"syscall"
+	"time"
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/reconciler"
@@ -39,6 +41,9 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	mux.HandleFunc("/api/tailnet/disconnect", s.handleTailnetDisconnect)
 	mux.HandleFunc("/api/config/dns", s.handleConfigDNS)
 	mux.HandleFunc("/api/config", s.handleConfig)
+	// Method-qualified pattern (Go 1.22+) — restricts to GET only and supports {id} wildcard.
+	// Registered after the exact-match tailnet routes above, which take priority.
+	mux.HandleFunc("GET /api/tailnet/{id}/detail", s.handleTailnetDetail)
 
 	s.httpServer = &http.Server{Handler: mux}
 	return s
@@ -364,6 +369,52 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := ConfigResponse{Config: redacted}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handleTailnetDetail serves GET /api/tailnet/{id}/detail.
+// It fetches live TailscaleStatus from inside the tailnet's network namespace.
+// Always returns HTTP 200; sets the Error field in the response body on failure
+// so the TUI can render the error inline without needing to handle non-200 status.
+func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing tailnet id", http.StatusBadRequest)
+		return
+	}
+
+	resp := TailnetDetailResponse{FetchedAt: time.Now()}
+
+	status, err := s.reconciler.GetTailscaleStatus(id)
+	if err != nil {
+		// Distinguish "not found" from other errors for proper HTTP status.
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		resp.Error = err.Error()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	if status == nil {
+		// Daemon exists but returned no status — still starting up.
+		resp.Error = "daemon starting, status unavailable"
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	resp.TailscaleIPs = status.Self.TailscaleIPs
+	resp.PeerCount = len(status.Peer)
+	for _, peer := range status.Peer {
+		if peer.Online {
+			resp.OnlinePeers++
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }

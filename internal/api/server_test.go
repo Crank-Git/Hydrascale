@@ -66,8 +66,10 @@ func (m *mockNS) SetupVeth(nsName string, index int) error { return nil }
 func (m *mockNS) TeardownVeth(nsName string) error         { return nil }
 
 type mockDaemon struct {
-	mu      sync.Mutex
-	healthy map[string]bool
+	mu           sync.Mutex
+	healthy      map[string]bool
+	statusResult *daemon.TailscaleStatus // returned by GetStatus; nil = daemon starting
+	statusErr    error                   // returned by GetStatus; non-nil = error
 }
 
 func newMockDaemon() *mockDaemon {
@@ -101,7 +103,9 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error { return nil }
 
 func (m *mockDaemon) GetStatus(nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.statusResult, m.statusErr
 }
 
 type mockRouting struct{}
@@ -400,4 +404,134 @@ func TestReconcileEndpointError(t *testing.T) {
 		t.Error("expected non-empty Message on reconcile failure")
 	}
 	_ = fmt.Sprintf("message: %s", resp.Message) // use fmt
+}
+
+// --- Detail endpoint tests ---
+
+func TestDetailEndpoint_HappyPath(t *testing.T) {
+	cfgPath := writeTestConfig(t, "alpha")
+	md := newMockDaemon()
+	md.statusResult = &daemon.TailscaleStatus{
+		Self: daemon.StatusNode{
+			TailscaleIPs: []string{"100.64.1.5"},
+			HostName:     "myhost",
+		},
+		Peer: map[string]daemon.StatusNode{
+			"peer1": {HostName: "peer1", Online: true},
+			"peer2": {HostName: "peer2", Online: false},
+		},
+	}
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	detail, err := client.TailnetDetail("alpha")
+	if err != nil {
+		t.Fatalf("TailnetDetail: %v", err)
+	}
+	if detail.Error != "" {
+		t.Fatalf("expected no error, got: %s", detail.Error)
+	}
+	if len(detail.TailscaleIPs) != 1 || detail.TailscaleIPs[0] != "100.64.1.5" {
+		t.Errorf("TailscaleIPs: got %v, want [100.64.1.5]", detail.TailscaleIPs)
+	}
+	if detail.PeerCount != 2 {
+		t.Errorf("PeerCount: got %d, want 2", detail.PeerCount)
+	}
+	if detail.OnlinePeers != 1 {
+		t.Errorf("OnlinePeers: got %d, want 1", detail.OnlinePeers)
+	}
+	if detail.FetchedAt.IsZero() {
+		t.Error("FetchedAt should not be zero")
+	}
+}
+
+func TestDetailEndpoint_DaemonStarting(t *testing.T) {
+	// GetStatus returns (nil, nil) — daemon is starting up
+	cfgPath := writeTestConfig(t, "alpha")
+	md := newMockDaemon()
+	md.statusResult = nil
+	md.statusErr = nil
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	detail, err := client.TailnetDetail("alpha")
+	if err != nil {
+		t.Fatalf("TailnetDetail: %v", err)
+	}
+	if detail.Error == "" {
+		t.Error("expected Error to be set when status is nil")
+	}
+	if detail.TailscaleIPs != nil {
+		t.Error("expected nil TailscaleIPs when daemon starting")
+	}
+}
+
+func TestDetailEndpoint_DaemonError(t *testing.T) {
+	cfgPath := writeTestConfig(t, "alpha")
+	md := newMockDaemon()
+	md.statusErr = fmt.Errorf("context deadline exceeded")
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	detail, err := client.TailnetDetail("alpha")
+	if err != nil {
+		t.Fatalf("TailnetDetail: %v", err)
+	}
+	if detail.Error == "" {
+		t.Error("expected Error to be set on daemon error")
+	}
+}
+
+func TestDetailEndpoint_UnknownID(t *testing.T) {
+	cfgPath := writeTestConfig(t, "alpha")
+	r := newTestReconciler(cfgPath)
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	_, err := client.TailnetDetail("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unknown tailnet ID")
+	}
+}
+
+func TestDetailEndpoint_NoPeers(t *testing.T) {
+	cfgPath := writeTestConfig(t, "alpha")
+	md := newMockDaemon()
+	md.statusResult = &daemon.TailscaleStatus{
+		Self: daemon.StatusNode{TailscaleIPs: []string{"100.64.1.1"}},
+		Peer: map[string]daemon.StatusNode{},
+	}
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	detail, err := client.TailnetDetail("alpha")
+	if err != nil {
+		t.Fatalf("TailnetDetail: %v", err)
+	}
+	if detail.PeerCount != 0 || detail.OnlinePeers != 0 {
+		t.Errorf("expected 0 peers, got count=%d online=%d", detail.PeerCount, detail.OnlinePeers)
+	}
+}
+
+// Verify that the existing tests still compile and link correctly after mock changes.
+// The mockDaemon.statusResult defaults to nil (daemon starting), which is the
+// same behavior as the previous hard-coded (nil, nil) return.
+func TestDetailEndpoint_BackwardsCompatMock(t *testing.T) {
+	cfgPath := writeTestConfig(t, "alpha")
+	r := newTestReconciler(cfgPath) // uses newMockDaemon() with nil statusResult
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	detail, err := client.TailnetDetail("alpha")
+	if err != nil {
+		t.Fatalf("TailnetDetail: %v", err)
+	}
+	// nil statusResult → "daemon starting" error in response
+	if detail.Error == "" {
+		t.Error("expected Error set for default mock (nil status)")
+	}
 }
