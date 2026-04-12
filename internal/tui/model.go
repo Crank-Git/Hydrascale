@@ -285,6 +285,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.status != nil && m.cursor >= len(m.status.Desired) {
 				m.cursor = max(0, len(m.status.Desired)-1)
 			}
+			// Prune expansion state for tailnets no longer in config so that
+			// deleted tailnets don't inflate the height-floor calculation or
+			// leak memory across long-running TUI sessions.
+			if m.status != nil {
+				for id := range m.expanded {
+					if _, ok := m.status.Desired[id]; !ok {
+						delete(m.expanded, id)
+						delete(m.detailCache, id)
+						delete(m.fetching, id)
+					}
+				}
+			}
 		} else {
 			m.err = msg.err
 		}

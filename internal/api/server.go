@@ -375,8 +375,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 // handleTailnetDetail serves GET /api/tailnet/{id}/detail.
 // It fetches live TailscaleStatus from inside the tailnet's network namespace.
-// Always returns HTTP 200; sets the Error field in the response body on failure
-// so the TUI can render the error inline without needing to handle non-200 status.
+// Returns HTTP 404 for unknown tailnet IDs.
+// Returns HTTP 200 with a non-empty Error field for daemon failures (unreachable,
+// starting up) so the TUI can render the error inline without treating it as a
+// transport error.
 func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -395,7 +397,9 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Error = err.Error()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+			log.Printf("handleTailnetDetail: encode error response: %v", encErr)
+		}
 		return
 	}
 
@@ -403,7 +407,9 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 		// Daemon exists but returned no status — still starting up.
 		resp.Error = "daemon starting, status unavailable"
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+			log.Printf("handleTailnetDetail: encode nil-status response: %v", encErr)
+		}
 		return
 	}
 
@@ -418,6 +424,8 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+		log.Printf("handleTailnetDetail: encode success response: %v", encErr)
+	}
 }
 

@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Client connects to the Hydrascale API over a Unix socket.
@@ -26,7 +28,9 @@ func NewClient(socketPath string) *Client {
 	}
 	return &Client{
 		socketPath: socketPath,
-		httpClient: &http.Client{Transport: transport},
+		// 10-second timeout bounds all requests, including fetchDetail, so a
+		// hung server cannot lock m.fetching[id] permanently in the TUI.
+		httpClient: &http.Client{Transport: transport, Timeout: 10 * time.Second},
 	}
 }
 
@@ -182,7 +186,8 @@ func (c *Client) TailnetDetail(id string) (*TailnetDetailResponse, error) {
 		return nil, fmt.Errorf("detail returned HTTP %d", resp.StatusCode)
 	}
 	var result TailnetDetailResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	// Cap at 1 MiB to protect against a misbehaving server sending unbounded output.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode detail response: %w", err)
 	}
 	return &result, nil
