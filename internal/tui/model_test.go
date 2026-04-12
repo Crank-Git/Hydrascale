@@ -153,6 +153,8 @@ func TestView_SuppressExpansion(t *testing.T) {
 		TailscaleIPs: []string{"100.64.0.1"},
 		FetchedAt:    time.Now(),
 	}
+	// width must be non-zero or View returns early ("Loading...") before suppressExpansion runs.
+	m.width = 80
 	// A height of 5 is far too small to render the detail rows alongside events.
 	m.height = 5
 
