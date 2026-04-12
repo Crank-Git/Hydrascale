@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -169,7 +170,7 @@ func (c *Client) UpdateDNS(mode, bindAddress string) (*ReconcileResponse, error)
 // TailnetDetail calls GET /api/tailnet/{id}/detail and returns live Tailscale status.
 // A non-nil response with a non-empty Error field means the daemon was unreachable.
 func (c *Client) TailnetDetail(id string) (*TailnetDetailResponse, error) {
-	resp, err := c.httpClient.Get("http://localhost/api/tailnet/" + id + "/detail")
+	resp, err := c.httpClient.Get("http://localhost/api/tailnet/" + url.PathEscape(id) + "/detail")
 	if err != nil {
 		return nil, fmt.Errorf("detail request failed: %w", err)
 	}

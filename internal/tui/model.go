@@ -108,9 +108,12 @@ type model struct {
 	statusMsgTime time.Time
 
 	// Inline expansion: maps tailnet ID → expanded state and cached detail data.
-	// Both maps must be initialized in initialModel() — writing to nil maps panics.
+	// All maps must be initialized in initialModel() — writing to nil maps panics.
 	expanded    map[string]bool
 	detailCache map[string]*api.TailnetDetailResponse
+	// fetching tracks in-flight fetchDetail commands to prevent duplicate requests
+	// and avoid stale responses overwriting newer cache entries on out-of-order returns.
+	fetching map[string]bool
 }
 
 func newAddForm() addForm {
@@ -156,6 +159,7 @@ func initialModel(socketPath string) model {
 		mode:        modeNormal,
 		expanded:    make(map[string]bool),
 		detailCache: make(map[string]*api.TailnetDetailResponse),
+		fetching:    make(map[string]bool),
 	}
 }
 
@@ -321,6 +325,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case detailMsg:
+		delete(m.fetching, msg.id)
 		if msg.err != nil {
 			m.detailCache[msg.id] = &api.TailnetDetailResponse{Error: msg.err.Error()}
 		} else {
@@ -410,7 +415,11 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.expanded[id] = false
 			} else {
 				m.expanded[id] = true
-				return m, fetchDetail(m.client, id)
+				// Only fire a fetch if one isn't already in-flight for this tailnet.
+				if !m.fetching[id] {
+					m.fetching[id] = true
+					return m, fetchDetail(m.client, id)
+				}
 			}
 		}
 	}
@@ -855,8 +864,15 @@ func (m model) overlayConfirm(behind string) string {
 	return m.overlayOnView(behind, box)
 }
 
+// detailLinesFull is the number of lines renderDetailLines returns for a fully populated
+// detail response. Must stay in sync with the slice length returned by renderDetailLines.
+const detailLinesFull = 6
+
+// detailStaleAfter is the age at which a cached detail response gets a staleness warning badge.
+const detailStaleAfter = 30 * time.Second
+
 // detailLineCount returns how many lines the inline expansion for id will occupy.
-// 0 if not expanded, 1 for loading/error, 6 for a fully populated response.
+// 0 if not expanded, 1 for loading/error, detailLinesFull for a fully populated response.
 func (m model) detailLineCount(id string) int {
 	if !m.expanded[id] {
 		return 0
@@ -865,7 +881,7 @@ func (m model) detailLineCount(id string) int {
 	if detail == nil || detail.Error != "" {
 		return 1
 	}
-	return 6
+	return detailLinesFull
 }
 
 // renderDetailLines returns the rendered lines for an expanded tailnet row.
@@ -922,7 +938,7 @@ func (m model) renderDetailLines(id string) []string {
 	// Staleness badge
 	age := time.Since(detail.FetchedAt).Truncate(time.Second)
 	updatedStr := age.String() + " ago"
-	if age > 30*time.Second {
+	if age > detailStaleAfter {
 		updatedStr = warnStyle.Render(updatedStr + " ⚠")
 	}
 

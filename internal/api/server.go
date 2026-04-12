@@ -3,12 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"syscall"
 	"time"
 
@@ -384,12 +384,12 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := TailnetDetailResponse{FetchedAt: time.Now()}
+	var resp TailnetDetailResponse
 
-	status, err := s.reconciler.GetTailscaleStatus(id)
+	status, err := s.reconciler.GetTailscaleStatus(r.Context(), id)
 	if err != nil {
 		// Distinguish "not found" from other errors for proper HTTP status.
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, reconciler.ErrTailnetNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
@@ -407,6 +407,8 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// FetchedAt stamps when the live data was actually obtained (after the subprocess).
+	resp.FetchedAt = time.Now()
 	resp.TailscaleIPs = status.Self.TailscaleIPs
 	resp.PeerCount = len(status.Peer)
 	for _, peer := range status.Peer {

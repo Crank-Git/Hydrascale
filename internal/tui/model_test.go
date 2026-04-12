@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,9 @@ func TestInitialModel_MapsInitialized(t *testing.T) {
 	}
 	if m.detailCache == nil {
 		t.Fatal("detailCache map is nil — writing to it will panic")
+	}
+	if m.fetching == nil {
+		t.Fatal("fetching map is nil — writing to it will panic")
 	}
 }
 
@@ -135,6 +139,50 @@ func TestDetailLineCount(t *testing.T) {
 	}
 	if n := m.detailLineCount("personal"); n != 6 {
 		t.Errorf("expanded, populated: want 6, got %d", n)
+	}
+}
+
+// TestView_SuppressExpansion verifies that when the terminal is too small to show
+// the inline detail panel, the "terminal too small" note is rendered instead.
+func TestView_SuppressExpansion(t *testing.T) {
+	m := initialModel("/tmp/test.sock")
+	m.status = minimalStatus("personal")
+	m.cursor = 0
+	m.expanded["personal"] = true
+	m.detailCache["personal"] = &api.TailnetDetailResponse{
+		TailscaleIPs: []string{"100.64.0.1"},
+		FetchedAt:    time.Now(),
+	}
+	// A height of 5 is far too small to render the detail rows alongside events.
+	m.height = 5
+
+	view := m.View()
+	if !strings.Contains(view, "terminal too small") {
+		t.Errorf("expected 'terminal too small' note in View output when height=%d, got:\n%s", m.height, view)
+	}
+}
+
+// TestRenderDetailLines_StalenessBadge verifies that when FetchedAt is older
+// than detailStaleAfter, the staleness warning (⚠) appears in the rendered lines.
+func TestRenderDetailLines_StalenessBadge(t *testing.T) {
+	m := initialModel("/tmp/test.sock")
+	m.expanded["personal"] = true
+	// FetchedAt more than 30 seconds ago → stale
+	m.detailCache["personal"] = &api.TailnetDetailResponse{
+		TailscaleIPs: []string{"100.64.0.1"},
+		FetchedAt:    time.Now().Add(-(detailStaleAfter + 5*time.Second)),
+	}
+
+	lines := m.renderDetailLines("personal")
+	var found bool
+	for _, line := range lines {
+		if strings.Contains(line, "⚠") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected staleness ⚠ badge in renderDetailLines output, got: %v", lines)
 	}
 }
 

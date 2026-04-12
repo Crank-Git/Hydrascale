@@ -102,7 +102,7 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 
 func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error { return nil }
 
-func (m *mockDaemon) GetStatus(nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
+func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.statusResult, m.statusErr
@@ -514,6 +514,32 @@ func TestDetailEndpoint_NoPeers(t *testing.T) {
 	}
 	if detail.PeerCount != 0 || detail.OnlinePeers != 0 {
 		t.Errorf("expected 0 peers, got count=%d online=%d", detail.PeerCount, detail.OnlinePeers)
+	}
+}
+
+// TestTailnetDetailClient_HTTP500 verifies that Client.TailnetDetail returns an
+// error when the server responds with a non-200, non-404 status code.
+func TestTailnetDetailClient_HTTP500(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "fake-api.sock")
+
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/tailnet/alpha/detail", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	})
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(ln) //nolint:errcheck
+	defer srv.Close()
+
+	client := NewClient(socketPath)
+	_, err = client.TailnetDetail("alpha")
+	if err == nil {
+		t.Fatal("expected error from TailnetDetail on HTTP 500, got nil")
 	}
 }
 

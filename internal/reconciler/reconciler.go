@@ -6,6 +6,7 @@ package reconciler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -50,6 +51,9 @@ type Action struct {
 func (a Action) String() string {
 	return fmt.Sprintf("%s %s (%s)", a.Type, a.TailnetID, a.NsName)
 }
+
+// ErrTailnetNotFound is returned by GetTailscaleStatus when the tailnet ID is not in config.
+var ErrTailnetNotFound = errors.New("tailnet not found")
 
 // TailnetState represents the observed state of a single tailnet.
 type TailnetState struct {
@@ -295,7 +299,7 @@ func (r *Reconciler) executeAction(action Action) error {
 		index := namespaces.VethIndex(nsName)
 		// Ensure namespace-side iptables are set up (idempotent — safe every cycle)
 		namespaces.SetupHostAccess(nsName, index)
-		status, err := r.dm.GetStatus(nsName, action.TailnetID)
+		status, err := r.dm.GetStatus(context.Background(), nsName, action.TailnetID)
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
 		}
@@ -371,18 +375,18 @@ func (r *Reconciler) ConfigPath() string {
 }
 
 // GetTailscaleStatus fetches live Tailscale status for a single tailnet by running
-// tailscale status --json inside its network namespace. Returns an error if the
-// tailnet ID is not found in config or if the daemon call fails.
-func (r *Reconciler) GetTailscaleStatus(id string) (*daemon.TailscaleStatus, error) {
+// tailscale status --json inside its network namespace. Returns ErrTailnetNotFound
+// (wrapped) if the tailnet ID is not in config; other errors on daemon failure.
+func (r *Reconciler) GetTailscaleStatus(ctx context.Context, id string) (*daemon.TailscaleStatus, error) {
 	desired, err := r.DesiredState()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load desired state: %w", err)
 	}
 	if _, ok := desired[id]; !ok {
-		return nil, fmt.Errorf("tailnet %s not found", id)
+		return nil, fmt.Errorf("tailnet %s: %w", id, ErrTailnetNotFound)
 	}
 	nsName := r.ns.GetName(id)
-	return r.dm.GetStatus(nsName, id)
+	return r.dm.GetStatus(ctx, nsName, id)
 }
 
 // StopDaemon stops a running tailnet daemon without removing it from config.
