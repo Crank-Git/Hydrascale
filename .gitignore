@@ -20,3 +20,4 @@ TODOS.md
 test-config.yaml
 config.yaml
 .hydrascale.lock
+.worktrees/

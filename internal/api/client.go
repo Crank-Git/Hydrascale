@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 )
 
 // Client connects to the Hydrascale API over a Unix socket.
@@ -25,7 +28,9 @@ func NewClient(socketPath string) *Client {
 	}
 	return &Client{
 		socketPath: socketPath,
-		httpClient: &http.Client{Transport: transport},
+		// 10-second timeout bounds all requests, including fetchDetail, so a
+		// hung server cannot lock m.fetching[id] permanently in the TUI.
+		httpClient: &http.Client{Transport: transport, Timeout: 10 * time.Second},
 	}
 }
 
@@ -162,6 +167,28 @@ func (c *Client) UpdateDNS(mode, bindAddress string) (*ReconcileResponse, error)
 	var result ReconcileResponse
 	if err := c.postJSON("/api/config/dns", req, &result); err != nil {
 		return nil, err
+	}
+	return &result, nil
+}
+
+// TailnetDetail calls GET /api/tailnet/{id}/detail and returns live Tailscale status.
+// A non-nil response with a non-empty Error field means the daemon was unreachable.
+func (c *Client) TailnetDetail(id string) (*TailnetDetailResponse, error) {
+	resp, err := c.httpClient.Get("http://localhost/api/tailnet/" + url.PathEscape(id) + "/detail")
+	if err != nil {
+		return nil, fmt.Errorf("detail request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("tailnet %s not found", id)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("detail returned HTTP %d", resp.StatusCode)
+	}
+	var result TailnetDetailResponse
+	// Cap at 1 MiB to protect against a misbehaving server sending unbounded output.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode detail response: %w", err)
 	}
 	return &result, nil
 }

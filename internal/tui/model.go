@@ -54,6 +54,13 @@ type mutationMsg struct {
 }
 type clearStatusMsg struct{}
 
+// detailMsg carries the result of a fetchDetail command.
+type detailMsg struct {
+	id     string
+	detail *api.TailnetDetailResponse
+	err    error
+}
+
 // ---- sub-forms ----
 
 type addForm struct {
@@ -99,6 +106,14 @@ type model struct {
 	// Transient status message
 	statusMsg     string
 	statusMsgTime time.Time
+
+	// Inline expansion: maps tailnet ID → expanded state and cached detail data.
+	// All maps must be initialized in initialModel() — writing to nil maps panics.
+	expanded    map[string]bool
+	detailCache map[string]*api.TailnetDetailResponse
+	// fetching tracks in-flight fetchDetail commands to prevent duplicate requests
+	// and avoid stale responses overwriting newer cache entries on out-of-order returns.
+	fetching map[string]bool
 }
 
 func newAddForm() addForm {
@@ -142,6 +157,9 @@ func initialModel(socketPath string) model {
 		client:      api.NewClient(socketPath),
 		activePanel: panelStatus,
 		mode:        modeNormal,
+		expanded:    make(map[string]bool),
+		detailCache: make(map[string]*api.TailnetDetailResponse),
+		fetching:    make(map[string]bool),
 	}
 }
 
@@ -238,6 +256,13 @@ func clearStatusAfter(d time.Duration) tea.Cmd {
 	})
 }
 
+func fetchDetail(c *api.Client, id string) tea.Cmd {
+	return func() tea.Msg {
+		detail, err := c.TailnetDetail(id)
+		return detailMsg{id: id, detail: detail, err: err}
+	}
+}
+
 // ---- update ----
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -249,7 +274,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		return m, tea.Batch(tickCmd(), fetchStatus(m.client), fetchEvents(m.client))
+		cmds := []tea.Cmd{tickCmd(), fetchStatus(m.client), fetchEvents(m.client)}
+		// Auto-refresh detail for expanded tailnets whose cache has gone stale.
+		for id, exp := range m.expanded {
+			if exp && !m.fetching[id] {
+				if cached := m.detailCache[id]; cached != nil && cached.Error == "" &&
+					time.Since(cached.FetchedAt) > detailStaleAfter {
+					m.fetching[id] = true
+					cmds = append(cmds, fetchDetail(m.client, id))
+				}
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case statusMsg:
 		if msg.err == nil {
@@ -259,6 +295,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// clamp cursor
 			if m.status != nil && m.cursor >= len(m.status.Desired) {
 				m.cursor = max(0, len(m.status.Desired)-1)
+			}
+			// Prune expansion state for tailnets no longer in config so that
+			// deleted tailnets don't inflate the height-floor calculation or
+			// leak memory across long-running TUI sessions.
+			if m.status != nil {
+				for id := range m.expanded {
+					if _, ok := m.status.Desired[id]; !ok {
+						delete(m.expanded, id)
+						delete(m.detailCache, id)
+						delete(m.fetching, id)
+					}
+				}
 			}
 		} else {
 			m.err = msg.err
@@ -297,6 +345,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clearStatusMsg:
 		m.statusMsg = ""
+		return m, nil
+
+	case detailMsg:
+		delete(m.fetching, msg.id)
+		if msg.err != nil {
+			m.detailCache[msg.id] = &api.TailnetDetailResponse{Error: msg.err.Error()}
+		} else {
+			m.detailCache[msg.id] = msg.detail
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -374,6 +431,20 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.dnsForm = newDNSForm()
 		m.mode = modeDNS
+
+	case "enter":
+		if id := m.selectedID(); id != "" {
+			if m.expanded[id] {
+				m.expanded[id] = false
+			} else {
+				m.expanded[id] = true
+				// Only fire a fetch if one isn't already in-flight for this tailnet.
+				if !m.fetching[id] {
+					m.fetching[id] = true
+					return m, fetchDetail(m.client, id)
+				}
+			}
+		}
 	}
 
 	return m, nil
@@ -519,6 +590,35 @@ func (m model) View() string {
 	header.WriteString(fmt.Sprintf(" %s  %s\n", title, connStatus))
 	header.WriteString(strings.Repeat("─", lineWidth) + "\n")
 
+	// Status message (fixed — 0 or 1 line). Computed early for height floor check.
+	var statusLine string
+	statusLines := 0
+	if m.statusMsg != "" {
+		statusLine = " " + successStyle.Render(m.statusMsg) + "\n"
+		statusLines = 1
+	}
+
+	// Height floor check: compute how many extra lines expansion would add.
+	// Fixed overhead (without tailnet rows): header(2) + tailnet-hdr(2) + sep(2) + events-hdr(1) + sep(2) + status + footer(1) = 10+status
+	const fixedOverhead = 2 + 2 + 2 + 1 + 2 + 1
+	baseTailnetRows := 0
+	if m.status != nil && len(m.status.Desired) > 0 {
+		baseTailnetRows = len(m.status.Desired)
+	} else {
+		baseTailnetRows = 1
+	}
+	extraDetailRows := 0
+	anyExpanded := false
+	for id, exp := range m.expanded {
+		if exp {
+			anyExpanded = true
+			extraDetailRows += m.detailLineCount(id)
+		}
+	}
+	totalTailnetRows := baseTailnetRows + extraDetailRows
+	fixedCheck := fixedOverhead + totalTailnetRows + statusLines
+	suppressExpansion := m.height > 0 && (m.height-fixedCheck) < 3
+
 	// Tailnets section (fixed)
 	var tailnets strings.Builder
 	tailnets.WriteString(" " + headerStyle.Render("Tailnets") + "\n")
@@ -533,8 +633,8 @@ func (m model) View() string {
 	tailnetRows := 0
 	if m.status != nil && len(m.status.Desired) > 0 {
 		keys := sortedTailnetIDs(m.status)
-		tailnetRows = len(keys)
 		for i, id := range keys {
+			tailnetRows++
 			selected := i == m.cursor
 
 			nsName := namespaces.GetNamespaceName(id)
@@ -568,6 +668,17 @@ func (m model) View() string {
 			} else {
 				tailnets.WriteString(renderRow([]string{id, nsName, daemonStr, stateStr, errStr}, colWidths, false, false) + "\n")
 			}
+
+			if m.expanded[id] && !suppressExpansion {
+				for _, dl := range m.renderDetailLines(id) {
+					tailnets.WriteString(dl + "\n")
+					tailnetRows++
+				}
+			}
+		}
+		if suppressExpansion && anyExpanded {
+			tailnets.WriteString("  " + dimStyle.Render("(terminal too small to show details — resize to expand)") + "\n")
+			tailnetRows++
 		}
 	} else if m.status != nil {
 		tailnets.WriteString("  " + dimStyle.Render("No tailnets configured") + "\n")
@@ -580,16 +691,8 @@ func (m model) View() string {
 	tailnets.WriteString("\n" + strings.Repeat("─", lineWidth) + "\n")
 
 	// Footer (fixed — always visible)
-	footerText := "a add  d delete  c connect  x disconnect  r reconcile  n dns  tab switch  ↑↓/jk select  q quit"
+	footerText := "a add  d delete  c connect  x disconnect  r reconcile  n dns  tab switch  ↑↓/jk select  enter expand  q quit"
 	footerLine := statusBar.Render(footerText)
-
-	// Status message (fixed — 0 or 1 line)
-	var statusLine string
-	statusLines := 0
-	if m.statusMsg != "" {
-		statusLine = " " + successStyle.Render(m.statusMsg) + "\n"
-		statusLines = 1
-	}
 
 	// Calculate available height for events section.
 	// Fixed lines: header(2) + tailnet header(2) + tailnet rows + separator(2) + events header(1) + separator(2) + status(0-1) + footer(1)
@@ -782,6 +885,94 @@ func (m model) overlayConfirm(behind string) string {
 	hint := dimStyle.Render("(y/n)")
 	box := confirmStyle.Render(prompt + "  " + hint)
 	return m.overlayOnView(behind, box)
+}
+
+// detailLinesFull is the number of lines renderDetailLines returns for a fully populated
+// detail response. Must stay in sync with the slice length returned by renderDetailLines.
+const detailLinesFull = 6
+
+// detailStaleAfter is the age at which a cached detail response gets a staleness warning badge.
+const detailStaleAfter = 30 * time.Second
+
+// detailLineCount returns how many lines the inline expansion for id will occupy.
+// 0 if not expanded, 1 for loading/error, detailLinesFull for a fully populated response.
+func (m model) detailLineCount(id string) int {
+	if !m.expanded[id] {
+		return 0
+	}
+	detail := m.detailCache[id]
+	if detail == nil || detail.Error != "" {
+		return 1
+	}
+	return detailLinesFull
+}
+
+// renderDetailLines returns the rendered lines for an expanded tailnet row.
+// Called only when m.expanded[id] is true.
+func (m model) renderDetailLines(id string) []string {
+	detail := m.detailCache[id]
+	pfx := "  " + dimStyle.Render("┄") + " "
+
+	if detail == nil {
+		return []string{pfx + dimStyle.Render("Loading...")}
+	}
+	if detail.Error != "" {
+		return []string{pfx + errorStyle.Render("Error: "+detail.Error)}
+	}
+
+	// IPs
+	ipStr := dimStyle.Render("none")
+	if len(detail.TailscaleIPs) > 0 {
+		ipStr = strings.Join(detail.TailscaleIPs, ", ")
+	}
+
+	// Peers
+	peersStr := fmt.Sprintf("%d online / %d total", detail.OnlinePeers, detail.PeerCount)
+
+	// Exit node (from desired config)
+	exitStr := dimStyle.Render("none")
+	if m.status != nil {
+		if desired, ok := m.status.Desired[id]; ok && desired.ExitNode != "" {
+			exitStr = desired.ExitNode
+		}
+	}
+
+	// Routes (from actual state)
+	routesStr := dimStyle.Render("none")
+	if m.status != nil {
+		if actual, ok := m.status.Actual[id]; ok && actual != nil && len(actual.Routes) > 0 {
+			parts := make([]string, len(actual.Routes))
+			for i, r := range actual.Routes {
+				parts[i] = r.Network
+			}
+			joined := strings.Join(parts, ", ")
+			routesStr = truncate(joined, 40)
+		}
+	}
+
+	// Host access (from desired config)
+	hostStr := dimStyle.Render("off")
+	if m.status != nil {
+		if desired, ok := m.status.Desired[id]; ok && desired.HostAccess != nil && *desired.HostAccess {
+			hostStr = healthyStyle.Render("on")
+		}
+	}
+
+	// Staleness badge
+	age := time.Since(detail.FetchedAt).Truncate(time.Second)
+	updatedStr := age.String() + " ago"
+	if age > detailStaleAfter {
+		updatedStr = warnStyle.Render(updatedStr + " ⚠")
+	}
+
+	return []string{
+		pfx + dimStyle.Render("IP:      ") + ipStr,
+		pfx + dimStyle.Render("Peers:   ") + peersStr,
+		pfx + dimStyle.Render("Exit:    ") + exitStr,
+		pfx + dimStyle.Render("Routes:  ") + routesStr,
+		pfx + dimStyle.Render("Access:  ") + "host-access " + hostStr,
+		pfx + dimStyle.Render("Updated: ") + updatedStr,
+	}
 }
 
 // truncate truncates s to maxLen bytes (not rune-aware, kept for short error strings).

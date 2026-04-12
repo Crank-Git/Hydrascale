@@ -39,7 +39,7 @@ type Manager interface {
 	CheckHealth(nsName, tailnetID string) (bool, error)
 	GetSocketPath(tailnetID string) string
 	AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error
-	GetStatus(nsName, tailnetID string) (*TailscaleStatus, error)
+	GetStatus(ctx context.Context, nsName, tailnetID string) (*TailscaleStatus, error)
 }
 
 // RealManager implements Manager using real system calls.
@@ -70,16 +70,17 @@ func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL str
 	return AuthorizeDaemon(tailnetID, nsName, authKey, controlURL)
 }
 
-func (m *RealManager) GetStatus(nsName, tailnetID string) (*TailscaleStatus, error) {
-	return GetStatus(nsName, tailnetID)
+func (m *RealManager) GetStatus(ctx context.Context, nsName, tailnetID string) (*TailscaleStatus, error) {
+	return GetStatus(ctx, nsName, tailnetID)
 }
 
 // GetStatus returns parsed tailscale status for a tailnet.
-func GetStatus(namespaceName string, tailnetID string) (*TailscaleStatus, error) {
+// The provided context is used as the parent; a 5-second hard timeout is applied on top.
+func GetStatus(ctx context.Context, namespaceName string, tailnetID string) (*TailscaleStatus, error) {
 	stateDir := filepath.Join(DefaultStateDir, tailnetID)
 	socketPath := filepath.Join(stateDir, "tailscaled.sock")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", namespaceName,

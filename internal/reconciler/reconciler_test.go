@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,11 +74,13 @@ func (m *mockNS) TeardownVeth(nsName string) error {
 }
 
 type mockDaemon struct {
-	mu        sync.Mutex
-	healthy   map[string]bool // tailnetID -> healthy
-	startErr  map[string]error
-	stopErr   error
-	healthErr error
+	mu           sync.Mutex
+	healthy      map[string]bool // tailnetID -> healthy
+	startErr     map[string]error
+	stopErr      error
+	healthErr    error
+	statusResult *daemon.TailscaleStatus // returned by GetStatus; nil = daemon starting
+	statusErr    error                   // returned by GetStatus; non-nil = error
 }
 
 func newMockDaemon() *mockDaemon {
@@ -124,8 +127,10 @@ func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL stri
 	return nil
 }
 
-func (m *mockDaemon) GetStatus(nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
-	return nil, nil
+func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.statusResult, m.statusErr
 }
 
 type mockRouting struct {
@@ -624,6 +629,52 @@ func TestDiff_ControlURL(t *testing.T) {
 	}
 	if authAction.ControlURL != "https://headscale.example.com" {
 		t.Errorf("ControlURL = %q, want %q", authAction.ControlURL, "https://headscale.example.com")
+	}
+}
+
+// TestGetTailscaleStatus_HappyPath verifies that GetTailscaleStatus returns the
+// daemon's TailscaleStatus when the tailnet ID is present in config.
+func TestGetTailscaleStatus_HappyPath(t *testing.T) {
+	cfgPath := writeTestConfig(t, "myriad")
+	dm := newMockDaemon()
+	dm.statusResult = &daemon.TailscaleStatus{
+		Self: daemon.StatusNode{TailscaleIPs: []string{"100.64.0.1"}},
+	}
+	r := newTestReconciler(cfgPath, newMockNS(), dm, newMockRouting())
+	status, err := r.GetTailscaleStatus(context.Background(), "myriad")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status == nil {
+		t.Fatal("expected non-nil status")
+	}
+	if len(status.Self.TailscaleIPs) == 0 || status.Self.TailscaleIPs[0] != "100.64.0.1" {
+		t.Errorf("TailscaleIPs = %v, want [100.64.0.1]", status.Self.TailscaleIPs)
+	}
+}
+
+// TestGetTailscaleStatus_DesiredStateFailure verifies that GetTailscaleStatus
+// propagates errors from DesiredState() (e.g., missing or unreadable config).
+func TestGetTailscaleStatus_DesiredStateFailure(t *testing.T) {
+	// Point the reconciler at a path that doesn't exist so DesiredState fails.
+	r := newTestReconciler("/nonexistent/path/config.yaml", newMockNS(), newMockDaemon(), newMockRouting())
+	_, err := r.GetTailscaleStatus(context.Background(), "anytailnet")
+	if err == nil {
+		t.Fatal("expected error from GetTailscaleStatus when config is missing, got nil")
+	}
+}
+
+// TestGetTailscaleStatus_NotFound verifies that GetTailscaleStatus returns
+// ErrTailnetNotFound (wrapped) when the requested ID is not in config.
+func TestGetTailscaleStatus_NotFound(t *testing.T) {
+	cfgPath := writeTestConfig(t, "other")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	_, err := r.GetTailscaleStatus(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrTailnetNotFound) {
+		t.Errorf("expected errors.Is(err, ErrTailnetNotFound) but got: %v", err)
 	}
 }
 
