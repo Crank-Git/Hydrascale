@@ -274,7 +274,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		return m, tea.Batch(tickCmd(), fetchStatus(m.client), fetchEvents(m.client))
+		cmds := []tea.Cmd{tickCmd(), fetchStatus(m.client), fetchEvents(m.client)}
+		// Auto-refresh detail for expanded tailnets whose cache has gone stale.
+		for id, exp := range m.expanded {
+			if exp && !m.fetching[id] {
+				if cached := m.detailCache[id]; cached != nil && cached.Error == "" &&
+					time.Since(cached.FetchedAt) > detailStaleAfter {
+					m.fetching[id] = true
+					cmds = append(cmds, fetchDetail(m.client, id))
+				}
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case statusMsg:
 		if msg.err == nil {
