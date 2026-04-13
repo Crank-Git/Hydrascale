@@ -41,7 +41,7 @@ func TestSync_FullFlow(t *testing.T) {
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	status := makeTestStatus()
 
-	m.Sync("havoc", status, "10.0.0.1", "veth0")
+	m.Sync("havoc", status, "10.0.0.1", "veth0", "ns-havoc")
 
 	got, err := os.ReadFile(hostsPath)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestSync_NilStatus(t *testing.T) {
 	info1, _ := os.Stat(hostsPath)
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
-	m.Sync("havoc", nil, "10.0.0.1", "veth0")
+	m.Sync("havoc", nil, "10.0.0.1", "veth0", "ns-havoc")
 
 	info2, _ := os.Stat(hostsPath)
 	if info2.ModTime() != info1.ModTime() {
@@ -105,7 +105,7 @@ func TestSync_PartialFailure(t *testing.T) {
 	status := makeTestStatus()
 
 	// Routes will fail (no root), but should not block DNS update
-	m.Sync("havoc", status, "10.0.0.1", "veth0")
+	m.Sync("havoc", status, "10.0.0.1", "veth0", "ns-havoc")
 
 	got, err := os.ReadFile(hostsPath)
 	if err != nil {

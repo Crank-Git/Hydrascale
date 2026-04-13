@@ -313,7 +313,7 @@ func (r *Reconciler) executeAction(action Action) error {
 			return fmt.Errorf("host-access: failed to get veth IPs: %w", err)
 		}
 		vethHost, _ := namespaces.VethNames(nsName)
-		r.ha.Sync(action.TailnetID, status, vethGW, vethHost)
+		r.ha.Sync(action.TailnetID, status, vethGW, vethHost, nsName)
 		return nil
 	default:
 		return fmt.Errorf("unknown action type: %s", action.Type)

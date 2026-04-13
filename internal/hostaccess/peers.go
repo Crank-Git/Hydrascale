@@ -20,18 +20,21 @@ type TailnetPeers struct {
 	Peers          []Peer
 	VethGateway    string
 	VethHost       string
+	NsName         string
 }
 
-func ParsePeers(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHost string) TailnetPeers {
+func ParsePeers(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHost, nsName string) TailnetPeers {
 	result := TailnetPeers{
 		TailnetID:   tailnetID,
 		VethGateway: vethGW,
 		VethHost:    vethHost,
+		NsName:      nsName,
 	}
 	if status == nil {
 		return result
 	}
 	result.MagicDNSSuffix = status.MagicDNSSuffix
+
 	for _, node := range status.Peer {
 		// Sanitize hostname: lowercase, replace spaces with dashes
 		hostname := strings.ToLower(node.HostName)

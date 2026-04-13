@@ -40,8 +40,8 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
 }
 
 // Sync updates host routes and DNS for a tailnet's peers.
-func (m *Manager) Sync(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHost string) {
-	peers := ParsePeers(tailnetID, status, vethGW, vethHost)
+func (m *Manager) Sync(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHost, nsName string) {
+	peers := ParsePeers(tailnetID, status, vethGW, vethHost, nsName)
 
 	if len(peers.Peers) == 0 && status == nil {
 		return
