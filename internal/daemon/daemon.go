@@ -246,7 +246,10 @@ func CheckHealth(namespaceName string, tailnetID string) (bool, error) {
 // buildTailscaleUpArgs constructs the argument list for `tailscale up`.
 // When controlURL is non-empty, --login-server is appended (for Headscale).
 func buildTailscaleUpArgs(socketPath, controlURL string) []string {
-	args := []string{"tailscale", "--socket=" + socketPath, "up", "--accept-dns=false"}
+	// --accept-dns=true is required so tailscaled enables its MagicDNS proxy
+	// at 100.100.100.100:53 inside the namespace. The hostaccess forwarder
+	// routes per-tailnet queries to that endpoint via DNAT on the veth.
+	args := []string{"tailscale", "--socket=" + socketPath, "up", "--accept-dns=true"}
 	if controlURL != "" {
 		args = append(args, "--login-server="+controlURL)
 	}

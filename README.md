@@ -128,7 +128,7 @@ tailnets:
 
 ### How It Works
 
-When host access is enabled for a tailnet, Hydrascale does three things each reconciliation cycle:
+When host access is enabled for a tailnet, Hydrascale does four things each reconciliation cycle:
 
 1. **Host routes** -- adds routes on the host for each peer's Tailscale IP (both IPv4 and IPv6) via the namespace's veth pair. This lets the kernel route packets to the right namespace.
 
@@ -136,7 +136,11 @@ When host access is enabled for a tailnet, Hydrascale does three things each rec
 
 3. **DNS entries** -- writes `/etc/hosts` entries so peers are resolvable by name from the host.
 
+4. **Per-tailnet MagicDNS routes** -- registers each tailnet's MagicDNS suffix (e.g. `taildf854a.ts.net`) with Hydrascale's DNS forwarder, pointing at that tailnet's veth gateway. Queries for tailnet FQDNs are routed to the correct namespace's MagicDNS resolver (`100.100.100.100`) via a PREROUTING DNAT on the veth. This means multiple tailnets can answer MagicDNS queries on the same host without the last-write-wins problem.
+
 All of this is automatic and fully managed. Routes and DNS entries are synced every reconciliation cycle and cleaned up on shutdown or when host access is disabled.
+
+> **Note on `--accept-dns`:** Hydrascale runs `tailscale up --accept-dns=true` inside each namespace so tailscaled enables its MagicDNS proxy at `100.100.100.100:53`. Without this, the DNAT path would have no listener inside the namespace and FQDN queries would return SERVFAIL. If you upgrade from a version before this fix and your daemons have `CorpDNS=false` persisted in their state, run `sudo hydrascale tailscale <id> -- set --accept-dns=true` once per tailnet to flip it.
 
 ### Accepted Subnet Routes
 
@@ -192,8 +196,8 @@ On graceful shutdown, all host access state is cleaned up automatically.
 
 ### Compatibility Notes
 
-- **Standard Linux distributions**: Full functionality including MagicDNS FQDN resolution via the namespace's DNS forwarder.
-- **Tegra/Jetson** (or kernels missing `xt_connmark`): Host routes and prefixed short names (`havoc-mars`) work fully. MagicDNS FQDN resolution (`mars.taildf854a.ts.net`) may not work due to kernel limitations.
+- **Standard Linux distributions**: Full functionality including per-tailnet MagicDNS FQDN resolution.
+- **Tegra/Jetson** (and other kernels missing `xt_connmark`): Fully supported. Per-tailnet MagicDNS routing via the host DNS forwarder + veth DNAT works without `xt_connmark`, so FQDNs like `mars.taildf854a.ts.net` resolve correctly on Jetson devices.
 - **Systems without systemd-resolved**: Use `hosts` mode (the default). The `resolved` mode is unavailable.
 
 ## Headscale / Custom Control Server

@@ -121,6 +121,82 @@ func TestSync_PartialFailure(t *testing.T) {
 	}
 }
 
+// mockForwarder records the most recent SetDomainRoutes call.
+type mockForwarder struct {
+	lastRoutes map[string]string
+	callCount  int
+}
+
+func (f *mockForwarder) SetDomainRoutes(routes map[string]string) {
+	f.lastRoutes = routes
+	f.callCount++
+}
+
+// TestSyncDNS_SetsDomainRoutes verifies that syncDNS wires each tailnet's
+// MagicDNS suffix to its veth gateway when a forwarder is configured.
+func TestSyncDNS_SetsDomainRoutes(t *testing.T) {
+	dir := t.TempDir()
+	hostsPath := dir + "/hosts"
+
+	fwd := &mockForwarder{}
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m.SetForwarder(fwd)
+
+	status1 := &daemon.TailscaleStatus{MagicDNSSuffix: "corp.ts.net"}
+	status2 := &daemon.TailscaleStatus{MagicDNSSuffix: "home.ts.net"}
+
+	m.Sync("corp", status1, "10.200.0.2", "vh001", "ns-corp")
+	m.Sync("home", status2, "10.200.0.6", "vh002", "ns-home")
+
+	if fwd.callCount == 0 {
+		t.Fatal("SetDomainRoutes was never called")
+	}
+	got := fwd.lastRoutes
+	if got["corp.ts.net"] != "10.200.0.2" {
+		t.Errorf("corp.ts.net route = %q, want %q", got["corp.ts.net"], "10.200.0.2")
+	}
+	if got["home.ts.net"] != "10.200.0.6" {
+		t.Errorf("home.ts.net route = %q, want %q", got["home.ts.net"], "10.200.0.6")
+	}
+}
+
+// TestSyncDNS_NoForwarder verifies that Sync does not panic when no forwarder
+// is configured.
+func TestSyncDNS_NoForwarder(t *testing.T) {
+	dir := t.TempDir()
+	hostsPath := dir + "/hosts"
+
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	status := &daemon.TailscaleStatus{MagicDNSSuffix: "corp.ts.net"}
+
+	// Must not panic
+	m.Sync("corp", status, "10.200.0.2", "vh001", "ns-corp")
+}
+
+// TestSyncDNS_EmptySuffix verifies that a tailnet with no MagicDNSSuffix is
+// excluded from the domain routes map sent to the forwarder.
+func TestSyncDNS_EmptySuffix(t *testing.T) {
+	dir := t.TempDir()
+	hostsPath := dir + "/hosts"
+
+	fwd := &mockForwarder{}
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m.SetForwarder(fwd)
+
+	// Tailnet with no MagicDNSSuffix
+	status := &daemon.TailscaleStatus{MagicDNSSuffix: ""}
+	m.Sync("corp", status, "10.200.0.2", "vh001", "ns-corp")
+
+	if fwd.callCount == 0 {
+		t.Fatal("SetDomainRoutes was never called")
+	}
+	for suffix := range fwd.lastRoutes {
+		if suffix == "" {
+			t.Error("empty suffix should not appear in domain routes map")
+		}
+	}
+}
+
 // TestTeardown_Idempotent verifies that calling Teardown with nothing set up
 // does not panic or error.
 func TestTeardown_Idempotent(t *testing.T) {

@@ -197,10 +197,10 @@ func VethIPs(infraSubnet string, index int) (hostIP, nsIP, hostGW, nsGW string, 
 // SetupVeth creates a veth pair between host and namespace for DNS routing.
 // Host side: vh<hash> with IP from infraSubnet
 // Namespace side: vn<hash> with IP from infraSubnet
-// Adds host route: 100.100.100.100 via namespace side dev vh<hash>
+// MagicDNS (100.100.100.100) is reached via the DNS forwarder, not a host route.
 func SetupVeth(nsName string, index int, infraSubnet string) error {
 	hostVeth, nsVeth := VethNames(nsName)
-	hostIP, nsIP, hostGW, nsGW, err := VethIPs(infraSubnet, index)
+	hostIP, nsIP, hostGW, _, err := VethIPs(infraSubnet, index)
 	if err != nil {
 		return err
 	}
@@ -276,12 +276,6 @@ func SetupVeth(nsName string, index int, infraSubnet string) error {
 		}
 	}
 
-	// Add host route: 100.100.100.100 via namespace side (replace to handle multiple namespaces)
-	cmd = exec.Command("ip", "route", "replace", "100.100.100.100", "via", nsGW, "dev", hostVeth)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to add route for 100.100.100.100 via %s: %v (%s)", nsGW, err, out)
-	}
-
 	log.Printf("Set up veth pair for namespace %s with IPs from %s", nsName, infraSubnet)
 	return nil
 }
@@ -293,7 +287,7 @@ func TeardownVeth(nsName string, infraSubnet string) error {
 
 	// Remove iptables rules (best effort)
 	index := VethIndex(nsName)
-	_, nsIP, _, nsGW, err := VethIPs(infraSubnet, index)
+	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
 	if err == nil {
 		delFwd1 := exec.Command("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 		_ = delFwd1.Run()
@@ -301,10 +295,6 @@ func TeardownVeth(nsName string, infraSubnet string) error {
 		_ = delFwd2.Run()
 		delNat := exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
 		_ = delNat.Run()
-
-		// Remove the host route first (best effort)
-		delRoute := exec.Command("ip", "route", "del", "100.100.100.100", "via", nsGW, "dev", hostVeth)
-		_ = delRoute.Run() // ignore error if route doesn't exist
 	}
 
 	// Delete the veth pair (deleting one end removes both)
