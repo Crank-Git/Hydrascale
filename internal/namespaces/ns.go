@@ -148,8 +148,8 @@ func GetTailnetFromNamespace(namespaceName string) string {
 	return ""
 }
 
-// VethIndex returns a deterministic index (1-254) for a namespace name,
-// used to pick the /30 subnet: 10.200.{index}.0/30.
+// VethIndex returns a deterministic index (1-254) for a namespace name.
+// The index selects a /30 block within the configured infra subnet.
 func VethIndex(nsName string) int {
 	h := sha256.Sum256([]byte(nsName))
 	v := int(binary.BigEndian.Uint32(h[:4]))
@@ -186,6 +186,10 @@ func VethIPs(infraSubnet string, index int) (hostIP, nsIP, hostGW, nsGW string, 
 	binary.BigEndian.PutUint32(ip1, uHostIP)
 	ip2 := make(net.IP, 4)
 	binary.BigEndian.PutUint32(ip2, uNsIP)
+
+	if !ipnet.Contains(ip1) || !ipnet.Contains(ip2) {
+		return "", "", "", "", fmt.Errorf("veth index %d out of range for subnet %s", index, infraSubnet)
+	}
 
 	return ip1.String() + "/30", ip2.String() + "/30", ip1.String(), ip2.String(), nil
 }

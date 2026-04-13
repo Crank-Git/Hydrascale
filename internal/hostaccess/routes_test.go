@@ -154,3 +154,66 @@ func TestRouteSync_NoOp(t *testing.T) {
 		t.Errorf("NoOp: expected no routes to remove, got %v", toRemove)
 	}
 }
+
+func TestMergeRoutes(t *testing.T) {
+	tests := []struct {
+		name string
+		a    []string
+		b    []string
+		want []string
+	}{
+		{
+			name: "no overlap",
+			a:    []string{"10.0.0.0/8", "172.16.0.0/12"},
+			b:    []string{"192.168.1.0/24"},
+			want: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.1.0/24"},
+		},
+		{
+			name: "full overlap deduped",
+			a:    []string{"10.0.0.0/8"},
+			b:    []string{"10.0.0.0/8"},
+			want: []string{"10.0.0.0/8"},
+		},
+		{
+			name: "partial overlap",
+			a:    []string{"10.0.0.0/8", "172.16.0.0/12"},
+			b:    []string{"172.16.0.0/12", "192.168.1.0/24"},
+			want: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.1.0/24"},
+		},
+		{
+			name: "empty a",
+			a:    nil,
+			b:    []string{"10.0.0.0/8"},
+			want: []string{"10.0.0.0/8"},
+		},
+		{
+			name: "empty b",
+			a:    []string{"10.0.0.0/8"},
+			b:    nil,
+			want: []string{"10.0.0.0/8"},
+		},
+		{
+			name: "both empty",
+			a:    nil,
+			b:    nil,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeRoutes(tt.a, tt.b)
+			sort.Strings(got)
+			wantSorted := append([]string(nil), tt.want...)
+			sort.Strings(wantSorted)
+			if len(got) != len(wantSorted) {
+				t.Fatalf("mergeRoutes(%v, %v) = %v, want %v", tt.a, tt.b, got, wantSorted)
+			}
+			for i := range wantSorted {
+				if got[i] != wantSorted[i] {
+					t.Errorf("mergeRoutes[%d] = %q, want %q", i, got[i], wantSorted[i])
+				}
+			}
+		})
+	}
+}

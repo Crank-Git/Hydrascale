@@ -138,6 +138,18 @@ When host access is enabled for a tailnet, Hydrascale does three things each rec
 
 All of this is automatic and fully managed. Routes and DNS entries are synced every reconciliation cycle and cleaned up on shutdown or when host access is disabled.
 
+### Accepted Subnet Routes
+
+If a tailnet peer advertises subnet routes and your namespace's `tailscaled` is started with `--accept-routes`, Hydrascale automatically propagates those routes to the host. On each reconciliation cycle it reads routing table 52 inside the namespace (where tailscaled installs accepted routes) and adds matching routes on the host pointing via the veth gateway.
+
+To use this, pass `--accept-routes` when logging in:
+
+```bash
+sudo hydrascale tailscale corp-prod -- up --accept-routes
+```
+
+No config change is needed. Subnet routes appear on the host within one reconciliation cycle after login and are removed when the tailnet is torn down.
+
 ### Naming Convention
 
 Each peer gets a prefixed hostname: `<tailnet-id>-<hostname>`. This prevents collisions when multiple tailnets have peers with the same name.
@@ -211,6 +223,23 @@ tailnets:
 
 Per-tailnet `control_url` overrides the global default. Omitting the field (or leaving it empty) uses the standard Tailscale coordination server. This means you can mix Tailscale and Headscale networks on the same host.
 
+### Logging In Without an Auth Key
+
+If you don't use pre-auth keys, you can log in interactively after Hydrascale creates the namespace. Start the daemon (or run `apply`), then use the `tailscale` subcommand to trigger the login flow for each tailnet:
+
+```bash
+# Start Hydrascale (creates namespaces and starts tailscaled)
+sudo hydrascale serve &
+
+# Log in to a Headscale tailnet interactively
+sudo hydrascale tailscale corp-prod -- up --login-server https://headscale.example.com
+
+# For the standard Tailscale coordination server
+sudo hydrascale tailscale personal -- up
+```
+
+Hydrascale prints the auth URL. Open it in a browser, approve the device, and the tailnet comes online. The namespace stays running; Hydrascale manages the lifecycle from that point forward.
+
 ### Important Caveats
 
 - **Auth key format**: Headscale auth keys have a different format than Tailscale's `tskey-auth-*` keys. Hydrascale does not validate the key format -- it passes the key directly to `tailscale up` via `TS_AUTHKEY`. Make sure you use the correct key type for your control server.
@@ -233,6 +262,11 @@ host_access: false
 # Custom control server URL for Headscale (default: empty = use Tailscale)
 # Applied to all tailnets unless overridden per-tailnet. Must be HTTPS.
 # control_url: "https://headscale.example.com"
+
+# Subnet used for internal veth pairs between host and namespaces (default: 10.200.0.0/16)
+# Change this if 10.200.0.0/16 conflicts with an existing route on your network.
+# Must be an IPv4 CIDR of at least /16.
+# infra_subnet: "10.200.0.0/16"
 
 # List of tailnets to manage
 tailnets:
@@ -275,7 +309,9 @@ net.ipv4.ip_forward = 1
 
 ### Veth Pairs
 
-Each namespace is connected to the host via a veth pair. Interface names are derived from a short hash of the tailnet ID (`vh<hash>` on the host side, `vn<hash>` inside the namespace), keeping names within Linux's 15-character interface name limit. Subnets are allocated from `10.200.N.0/30` where N is an index assigned per tailnet.
+Each namespace is connected to the host via a veth pair. Interface names are derived from a short hash of the tailnet ID (`vh<hash>` on the host side, `vn<hash>` inside the namespace), keeping names within Linux's 15-character interface name limit. Each pair gets a dedicated `/30` block allocated sequentially from the infra subnet (default `10.200.0.0/16`).
+
+If `10.200.0.0/16` collides with an existing route on your network, configure a different range with `infra_subnet` (see [Config Reference](#config-reference)). The subnet must be IPv4 and at least a `/16`.
 
 ### NAT / Masquerade
 
@@ -435,6 +471,17 @@ Hydrascale inserts FORWARD ACCEPT rules automatically, but if traffic is still b
 sudo iptables -L FORWARD -v
 ```
 Look for a blanket `DROP` rule positioned before Hydrascale's `ACCEPT` rules and remove or reorder it as needed.
+
+**Infra subnet conflicts with an existing network route**
+If `10.200.0.0/16` overlaps a route already on your host, veth setup will fail or traffic will be misdirected. Confirm the conflict with:
+```bash
+ip route | grep 10.200
+```
+If there is a match, set `infra_subnet` in your config to a free range:
+```yaml
+infra_subnet: "10.201.0.0/16"
+```
+Then restart Hydrascale. Existing namespaces will be torn down and rebuilt with the new addressing.
 
 **"name not a valid ifname"**
 This error occurs with older Hydrascale versions that used full tailnet IDs as interface names, which exceed Linux's 15-character limit. Update to the latest release, which uses hash-based veth names (`vh<hash>`/`vn<hash>`) that always fit within the limit.
