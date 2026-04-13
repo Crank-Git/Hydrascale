@@ -18,6 +18,7 @@ type TailnetPeers struct {
 	TailnetID      string
 	MagicDNSSuffix string
 	Peers          []Peer
+	SubnetRoutes   []string // Added for pushed routes
 	VethGateway    string
 	VethHost       string
 }
@@ -32,6 +33,14 @@ func ParsePeers(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHo
 		return result
 	}
 	result.MagicDNSSuffix = status.MagicDNSSuffix
+
+	// Extract pushed routes (non-natural, non-default)
+	for _, r := range status.Routes {
+		if !r.Natural && r.Network != "0.0.0.0/0" && r.Network != "::/0" {
+			result.SubnetRoutes = append(result.SubnetRoutes, r.Network)
+		}
+	}
+
 	for _, node := range status.Peer {
 		// Sanitize hostname: lowercase, replace spaces with dashes
 		hostname := strings.ToLower(node.HostName)

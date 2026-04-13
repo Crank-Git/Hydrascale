@@ -7,13 +7,14 @@ import (
 
 func TestParseHostRoutes(t *testing.T) {
 	const vethDev = "vh123456"
+	const infraSubnet = "10.200.0.0/16"
 	input := `100.64.0.1 dev vh123456 scope link
 100.64.0.2 dev vh123456 scope link
 100.100.100.100 via 10.200.1.2 dev vh123456
 10.0.0.1 dev eth0 scope link
 100.64.0.3 dev eth0 scope link
 `
-	got := parseHostRoutes(input, vethDev)
+	got := parseHostRoutes(input, vethDev, infraSubnet)
 	// Expect 100.64.0.1 and 100.64.0.2 — 100.100.100.100 excluded, 10.0.0.1 not CGNAT,
 	// 100.64.0.3 on wrong device
 	want := []string{"100.64.0.1", "100.64.0.2"}
@@ -31,10 +32,11 @@ func TestParseHostRoutes(t *testing.T) {
 
 func TestParseHostRoutes_ExcludesMagicDNS(t *testing.T) {
 	const vethDev = "vh123456"
+	const infraSubnet = "10.200.0.0/16"
 	input := `100.100.100.100 via 10.200.1.2 dev vh123456
 100.64.1.1 dev vh123456 scope link
 `
-	got := parseHostRoutes(input, vethDev)
+	got := parseHostRoutes(input, vethDev, infraSubnet)
 	for _, ip := range got {
 		if ip == "100.100.100.100" {
 			t.Errorf("parseHostRoutes should exclude 100.100.100.100, but found it in %v", got)

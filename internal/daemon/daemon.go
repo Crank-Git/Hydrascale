@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"hydrascale/internal/routing"
 )
 
 // DefaultStateDir is the base directory for per-tailnet state.
@@ -22,6 +24,7 @@ type TailscaleStatus struct {
 	Self           StatusNode            `json:"Self"`
 	Peer           map[string]StatusNode `json:"Peer"`
 	MagicDNSSuffix string                `json:"MagicDNSSuffix"`
+	Routes         []routing.Route       `json:"Routes"` // Added for pushed routes
 }
 
 // StatusNode represents a node in tailscale status.
@@ -129,7 +132,7 @@ func StartDaemon(tailnetID string, namespaceName string) error {
 	// Setpgid detaches the process group; Pdeathsig ensures tailscaled
 	// is killed if hydrascale dies unexpectedly (e.g. SIGKILL).
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid:  true,
+		Setpgid:   true,
 		Pdeathsig: syscall.SIGTERM,
 	}
 
@@ -364,4 +367,3 @@ func validatePID(pid int) bool {
 	}
 	return strings.Contains(string(data), "tailscaled")
 }
-

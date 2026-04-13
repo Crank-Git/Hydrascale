@@ -10,9 +10,9 @@ import (
 )
 
 var (
-	cgnatNet  *net.IPNet
-	tsV6Net   *net.IPNet
-	magicDNS  = "100.100.100.100"
+	cgnatNet *net.IPNet
+	tsV6Net  *net.IPNet
+	magicDNS = "100.100.100.100"
 )
 
 func init() {
@@ -24,7 +24,12 @@ func init() {
 func isCGNAT(ip string) bool {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
-		return false
+		// Might be a CIDR
+		var err error
+		parsed, _, err = net.ParseCIDR(ip)
+		if err != nil {
+			return false
+		}
 	}
 	return cgnatNet.Contains(parsed)
 }
@@ -33,15 +38,22 @@ func isCGNAT(ip string) bool {
 func isTailscaleV6(ip string) bool {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
-		return false
+		// Might be a CIDR
+		var err error
+		parsed, _, err = net.ParseCIDR(ip)
+		if err != nil {
+			return false
+		}
 	}
 	return tsV6Net.Contains(parsed)
 }
 
 // parseHostRoutes parses `ip route show` output and returns host routes
-// that are in the CGNAT range on vethDev, excluding the MagicDNS address.
-func parseHostRoutes(output string, vethDev string) []string {
+// that are on vethDev, excluding MagicDNS and infra routes.
+func parseHostRoutes(output string, vethDev string, infraSubnet string) []string {
 	var routes []string
+	_, infraNet, _ := net.ParseCIDR(infraSubnet)
+
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -59,22 +71,31 @@ func parseHostRoutes(output string, vethDev string) []string {
 		if dest == magicDNS {
 			continue
 		}
-		// Must be a host route (bare IP, no prefix) or /32
-		ip := strings.TrimSuffix(dest, "/32")
-		if !isCGNAT(ip) {
-			continue
+
+		// Exclude routes that are part of the infra subnet
+		if infraNet != nil {
+			if destIP, _, err := net.ParseCIDR(dest); err == nil {
+				if infraNet.Contains(destIP) {
+					continue
+				}
+			} else if destIP := net.ParseIP(dest); destIP != nil {
+				if infraNet.Contains(destIP) {
+					continue
+				}
+			}
 		}
+
 		// Must be on the expected veth device
 		if vethDev != "" && !strings.Contains(line, "dev "+vethDev) {
 			continue
 		}
-		routes = append(routes, ip)
+		routes = append(routes, dest)
 	}
 	return routes
 }
 
 // parseHostRoutesV6 parses `ip -6 route show` output and returns host routes
-// in the Tailscale IPv6 range on vethDev.
+// on vethDev.
 func parseHostRoutesV6(output string, vethDev string) []string {
 	var routes []string
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
@@ -90,19 +111,15 @@ func parseHostRoutesV6(output string, vethDev string) []string {
 		if dest == "default" || dest == "::/0" {
 			continue
 		}
-		ip := strings.TrimSuffix(dest, "/128")
-		if !isTailscaleV6(ip) {
-			continue
-		}
 		if vethDev != "" && !strings.Contains(line, "dev "+vethDev) {
 			continue
 		}
-		routes = append(routes, ip)
+		routes = append(routes, dest)
 	}
 	return routes
 }
 
-// desiredRoutes extracts the v4 and v6 peer IPs from a TailnetPeers set.
+// desiredRoutes extracts the v4 and v6 peer IPs and subnet routes from a TailnetPeers set.
 func desiredRoutes(peers TailnetPeers) (v4, v6 []string) {
 	for _, p := range peers.Peers {
 		if p.IPv4 != "" {
@@ -110,6 +127,14 @@ func desiredRoutes(peers TailnetPeers) (v4, v6 []string) {
 		}
 		if p.IPv6 != "" {
 			v6 = append(v6, p.IPv6)
+		}
+	}
+	// Add subnet routes to the appropriate lists
+	for _, r := range peers.SubnetRoutes {
+		if strings.Contains(r, ":") {
+			v6 = append(v6, r)
+		} else {
+			v4 = append(v4, r)
 		}
 	}
 	return v4, v6
@@ -142,7 +167,7 @@ func diffRoutes(desired, actual []string) (toAdd, toRemove []string) {
 
 // SyncHostRoutes synchronises host routing table entries for all peers in the
 // TailnetPeers set, routing their IPs via the veth gateway.
-func SyncHostRoutes(peers TailnetPeers) error {
+func SyncHostRoutes(peers TailnetPeers, infraSubnet string) error {
 	vethDev := peers.VethHost
 	gw := peers.VethGateway
 
@@ -156,7 +181,7 @@ func SyncHostRoutes(peers TailnetPeers) error {
 		return fmt.Errorf("ip -6 route show: %w", err)
 	}
 
-	actualV4 := parseHostRoutes(string(v4Out), vethDev)
+	actualV4 := parseHostRoutes(string(v4Out), vethDev, infraSubnet)
 	actualV6 := parseHostRoutesV6(string(v6Out), vethDev)
 
 	wantV4, wantV6 := desiredRoutes(peers)
@@ -201,11 +226,11 @@ func SyncHostRoutes(peers TailnetPeers) error {
 	return errors.Join(errs...)
 }
 
-// RemoveAllHostRoutes removes all CGNAT and Tailscale v6 host routes on vethDev.
-func RemoveAllHostRoutes(vethDev string) {
+// RemoveAllHostRoutes removes all host routes on vethDev (excluding MagicDNS and infra).
+func RemoveAllHostRoutes(vethDev string, infraSubnet string) {
 	v4Out, err := exec.Command("ip", "route", "show").Output()
 	if err == nil {
-		for _, ip := range parseHostRoutes(string(v4Out), vethDev) {
+		for _, ip := range parseHostRoutes(string(v4Out), vethDev, infraSubnet) {
 			if out, e := exec.Command("ip", "route", "del", ip).CombinedOutput(); e != nil {
 				log.Printf("hostaccess: remove route %s: %v (%s)", ip, e, out)
 			}
