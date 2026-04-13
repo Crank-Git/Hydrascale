@@ -344,18 +344,73 @@ func SetupHostAccess(nsName string, index int, infraSubnet string) error {
 	}
 
 	// /etc/netns/NAME/resolv.conf
+	//
+	// Tailscaled's DNS proxy requires at least one reachable, non-loopback
+	// upstream resolver to answer queries — even for names it could satisfy
+	// locally from its peer table. If its resolver chain is empty (or only
+	// contains 100.100.100.100 itself, which it filters out as a self-loop),
+	// it returns SERVFAIL for every query. So write real host upstreams here,
+	// not 100.100.100.100. Queries that arrive at tailscaled via the veth DNAT
+	// path still work: tailscaled answers MagicDNS locally and forwards the
+	// rest to these upstreams.
 	netnsDir := filepath.Join("/etc/netns", nsName)
 	if err := os.MkdirAll(netnsDir, 0755); err != nil {
 		log.Printf("host-access: failed to create %s: %v", netnsDir, err)
 	} else {
 		resolvPath := filepath.Join(netnsDir, "resolv.conf")
-		if err := os.WriteFile(resolvPath, []byte("nameserver 100.100.100.100\n"), 0644); err != nil {
+		upstreams := resolveHostUpstreams()
+		var buf strings.Builder
+		for _, ns := range upstreams {
+			buf.WriteString("nameserver ")
+			buf.WriteString(ns)
+			buf.WriteString("\n")
+		}
+		if err := os.WriteFile(resolvPath, []byte(buf.String()), 0644); err != nil {
 			log.Printf("host-access: failed to write %s: %v", resolvPath, err)
 		}
 	}
 
 	log.Printf("Set up host access rules for namespace %s", nsName)
 	return nil
+}
+
+// resolveHostUpstreams returns DNS upstreams reachable from inside a namespace.
+// It prefers /run/systemd/resolve/resolv.conf (real upstreams, bypassing the
+// systemd-resolved stub) and falls back to /etc/resolv.conf. Loopback addresses
+// are filtered out because 127.0.0.x on the host is not reachable from inside
+// the namespace. If no usable upstream is found, 1.1.1.1 is returned as a
+// last-resort default.
+func resolveHostUpstreams() []string {
+	candidates := []string{
+		"/run/systemd/resolve/resolv.conf",
+		"/etc/resolv.conf",
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var found []string
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "nameserver") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			ip := net.ParseIP(fields[1])
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			found = append(found, ip.String())
+		}
+		if len(found) > 0 {
+			return found
+		}
+	}
+	return []string{"1.1.1.1"}
 }
 
 // TeardownHostAccess removes namespace-side host access iptables rules and resolv.conf.

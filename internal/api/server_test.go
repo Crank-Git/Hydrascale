@@ -102,6 +102,8 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 
 func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error { return nil }
 
+func (m *mockDaemon) RefreshDNSConfig(tailnetID, nsName string) error { return nil }
+
 func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
