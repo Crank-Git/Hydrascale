@@ -127,6 +127,10 @@ func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL stri
 	return nil
 }
 
+func (m *mockDaemon) RefreshDNSConfig(tailnetID, nsName string) error {
+	return nil
+}
+
 func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -310,6 +314,24 @@ func TestDiff_UnhealthyDaemon(t *testing.T) {
 	}
 	if counts[ActionCreateNS] != 0 {
 		t.Errorf("create_ns = %d, want 0 (ns exists)", counts[ActionCreateNS])
+	}
+	// Restart path must also refresh DNS so tailscaled rebuilds its resolver
+	// chain from resolv.conf — loading state from disk leaves MagicDNS wedged.
+	if counts[ActionRefreshDNS] != 1 {
+		t.Errorf("refresh_dns = %d, want 1 (restart path must refresh DNS)", counts[ActionRefreshDNS])
+	}
+	// And the refresh must come after the start.
+	var startIdx, refreshIdx = -1, -1
+	for i, a := range actions {
+		if a.Type == ActionStartDaemon {
+			startIdx = i
+		}
+		if a.Type == ActionRefreshDNS {
+			refreshIdx = i
+		}
+	}
+	if startIdx == -1 || refreshIdx == -1 || refreshIdx < startIdx {
+		t.Errorf("refresh_dns must be scheduled after start_daemon; got start=%d refresh=%d", startIdx, refreshIdx)
 	}
 }
 

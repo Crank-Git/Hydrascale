@@ -140,7 +140,11 @@ When host access is enabled for a tailnet, Hydrascale does four things each reco
 
 All of this is automatic and fully managed. Routes and DNS entries are synced every reconciliation cycle and cleaned up on shutdown or when host access is disabled.
 
-> **Note on `--accept-dns`:** Hydrascale runs `tailscale up --accept-dns=true` inside each namespace so tailscaled enables its MagicDNS proxy at `100.100.100.100:53`. Without this, the DNAT path would have no listener inside the namespace and FQDN queries would return SERVFAIL. If you upgrade from a version before this fix and your daemons have `CorpDNS=false` persisted in their state, run `sudo hydrascale tailscale <id> -- set --accept-dns=true` once per tailnet to flip it.
+> **Note on tailscaled DNS lifecycle.** Two subtleties matter for per-tailnet MagicDNS, and Hydrascale handles both automatically:
+>
+> 1. **Namespace upstreams.** Each namespace gets `/etc/netns/<ns>/resolv.conf` populated with real host upstream resolvers (sourced from `/run/systemd/resolve/resolv.conf` or `/etc/resolv.conf`, loopbacks filtered, falling back to `1.1.1.1`). Writing `100.100.100.100` there would leave tailscaled's resolver chain empty, because tailscaled filters its own address as a self-loop — and an empty chain returns SERVFAIL for every query, including names it could answer locally from the peer table.
+>
+> 2. **Daemon restart refresh.** When the reconciler restarts an unhealthy tailscaled, the new process loads state from disk but does not re-read `resolv.conf`, which can leave its MagicDNS proxy wedged. Hydrascale waits for `BackendState=Running` and then toggles `--accept-dns=false` → `--accept-dns=true` to force a resolver-chain rebuild. This recovers DNS automatically on every restart — no manual `tailscale set` required.
 
 ### Accepted Subnet Routes
 
@@ -489,6 +493,17 @@ Then restart Hydrascale. Existing namespaces will be torn down and rebuilt with 
 
 **"name not a valid ifname"**
 This error occurs with older Hydrascale versions that used full tailnet IDs as interface names, which exceed Linux's 15-character limit. Update to the latest release, which uses hash-based veth names (`vh<hash>`/`vn<hash>`) that always fit within the limit.
+
+**MagicDNS returns SERVFAIL for tailnet FQDNs**
+First confirm the log shows `refresh_dns` running after `start_daemon` on the affected tailnet:
+```bash
+journalctl -u hydrascale | grep -E 'start_daemon|refresh_dns'
+```
+If `refresh_dns` is missing or timed out, tailscaled probably never reached `BackendState=Running` (bad auth, no network, control server unreachable). Check `sudo hydrascale tailscale <id> -- status` inside the namespace. If `refresh_dns` ran but queries still SERVFAIL, inspect the namespace resolv.conf — it must contain real upstreams, not `100.100.100.100`:
+```bash
+cat /etc/netns/ns-<id>/resolv.conf
+```
+As a last resort, force a full refresh by restarting the service: `sudo systemctl restart hydrascale`. The reconciler will re-run the DNS refresh flow on the next cycle.
 
 ## License
 

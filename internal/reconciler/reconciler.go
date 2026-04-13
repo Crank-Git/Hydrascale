@@ -34,6 +34,7 @@ const (
 	ActionSyncRoutes     ActionType = "sync_routes"
 	ActionSyncHostAccess ActionType = "sync_host_access"
 	ActionAuthDaemon     ActionType = "auth_daemon"
+	ActionRefreshDNS     ActionType = "refresh_dns"
 )
 
 // MaxFailures is the number of consecutive failures before a tailnet enters error state.
@@ -207,7 +208,14 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 				actions = append(actions, Action{Type: ActionAuthDaemon, TailnetID: id, NsName: ns, AuthKey: authKey, ControlURL: controlURL})
 			}
 		} else if !state.DaemonHealthy {
+			// Restart path: tailscaled loads state from disk but doesn't re-read
+			// resolv.conf, so its MagicDNS resolver chain can come up wedged.
+			// Follow the start with a DNS refresh (accept-dns flip-flop) to
+			// force tailscaled to rebuild the chain from the current namespace
+			// resolv.conf. Without this, dig @100.100.100.100 returns SERVFAIL
+			// for every query until someone manually runs `tailscale set`.
 			actions = append(actions, Action{Type: ActionStartDaemon, TailnetID: id, NsName: ns})
+			actions = append(actions, Action{Type: ActionRefreshDNS, TailnetID: id, NsName: ns})
 		} else {
 			// Daemon healthy, sync routes
 			actions = append(actions, Action{Type: ActionSyncRoutes, TailnetID: id, NsName: ns})
@@ -289,6 +297,8 @@ func (r *Reconciler) executeAction(action Action) error {
 		return r.dm.Stop(action.NsName, action.TailnetID)
 	case ActionAuthDaemon:
 		return r.dm.AuthorizeDaemon(action.TailnetID, action.NsName, action.AuthKey, action.ControlURL)
+	case ActionRefreshDNS:
+		return r.dm.RefreshDNSConfig(action.TailnetID, action.NsName)
 	case ActionSyncRoutes:
 		socketPath := r.dm.GetSocketPath(action.TailnetID)
 		routes, err := r.rt.PollStatus(action.NsName, socketPath)

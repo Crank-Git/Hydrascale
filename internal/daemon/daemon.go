@@ -39,6 +39,7 @@ type Manager interface {
 	CheckHealth(nsName, tailnetID string) (bool, error)
 	GetSocketPath(tailnetID string) string
 	AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error
+	RefreshDNSConfig(tailnetID, nsName string) error
 	GetStatus(ctx context.Context, nsName, tailnetID string) (*TailscaleStatus, error)
 }
 
@@ -68,6 +69,10 @@ func (m *RealManager) GetSocketPath(tailnetID string) string {
 
 func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 	return AuthorizeDaemon(tailnetID, nsName, authKey, controlURL)
+}
+
+func (m *RealManager) RefreshDNSConfig(tailnetID, nsName string) error {
+	return RefreshDNSConfig(tailnetID, nsName)
 }
 
 func (m *RealManager) GetStatus(ctx context.Context, nsName, tailnetID string) (*TailscaleStatus, error) {
@@ -299,6 +304,89 @@ func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 	}
 
 	log.Printf("Authorized tailnet %s in namespace %s", tailnetID, nsName)
+	return nil
+}
+
+// RefreshDNSConfig forces tailscaled to re-initialize its DNS configuration
+// by toggling --accept-dns off and back on. This is required after a daemon
+// restart from an existing state file: tailscaled caches its resolver chain
+// in memory and does not re-read /etc/resolv.conf on startup. If the previous
+// chain was wedged (e.g. only contained 100.100.100.100, which tailscaled
+// filters as a self-loop), the MagicDNS proxy returns SERVFAIL for every
+// query — including names it could answer locally from the peer table.
+//
+// The off→on transition causes tailscaled to rebuild the resolver chain from
+// the current namespace resolv.conf, picking up real upstreams and unwedging
+// the proxy. The toggle only produces a real teardown/rebuild once the
+// backend is in the Running state; if we fire it earlier, the pref changes
+// just become the initial prefs applied when the netmap eventually arrives,
+// and no DNS rebuild happens. So poll for BackendState=Running first.
+func RefreshDNSConfig(tailnetID, nsName string) error {
+	socketPath := SocketPath(tailnetID)
+
+	// Phase 1: wait for socket to appear (StartDaemon is non-blocking).
+	sockDeadline := time.After(30 * time.Second)
+	sockTick := time.NewTicker(500 * time.Millisecond)
+	defer sockTick.Stop()
+
+	sockReady := false
+	for !sockReady {
+		select {
+		case <-sockDeadline:
+			return fmt.Errorf("timeout waiting for tailscaled socket for %s", tailnetID)
+		case <-sockTick.C:
+			if _, err := os.Stat(socketPath); err == nil {
+				sockReady = true
+			}
+		}
+	}
+
+	// Phase 2: wait for BackendState=Running. Login + netmap typically takes
+	// 2–10 seconds after socket creation; 60s gives slow networks headroom.
+	runDeadline := time.After(60 * time.Second)
+	runTick := time.NewTicker(500 * time.Millisecond)
+	defer runTick.Stop()
+
+	running := false
+	for !running {
+		select {
+		case <-runDeadline:
+			return fmt.Errorf("timeout waiting for tailscaled Running state for %s", tailnetID)
+		case <-runTick.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
+				"tailscale", "--socket="+socketPath, "status", "--json")
+			output, err := cmd.Output()
+			cancel()
+			if err != nil {
+				continue
+			}
+			var s struct {
+				BackendState string `json:"BackendState"`
+			}
+			if json.Unmarshal(output, &s) != nil {
+				continue
+			}
+			if s.BackendState == "Running" {
+				running = true
+			}
+		}
+	}
+
+	// Phase 3: real flip-flop against a stable, connected daemon.
+	for _, val := range []string{"false", "true"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
+			"tailscale", "--socket="+socketPath, "set", "--accept-dns="+val)
+		output, err := cmd.CombinedOutput()
+		cancel()
+		if err != nil {
+			return fmt.Errorf("tailscale set --accept-dns=%s failed for %s: %v (%s)",
+				val, tailnetID, err, strings.TrimSpace(string(output)))
+		}
+	}
+
+	log.Printf("Refreshed DNS config for tailnet %s (accept-dns flip-flop)", tailnetID)
 	return nil
 }
 
