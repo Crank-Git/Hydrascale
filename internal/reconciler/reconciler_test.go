@@ -30,7 +30,7 @@ func newMockNS() *mockNS {
 	return &mockNS{namespaces: make(map[string]bool)}
 }
 
-func (m *mockNS) Create(tailnetID string) error {
+func (m *mockNS) Create(tailnetID string, infraSubnet string) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -38,7 +38,7 @@ func (m *mockNS) Create(tailnetID string) error {
 	return nil
 }
 
-func (m *mockNS) Delete(nsName string) error {
+func (m *mockNS) Delete(nsName string, infraSubnet string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
@@ -65,11 +65,11 @@ func (m *mockNS) GetTailnetID(nsName string) string {
 	return namespaces.GetTailnetFromNamespace(nsName)
 }
 
-func (m *mockNS) SetupVeth(nsName string, index int) error {
+func (m *mockNS) SetupVeth(nsName string, index int, infraSubnet string) error {
 	return nil
 }
 
-func (m *mockNS) TeardownVeth(nsName string) error {
+func (m *mockNS) TeardownVeth(nsName string, infraSubnet string) error {
 	return nil
 }
 
@@ -152,7 +152,7 @@ func (m *mockRouting) PollStatus(nsName, socketPath string) ([]routing.Route, er
 	return m.routes[nsName], nil
 }
 
-func (m *mockRouting) SyncRoutes(nsName string, routes []routing.Route) error {
+func (m *mockRouting) SyncRoutes(nsName string, routes []routing.Route, infraSubnet string) error {
 	if m.syncErr != nil {
 		return m.syncErr
 	}
@@ -160,7 +160,7 @@ func (m *mockRouting) SyncRoutes(nsName string, routes []routing.Route) error {
 	return nil
 }
 
-func (m *mockRouting) ListRoutes(nsName string) ([]string, error) {
+func (m *mockRouting) ListRoutes(nsName string, infraSubnet string) ([]string, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -185,7 +185,7 @@ func writeTestConfig(t *testing.T, tailnets ...string) string {
 }
 
 func newTestReconciler(cfgPath string, ns *mockNS, dm *mockDaemon, rt *mockRouting) *Reconciler {
-	return New(cfgPath, ns, dm, rt, 1*time.Second, nil)
+	return New(cfgPath, ns, dm, rt, 1*time.Second, nil, "10.200.0.0/16")
 }
 
 // --- Tests ---

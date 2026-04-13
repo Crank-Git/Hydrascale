@@ -28,7 +28,7 @@ func TestParsePeers_MultiplePeers(t *testing.T) {
 		},
 	})
 
-	result := ParsePeers("mynet", status, "10.0.0.1", "10.0.0.2")
+	result := ParsePeers("mynet", status, "10.0.0.1", "10.0.0.2", "ns-mynet")
 
 	if result.TailnetID != "mynet" {
 		t.Errorf("TailnetID = %q, want %q", result.TailnetID, "mynet")
@@ -76,7 +76,7 @@ func TestParsePeers_MultiplePeers(t *testing.T) {
 
 func TestParsePeers_EmptyPeerList(t *testing.T) {
 	status := makeStatus("example.ts.net", map[string]daemon.StatusNode{})
-	result := ParsePeers("mynet", status, "", "")
+	result := ParsePeers("mynet", status, "", "", "ns-mynet")
 	if len(result.Peers) != 0 {
 		t.Errorf("expected 0 peers, got %d", len(result.Peers))
 	}
@@ -93,7 +93,7 @@ func TestParsePeers_OfflinePeersIncluded(t *testing.T) {
 			Online:       false,
 		},
 	})
-	result := ParsePeers("net", status, "", "")
+	result := ParsePeers("net", status, "", "", "ns-net")
 	if len(result.Peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(result.Peers))
 	}
@@ -103,7 +103,7 @@ func TestParsePeers_OfflinePeersIncluded(t *testing.T) {
 }
 
 func TestParsePeers_NilStatus(t *testing.T) {
-	result := ParsePeers("mynet", nil, "gw", "host")
+	result := ParsePeers("mynet", nil, "gw", "host", "ns-mynet")
 	if result.TailnetID != "mynet" {
 		t.Errorf("TailnetID = %q, want %q", result.TailnetID, "mynet")
 	}
@@ -122,7 +122,7 @@ func TestParsePeers_MissingMagicDNSSuffix(t *testing.T) {
 	status := makeStatus("", map[string]daemon.StatusNode{
 		"a": {HostName: "Node", TailscaleIPs: []string{"100.64.0.5"}},
 	})
-	result := ParsePeers("net", status, "", "")
+	result := ParsePeers("net", status, "", "", "ns-net")
 	if result.MagicDNSSuffix != "" {
 		t.Errorf("expected empty MagicDNSSuffix, got %q", result.MagicDNSSuffix)
 	}
@@ -130,10 +130,10 @@ func TestParsePeers_MissingMagicDNSSuffix(t *testing.T) {
 
 func TestParsePeers_PeerWithNoIPs_Excluded(t *testing.T) {
 	status := makeStatus("", map[string]daemon.StatusNode{
-		"noip": {HostName: "NoIP", TailscaleIPs: []string{}},
+		"noip":  {HostName: "NoIP", TailscaleIPs: []string{}},
 		"hasip": {HostName: "HasIP", TailscaleIPs: []string{"100.64.0.9"}},
 	})
-	result := ParsePeers("net", status, "", "")
+	result := ParsePeers("net", status, "", "", "ns-net")
 	if len(result.Peers) != 1 {
 		t.Fatalf("expected 1 peer (no-IP excluded), got %d", len(result.Peers))
 	}
@@ -146,7 +146,7 @@ func TestParsePeers_InvalidIPSkipped(t *testing.T) {
 	status := makeStatus("", map[string]daemon.StatusNode{
 		"bad": {HostName: "Bad", TailscaleIPs: []string{"not-an-ip", "100.64.0.3"}},
 	})
-	result := ParsePeers("net", status, "", "")
+	result := ParsePeers("net", status, "", "", "ns-net")
 	if len(result.Peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(result.Peers))
 	}

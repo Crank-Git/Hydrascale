@@ -129,7 +129,7 @@ func StartDaemon(tailnetID string, namespaceName string) error {
 	// Setpgid detaches the process group; Pdeathsig ensures tailscaled
 	// is killed if hydrascale dies unexpectedly (e.g. SIGKILL).
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid:  true,
+		Setpgid:   true,
 		Pdeathsig: syscall.SIGTERM,
 	}
 
@@ -364,4 +364,3 @@ func validatePID(pid int) bool {
 	}
 	return strings.Contains(string(data), "tailscaled")
 }
-

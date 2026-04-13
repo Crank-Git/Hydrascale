@@ -38,10 +38,10 @@ func TestSync_FullFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewManager("hosts", hostsPath)
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	status := makeTestStatus()
 
-	m.Sync("havoc", status, "10.0.0.1", "veth0")
+	m.Sync("havoc", status, "10.0.0.1", "veth0", "ns-havoc")
 
 	got, err := os.ReadFile(hostsPath)
 	if err != nil {
@@ -81,8 +81,8 @@ func TestSync_NilStatus(t *testing.T) {
 	}
 	info1, _ := os.Stat(hostsPath)
 
-	m := NewManager("hosts", hostsPath)
-	m.Sync("havoc", nil, "10.0.0.1", "veth0")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m.Sync("havoc", nil, "10.0.0.1", "veth0", "ns-havoc")
 
 	info2, _ := os.Stat(hostsPath)
 	if info2.ModTime() != info1.ModTime() {
@@ -101,11 +101,11 @@ func TestSync_PartialFailure(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath)
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	status := makeTestStatus()
 
 	// Routes will fail (no root), but should not block DNS update
-	m.Sync("havoc", status, "10.0.0.1", "veth0")
+	m.Sync("havoc", status, "10.0.0.1", "veth0", "ns-havoc")
 
 	got, err := os.ReadFile(hostsPath)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestTeardown_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath)
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 
 	// Should not panic
 	m.Teardown("nonexistent-tailnet")

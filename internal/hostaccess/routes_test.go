@@ -7,21 +7,21 @@ import (
 
 func TestParseHostRoutes(t *testing.T) {
 	const vethDev = "vh123456"
+	const infraSubnet = "10.200.0.0/16"
 	input := `100.64.0.1 dev vh123456 scope link
 100.64.0.2 dev vh123456 scope link
 100.100.100.100 via 10.200.1.2 dev vh123456
 10.0.0.1 dev eth0 scope link
 100.64.0.3 dev eth0 scope link
+192.168.1.0/24 via 10.200.1.2 dev vh123456
 `
-	got := parseHostRoutes(input, vethDev)
-	// Expect 100.64.0.1 and 100.64.0.2 — 100.100.100.100 excluded, 10.0.0.1 not CGNAT,
-	// 100.64.0.3 on wrong device
-	want := []string{"100.64.0.1", "100.64.0.2"}
+	got := parseHostRoutes(input, vethDev, infraSubnet)
+	want := []string{"100.64.0.1", "100.64.0.2", "192.168.1.0/24"}
+	sort.Strings(got)
+	sort.Strings(want)
 	if len(got) != len(want) {
 		t.Fatalf("parseHostRoutes: got %v, want %v", got, want)
 	}
-	sort.Strings(got)
-	sort.Strings(want)
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("parseHostRoutes[%d]: got %q, want %q", i, got[i], want[i])
@@ -31,10 +31,11 @@ func TestParseHostRoutes(t *testing.T) {
 
 func TestParseHostRoutes_ExcludesMagicDNS(t *testing.T) {
 	const vethDev = "vh123456"
+	const infraSubnet = "10.200.0.0/16"
 	input := `100.100.100.100 via 10.200.1.2 dev vh123456
 100.64.1.1 dev vh123456 scope link
 `
-	got := parseHostRoutes(input, vethDev)
+	got := parseHostRoutes(input, vethDev, infraSubnet)
 	for _, ip := range got {
 		if ip == "100.100.100.100" {
 			t.Errorf("parseHostRoutes should exclude 100.100.100.100, but found it in %v", got)
@@ -42,6 +43,33 @@ func TestParseHostRoutes_ExcludesMagicDNS(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "100.64.1.1" {
 		t.Errorf("parseHostRoutes: got %v, want [100.64.1.1]", got)
+	}
+}
+
+func TestParseTableRoutes(t *testing.T) {
+	const infraSubnet = "10.200.0.0/16"
+	input := `10.0.0.0/8 via 100.64.0.1 dev tailscale0
+172.16.0.0/12 via 100.64.0.1 dev tailscale0
+192.168.1.0/24 via 100.64.0.1 dev tailscale0
+default via 100.64.0.1 dev tailscale0
+10.200.3.0/30 dev vnabc proto kernel scope link
+100.64.0.5 dev tailscale0
+100.100.100.100 dev tailscale0
+fd7a:115c:a1e0::1 dev tailscale0
+fd7a:115c:a1e0::/48 dev tailscale0
+fd7a:115c:a1e0::53 dev tailscale0
+`
+	got := parseTableRoutes(input, infraSubnet)
+	want := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.1.0/24"}
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("parseTableRoutes: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseTableRoutes[%d]: got %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
@@ -54,7 +82,7 @@ func TestDesiredRoutes(t *testing.T) {
 			{Hostname: "delta"},
 		},
 	}
-	v4, v6 := desiredRoutes(peers)
+	v4, v6 := desiredPeerRoutes(peers)
 
 	wantV4 := []string{"100.64.0.1", "100.64.0.2"}
 	wantV6 := []string{"fd7a:115c:a1e0::1", "fd7a:115c:a1e0::3"}

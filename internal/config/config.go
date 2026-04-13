@@ -42,8 +42,8 @@ type Mesh struct {
 
 // ReconcilerConfig holds reconciler-specific settings.
 type ReconcilerConfig struct {
-	Interval time.Duration `yaml:"-"`
-	RawInterval string    `yaml:"interval,omitempty"`
+	Interval    time.Duration `yaml:"-"`
+	RawInterval string        `yaml:"interval,omitempty"`
 }
 
 // ResolverConfig represents DNS resolver configuration.
@@ -54,15 +54,16 @@ type ResolverConfig struct {
 
 // Config represents the Hydrascale service configuration.
 type Config struct {
-	Version    int              `yaml:"version,omitempty"`
-	HostAccess bool             `yaml:"host_access,omitempty"`
-	ControlURL string           `yaml:"control_url,omitempty"`
-	Tailnets   []Tailnet        `yaml:"tailnets"`
-	Resolver   ResolverConfig   `yaml:"resolver"`
-	Reconciler ReconcilerConfig `yaml:"reconciler,omitempty"`
-	Mesh       Mesh             `yaml:"mesh,omitempty"`
-	EventLog   string           `yaml:"event_log,omitempty"`
-	HostDNS    HostDNSConfig    `yaml:"host_dns,omitempty"`
+	Version     int              `yaml:"version,omitempty"`
+	HostAccess  bool             `yaml:"host_access,omitempty"`
+	ControlURL  string           `yaml:"control_url,omitempty"`
+	Tailnets    []Tailnet        `yaml:"tailnets"`
+	Resolver    ResolverConfig   `yaml:"resolver"`
+	Reconciler  ReconcilerConfig `yaml:"reconciler,omitempty"`
+	Mesh        Mesh             `yaml:"mesh,omitempty"`
+	EventLog    string           `yaml:"event_log,omitempty"`
+	HostDNS     HostDNSConfig    `yaml:"host_dns,omitempty"`
+	InfraSubnet string           `yaml:"infra_subnet,omitempty"` // Default: 10.200.0.0/16
 }
 
 // TailnetHostAccess returns whether host access is enabled for a specific tailnet,
@@ -155,14 +156,32 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Reconciler.Interval = 10 * time.Second
 	}
 
+	// Validate and default infra_subnet
+	if cfg.InfraSubnet == "" {
+		cfg.InfraSubnet = "10.200.0.0/16"
+	} else {
+		ip, ipnet, err := net.ParseCIDR(cfg.InfraSubnet)
+		if err != nil {
+			return nil, fmt.Errorf("invalid infra_subnet %q: %w", cfg.InfraSubnet, err)
+		}
+		if ip.To4() == nil {
+			return nil, fmt.Errorf("infra_subnet must be an IPv4 CIDR, got %q", cfg.InfraSubnet)
+		}
+		ones, bits := ipnet.Mask.Size()
+		if bits != 32 || ones > 16 {
+			return nil, fmt.Errorf("infra_subnet %q is too small, must be at least /16", cfg.InfraSubnet)
+		}
+	}
+
 	return &cfg, nil
 }
 
 // DefaultConfig returns a default v2 configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		Version:  2,
-		Tailnets: []Tailnet{},
+		Version:     2,
+		InfraSubnet: "10.200.0.0/16",
+		Tailnets:    []Tailnet{},
 		Resolver: ResolverConfig{
 			Mode: "unified",
 		},
