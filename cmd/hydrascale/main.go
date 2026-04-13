@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -80,15 +81,14 @@ func loadConfig() (*config.Config, error) {
 }
 
 func newReconciler() *reconciler.Reconciler {
-	cfg, _ := loadConfig()
-	infraSubnet := "10.200.0.0/16"
-	if cfg != nil && cfg.InfraSubnet != "" {
-		infraSubnet = cfg.InfraSubnet
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
 	}
 	ns := namespaces.NewRealManager()
 	dm := daemon.NewRealManager()
 	rt := routing.NewRealManager()
-	return reconciler.New(configPath(), ns, dm, rt, 10*time.Second, nil, infraSubnet)
+	return reconciler.New(configPath(), ns, dm, rt, 10*time.Second, nil, cfg.InfraSubnet)
 }
 
 // --- Declarative commands ---
