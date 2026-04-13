@@ -80,10 +80,15 @@ func loadConfig() (*config.Config, error) {
 }
 
 func newReconciler() *reconciler.Reconciler {
+	cfg, _ := loadConfig()
+	infraSubnet := "10.200.0.0/16"
+	if cfg != nil && cfg.InfraSubnet != "" {
+		infraSubnet = cfg.InfraSubnet
+	}
 	ns := namespaces.NewRealManager()
 	dm := daemon.NewRealManager()
 	rt := routing.NewRealManager()
-	return reconciler.New(configPath(), ns, dm, rt, 10*time.Second, nil)
+	return reconciler.New(configPath(), ns, dm, rt, 10*time.Second, nil, infraSubnet)
 }
 
 // --- Declarative commands ---
@@ -426,7 +431,7 @@ func serveCmd() *cobra.Command {
 			var ha *hostaccess.Manager
 			dnsMode := cfg.EffectiveHostDNSMode()
 			if dnsMode != "" {
-				ha = hostaccess.NewManager(dnsMode, "/etc/hosts")
+				ha = hostaccess.NewManager(dnsMode, "/etc/hosts", cfg.InfraSubnet)
 			}
 
 			r := reconciler.New(
@@ -436,6 +441,7 @@ func serveCmd() *cobra.Command {
 				routing.NewRealManager(),
 				interval,
 				ha,
+				cfg.InfraSubnet,
 			)
 
 			// Set up JSON event logging if configured

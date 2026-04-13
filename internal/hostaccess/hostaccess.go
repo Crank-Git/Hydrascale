@@ -9,23 +9,28 @@ import (
 
 // Manager coordinates host access features: routes, DNS, and namespace setup.
 type Manager struct {
-	mu        sync.Mutex
-	dnsMode   string // "hosts" or "resolved"
-	hostsPath string
-	resolved  *ResolvedManager
+	mu          sync.Mutex
+	dnsMode     string // "hosts" or "resolved"
+	hostsPath   string
+	infraSubnet string
+	resolved    *ResolvedManager
 
 	// Track which tailnets have been synced so teardown knows what to clean up
 	activeTailnets map[string]TailnetPeers
 }
 
 // NewManager creates a new host access Manager.
-func NewManager(dnsMode string, hostsPath string) *Manager {
+func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
 	if hostsPath == "" {
 		hostsPath = "/etc/hosts"
+	}
+	if infraSubnet == "" {
+		infraSubnet = "10.200.0.0/16"
 	}
 	m := &Manager{
 		dnsMode:        dnsMode,
 		hostsPath:      hostsPath,
+		infraSubnet:    infraSubnet,
 		activeTailnets: make(map[string]TailnetPeers),
 	}
 	if dnsMode == "resolved" {
@@ -46,7 +51,7 @@ func (m *Manager) Sync(tailnetID string, status *daemon.TailscaleStatus, vethGW,
 	m.activeTailnets[tailnetID] = peers
 	m.mu.Unlock()
 
-	if err := SyncHostRoutes(peers); err != nil {
+	if err := SyncHostRoutes(peers, m.infraSubnet); err != nil {
 		log.Printf("host-access: route sync failed for %s: %v", tailnetID, err)
 	}
 
@@ -63,7 +68,7 @@ func (m *Manager) Teardown(tailnetID string) {
 	m.mu.Unlock()
 
 	if exists {
-		RemoveAllHostRoutes(peers.VethHost)
+		RemoveAllHostRoutes(peers.VethHost, m.infraSubnet)
 	}
 
 	m.syncDNS()
@@ -80,7 +85,7 @@ func (m *Manager) TeardownAll() {
 	m.mu.Unlock()
 
 	for _, peers := range tailnets {
-		RemoveAllHostRoutes(peers.VethHost)
+		RemoveAllHostRoutes(peers.VethHost, m.infraSubnet)
 	}
 
 	m.syncDNS()

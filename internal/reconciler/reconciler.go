@@ -27,13 +27,13 @@ import (
 type ActionType string
 
 const (
-	ActionCreateNS    ActionType = "create_namespace"
-	ActionDeleteNS    ActionType = "delete_namespace"
-	ActionStartDaemon ActionType = "start_daemon"
-	ActionStopDaemon  ActionType = "stop_daemon"
-	ActionSyncRoutes      ActionType = "sync_routes"
-	ActionSyncHostAccess  ActionType = "sync_host_access"
-	ActionAuthDaemon      ActionType = "auth_daemon"
+	ActionCreateNS       ActionType = "create_namespace"
+	ActionDeleteNS       ActionType = "delete_namespace"
+	ActionStartDaemon    ActionType = "start_daemon"
+	ActionStopDaemon     ActionType = "stop_daemon"
+	ActionSyncRoutes     ActionType = "sync_routes"
+	ActionSyncHostAccess ActionType = "sync_host_access"
+	ActionAuthDaemon     ActionType = "auth_daemon"
 )
 
 // MaxFailures is the number of consecutive failures before a tailnet enters error state.
@@ -74,12 +74,13 @@ type Event struct {
 
 // Reconciler drives actual state toward desired state.
 type Reconciler struct {
-	configPath string
-	ns         namespaces.Manager
-	dm         daemon.Manager
-	rt         routing.Manager
-	ha         *hostaccess.Manager
-	interval   time.Duration
+	configPath  string
+	ns          namespaces.Manager
+	dm          daemon.Manager
+	rt          routing.Manager
+	ha          *hostaccess.Manager
+	interval    time.Duration
+	infraSubnet string
 
 	mu            sync.Mutex
 	failureCounts map[string]int    // tailnetID -> consecutive failure count
@@ -93,7 +94,10 @@ type Reconciler struct {
 }
 
 // New creates a new Reconciler with the given dependencies.
-func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing.Manager, interval time.Duration, ha *hostaccess.Manager) *Reconciler {
+func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing.Manager, interval time.Duration, ha *hostaccess.Manager, infraSubnet string) *Reconciler {
+	if infraSubnet == "" {
+		infraSubnet = "10.200.0.0/16"
+	}
 	return &Reconciler{
 		configPath:    configPath,
 		ns:            ns,
@@ -101,6 +105,7 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		rt:            rt,
 		ha:            ha,
 		interval:      interval,
+		infraSubnet:   infraSubnet,
 		failureCounts: make(map[string]int),
 		errorStates:   make(map[string]bool),
 		pausedStates:  make(map[string]bool),
@@ -264,20 +269,20 @@ func (r *Reconciler) Apply(actions []Action) {
 func (r *Reconciler) executeAction(action Action) error {
 	switch action.Type {
 	case ActionCreateNS:
-		if err := r.ns.Create(action.TailnetID); err != nil {
+		if err := r.ns.Create(action.TailnetID, r.infraSubnet); err != nil {
 			return err
 		}
 		// Set up host access iptables if enabled for this tailnet
 		if cfg, err := config.LoadConfig(r.configPath); err == nil && cfg.TailnetHostAccess(action.TailnetID) {
 			nsName := r.ns.GetName(action.TailnetID)
 			index := namespaces.VethIndex(nsName)
-			if err := namespaces.SetupHostAccess(nsName, index); err != nil {
+			if err := namespaces.SetupHostAccess(nsName, index, r.infraSubnet); err != nil {
 				log.Printf("host-access: setup failed for %s: %v", nsName, err)
 			}
 		}
 		return nil
 	case ActionDeleteNS:
-		return r.ns.Delete(action.NsName)
+		return r.ns.Delete(action.NsName, r.infraSubnet)
 	case ActionStartDaemon:
 		return r.dm.Start(action.TailnetID, action.NsName)
 	case ActionStopDaemon:
@@ -290,7 +295,7 @@ func (r *Reconciler) executeAction(action Action) error {
 		if err != nil {
 			return err
 		}
-		return r.rt.SyncRoutes(action.NsName, routes)
+		return r.rt.SyncRoutes(action.NsName, routes, r.infraSubnet)
 	case ActionSyncHostAccess:
 		if r.ha == nil {
 			return nil
@@ -298,12 +303,15 @@ func (r *Reconciler) executeAction(action Action) error {
 		nsName := r.ns.GetName(action.TailnetID)
 		index := namespaces.VethIndex(nsName)
 		// Ensure namespace-side iptables are set up (idempotent — safe every cycle)
-		namespaces.SetupHostAccess(nsName, index)
+		namespaces.SetupHostAccess(nsName, index, r.infraSubnet)
 		status, err := r.dm.GetStatus(context.Background(), nsName, action.TailnetID)
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
 		}
-		vethGW := fmt.Sprintf("10.200.%d.2", index)
+		_, _, _, vethGW, err := namespaces.VethIPs(r.infraSubnet, index)
+		if err != nil {
+			return fmt.Errorf("host-access: failed to get veth IPs: %w", err)
+		}
 		vethHost, _ := namespaces.VethNames(nsName)
 		r.ha.Sync(action.TailnetID, status, vethGW, vethHost)
 		return nil

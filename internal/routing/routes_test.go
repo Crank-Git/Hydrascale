@@ -164,7 +164,7 @@ func TestParseRouteOutput(t *testing.T) {
 		"192.168.100.0/24 dev eth1 proto kernel scope link src 192.168.100.1",
 	}, "\n")
 
-	got := parseRouteOutput(output)
+	got := parseRouteOutput(output, "10.200.0.0/16")
 	want := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.100.0/24"}
 
 	if len(got) != len(want) {
@@ -181,7 +181,7 @@ func TestListRoutes_ParsesOutput(t *testing.T) {
 	// Test the parseRouteOutput function which is the core of ListRoutes
 	// (ListRoutes itself calls exec which needs root)
 	output := "10.0.0.0/8 via 10.0.0.1 dev eth0\n172.16.0.0/12 dev tun0\ndefault via 10.0.0.1 dev eth0\n"
-	got := parseRouteOutput(output)
+	got := parseRouteOutput(output, "10.200.0.0/16")
 	want := []string{"10.0.0.0/8", "172.16.0.0/12"}
 
 	if !slices.Equal(got, want) {

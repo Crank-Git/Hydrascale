@@ -38,7 +38,7 @@ func TestSync_FullFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewManager("hosts", hostsPath)
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	status := makeTestStatus()
 
 	m.Sync("havoc", status, "10.0.0.1", "veth0")
@@ -81,7 +81,7 @@ func TestSync_NilStatus(t *testing.T) {
 	}
 	info1, _ := os.Stat(hostsPath)
 
-	m := NewManager("hosts", hostsPath)
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	m.Sync("havoc", nil, "10.0.0.1", "veth0")
 
 	info2, _ := os.Stat(hostsPath)
@@ -101,7 +101,7 @@ func TestSync_PartialFailure(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath)
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	status := makeTestStatus()
 
 	// Routes will fail (no root), but should not block DNS update
@@ -127,7 +127,7 @@ func TestTeardown_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath)
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 
 	// Should not panic
 	m.Teardown("nonexistent-tailnet")

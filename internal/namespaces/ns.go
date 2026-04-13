@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,13 +14,13 @@ import (
 
 // Manager defines the interface for network namespace operations.
 type Manager interface {
-	Create(tailnetID string) error
-	Delete(nsName string) error
+	Create(tailnetID string, infraSubnet string) error
+	Delete(nsName string, infraSubnet string) error
 	List() ([]string, error)
 	GetName(tailnetID string) string
 	GetTailnetID(nsName string) string
-	SetupVeth(nsName string, index int) error
-	TeardownVeth(nsName string) error
+	SetupVeth(nsName string, index int, infraSubnet string) error
+	TeardownVeth(nsName string, infraSubnet string) error
 }
 
 // RealManager implements Manager using real system calls.
@@ -41,23 +42,23 @@ func (m *RealManager) GetTailnetID(nsName string) string {
 }
 
 // Create creates a new network namespace for the given tailnet ID.
-func (m *RealManager) Create(tailnetID string) error {
-	return CreateNamespace(tailnetID)
+func (m *RealManager) Create(tailnetID string, infraSubnet string) error {
+	return CreateNamespace(tailnetID, infraSubnet)
 }
 
 // Delete deletes the network namespace with the given name.
-func (m *RealManager) Delete(nsName string) error {
-	return DeleteNamespace(nsName)
+func (m *RealManager) Delete(nsName string, infraSubnet string) error {
+	return DeleteNamespace(nsName, infraSubnet)
 }
 
 // SetupVeth creates a veth pair between host and namespace for DNS routing.
-func (m *RealManager) SetupVeth(nsName string, index int) error {
-	return SetupVeth(nsName, index)
+func (m *RealManager) SetupVeth(nsName string, index int, infraSubnet string) error {
+	return SetupVeth(nsName, index, infraSubnet)
 }
 
 // TeardownVeth removes the veth pair for a namespace.
-func (m *RealManager) TeardownVeth(nsName string) error {
-	return TeardownVeth(nsName)
+func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
+	return TeardownVeth(nsName, infraSubnet)
 }
 
 // List returns a list of all Hydrascale network namespaces.
@@ -73,7 +74,7 @@ func GetNamespaceName(tailnetID string) string {
 
 // CreateNamespace creates a new network namespace for the given tailnet ID.
 // After creating the namespace, it sets up a veth pair for DNS routing.
-func CreateNamespace(tailnetID string) error {
+func CreateNamespace(tailnetID string, infraSubnet string) error {
 	namespaceName := GetNamespaceName(tailnetID)
 
 	cmd := exec.Command("ip", "netns", "add", namespaceName)
@@ -86,7 +87,7 @@ func CreateNamespace(tailnetID string) error {
 
 	// Set up veth pair for DNS routing
 	index := VethIndex(namespaceName)
-	if err := SetupVeth(namespaceName, index); err != nil {
+	if err := SetupVeth(namespaceName, index, infraSubnet); err != nil {
 		// Best effort cleanup: delete the namespace if veth setup fails
 		_ = exec.Command("ip", "netns", "del", namespaceName).Run()
 		return fmt.Errorf("failed to setup veth for namespace %q: %v", namespaceName, err)
@@ -97,9 +98,9 @@ func CreateNamespace(tailnetID string) error {
 
 // DeleteNamespace deletes the network namespace with the given name.
 // Tears down the veth pair before deleting the namespace.
-func DeleteNamespace(namespaceName string) error {
+func DeleteNamespace(namespaceName string, infraSubnet string) error {
 	// Tear down veth pair first (best effort - namespace deletion will clean up anyway)
-	if err := TeardownVeth(namespaceName); err != nil {
+	if err := TeardownVeth(namespaceName, infraSubnet); err != nil {
 		log.Printf("Warning: veth teardown for %s: %v", namespaceName, err)
 	}
 
@@ -153,7 +154,7 @@ func VethIndex(nsName string) int {
 	h := sha256.Sum256([]byte(nsName))
 	v := int(binary.BigEndian.Uint32(h[:4]))
 	// Map to 1-254 range (avoid 0 and 255)
-	return (v%254) + 1
+	return (v % 254) + 1
 }
 
 // VethNames returns a pair of interface names (host, namespace) that fit
@@ -165,15 +166,40 @@ func VethNames(nsName string) (host, ns string) {
 	return "vh" + tag, "vn" + tag
 }
 
+// VethIPs calculates the IPs for a veth pair given an infra subnet and an index.
+func VethIPs(infraSubnet string, index int) (hostIP, nsIP, hostGW, nsGW string, err error) {
+	_, ipnet, err := net.ParseCIDR(infraSubnet)
+	if err != nil {
+		return "", "", "", "", err
+	}
+
+	// Use the index to pick a /30 subnet within the infraSubnet
+	// index is 1-based.
+	// 10.200.0.0/16 -> 10.200.0.0/30 (idx 1), 10.200.0.4/30 (idx 2), etc.
+	base := binary.BigEndian.Uint32(ipnet.IP.To4())
+	offset := uint32(index-1) * 4
+
+	uHostIP := base + offset + 1
+	uNsIP := base + offset + 2
+
+	ip1 := make(net.IP, 4)
+	binary.BigEndian.PutUint32(ip1, uHostIP)
+	ip2 := make(net.IP, 4)
+	binary.BigEndian.PutUint32(ip2, uNsIP)
+
+	return ip1.String() + "/30", ip2.String() + "/30", ip1.String(), ip2.String(), nil
+}
+
 // SetupVeth creates a veth pair between host and namespace for DNS routing.
-// Host side: vh<hash> with IP 10.200.N.1/30
-// Namespace side: vn<hash> with IP 10.200.N.2/30
-// Adds host route: 100.100.100.100 via 10.200.N.2 dev vh<hash>
-func SetupVeth(nsName string, index int) error {
+// Host side: vh<hash> with IP from infraSubnet
+// Namespace side: vn<hash> with IP from infraSubnet
+// Adds host route: 100.100.100.100 via namespace side dev vh<hash>
+func SetupVeth(nsName string, index int, infraSubnet string) error {
 	hostVeth, nsVeth := VethNames(nsName)
-	hostIP := fmt.Sprintf("10.200.%d.1/30", index)
-	nsIP := fmt.Sprintf("10.200.%d.2/30", index)
-	nsGW := fmt.Sprintf("10.200.%d.2", index)
+	hostIP, nsIP, hostGW, nsGW, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		return err
+	}
 
 	// Create veth pair
 	cmd := exec.Command("ip", "link", "add", hostVeth, "type", "veth", "peer", "name", nsVeth)
@@ -212,7 +238,6 @@ func SetupVeth(nsName string, index int) error {
 	}
 
 	// Add default route inside namespace so tailscaled can reach the internet
-	hostGW := fmt.Sprintf("10.200.%d.1", index)
 	cmd = exec.Command("ip", "netns", "exec", nsName, "ip", "route", "add", "default", "via", hostGW, "dev", nsVeth)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to add default route in namespace %s: %v (%s)", nsName, err, out)
@@ -253,29 +278,30 @@ func SetupVeth(nsName string, index int) error {
 		return fmt.Errorf("failed to add route for 100.100.100.100 via %s: %v (%s)", nsGW, err, out)
 	}
 
-	log.Printf("Set up veth pair for namespace %s (10.200.%d.0/30)", nsName, index)
+	log.Printf("Set up veth pair for namespace %s with IPs from %s", nsName, infraSubnet)
 	return nil
 }
 
 // TeardownVeth removes the veth pair for a namespace.
 // Deleting the host side automatically removes the peer.
-func TeardownVeth(nsName string) error {
+func TeardownVeth(nsName string, infraSubnet string) error {
 	hostVeth, _ := VethNames(nsName)
 
 	// Remove iptables rules (best effort)
 	index := VethIndex(nsName)
-	nsIP := fmt.Sprintf("10.200.%d.2/30", index)
-	delFwd1 := exec.Command("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
-	_ = delFwd1.Run()
-	delFwd2 := exec.Command("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-	_ = delFwd2.Run()
-	delNat := exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
-	_ = delNat.Run()
+	_, nsIP, _, nsGW, err := VethIPs(infraSubnet, index)
+	if err == nil {
+		delFwd1 := exec.Command("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
+		_ = delFwd1.Run()
+		delFwd2 := exec.Command("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+		_ = delFwd2.Run()
+		delNat := exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+		_ = delNat.Run()
 
-	// Remove the host route first (best effort)
-	nsGW := fmt.Sprintf("10.200.%d.2", index)
-	delRoute := exec.Command("ip", "route", "del", "100.100.100.100", "via", nsGW, "dev", hostVeth)
-	_ = delRoute.Run() // ignore error if route doesn't exist
+		// Remove the host route first (best effort)
+		delRoute := exec.Command("ip", "route", "del", "100.100.100.100", "via", nsGW, "dev", hostVeth)
+		_ = delRoute.Run() // ignore error if route doesn't exist
+	}
 
 	// Delete the veth pair (deleting one end removes both)
 	cmd := exec.Command("ip", "link", "del", hostVeth)
@@ -292,13 +318,16 @@ func TeardownVeth(nsName string) error {
 // - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
 // All rules are idempotent (check before insert).
-func SetupHostAccess(nsName string, index int) error {
+func SetupHostAccess(nsName string, index int, infraSubnet string) error {
 	_, nsVeth := VethNames(nsName)
-	nsIP := fmt.Sprintf("10.200.%d.0/30", index)
+	_, nsIPRange, _, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		return err
+	}
 
 	// Masquerade on tailscale0
-	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-o", "tailscale0", "-j", "MASQUERADE").Run() != nil {
-		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-o", "tailscale0", "-j", "MASQUERADE")
+	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE").Run() != nil {
+		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("host-access: failed to add tailscale0 masquerade in %s: %v (%s)", nsName, err, out)
 		}
@@ -336,11 +365,15 @@ func SetupHostAccess(nsName string, index int) error {
 }
 
 // TeardownHostAccess removes namespace-side host access iptables rules and resolv.conf.
-func TeardownHostAccess(nsName string, index int) {
+func TeardownHostAccess(nsName string, index int, infraSubnet string) {
 	_, nsVeth := VethNames(nsName)
-	nsIP := fmt.Sprintf("10.200.%d.0/30", index)
+	_, nsIPRange, _, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		log.Printf("host-access: failed to get veth IPs for teardown: %v", err)
+		return
+	}
 
-	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-o", "tailscale0", "-j", "MASQUERADE").Run()
+	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE").Run()
 	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run()
 	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run()
 

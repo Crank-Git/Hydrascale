@@ -30,14 +30,14 @@ func newMockNS() *mockNS {
 	return &mockNS{namespaces: make(map[string]bool)}
 }
 
-func (m *mockNS) Create(tailnetID string) error {
+func (m *mockNS) Create(tailnetID string, infraSubnet string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.namespaces[m.GetName(tailnetID)] = true
 	return nil
 }
 
-func (m *mockNS) Delete(nsName string) error {
+func (m *mockNS) Delete(nsName string, infraSubnet string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.namespaces, nsName)
@@ -62,8 +62,8 @@ func (m *mockNS) GetTailnetID(nsName string) string {
 	return namespaces.GetTailnetFromNamespace(nsName)
 }
 
-func (m *mockNS) SetupVeth(nsName string, index int) error { return nil }
-func (m *mockNS) TeardownVeth(nsName string) error         { return nil }
+func (m *mockNS) SetupVeth(nsName string, index int, infraSubnet string) error { return nil }
+func (m *mockNS) TeardownVeth(nsName string, infraSubnet string) error         { return nil }
 
 type mockDaemon struct {
 	mu           sync.Mutex
@@ -113,8 +113,12 @@ type mockRouting struct{}
 func (m *mockRouting) PollStatus(nsName, socketPath string) ([]routing.Route, error) {
 	return nil, nil
 }
-func (m *mockRouting) SyncRoutes(nsName string, routes []routing.Route) error { return nil }
-func (m *mockRouting) ListRoutes(nsName string) ([]string, error)             { return nil, nil }
+func (m *mockRouting) SyncRoutes(nsName string, routes []routing.Route, infraSubnet string) error {
+	return nil
+}
+func (m *mockRouting) ListRoutes(nsName string, infraSubnet string) ([]string, error) {
+	return nil, nil
+}
 
 // --- Helpers ---
 
@@ -133,7 +137,7 @@ func writeTestConfig(t *testing.T, tailnets ...string) string {
 }
 
 func newTestReconciler(cfgPath string) *reconciler.Reconciler {
-	return reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil)
+	return reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
 }
 
 // startTestServer starts a Server on a temp socket and returns the server, client, and cleanup func.
@@ -380,7 +384,7 @@ func TestServerShutdownCleanup(t *testing.T) {
 // Verify ReconcileResponse.Message is populated on failure.
 func TestReconcileEndpointError(t *testing.T) {
 	// Use a non-existent config path so Reconcile() returns an error.
-	r := reconciler.New("/nonexistent/config.yaml", newMockNS(), newMockDaemon(), &mockRouting{}, time.Second, nil)
+	r := reconciler.New("/nonexistent/config.yaml", newMockNS(), newMockDaemon(), &mockRouting{}, time.Second, nil, "10.200.0.0/16")
 	socketPath := filepath.Join(t.TempDir(), "err-api.sock")
 	srv := NewServer(socketPath, r)
 	if err := srv.Start(); err != nil {
@@ -421,7 +425,7 @@ func TestDetailEndpoint_HappyPath(t *testing.T) {
 			"peer2": {HostName: "peer2", Online: false},
 		},
 	}
-	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
 	_, client, cleanup := startTestServer(t, r)
 	defer cleanup()
 
@@ -452,7 +456,7 @@ func TestDetailEndpoint_DaemonStarting(t *testing.T) {
 	md := newMockDaemon()
 	md.statusResult = nil
 	md.statusErr = nil
-	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
 	_, client, cleanup := startTestServer(t, r)
 	defer cleanup()
 
@@ -472,7 +476,7 @@ func TestDetailEndpoint_DaemonError(t *testing.T) {
 	cfgPath := writeTestConfig(t, "alpha")
 	md := newMockDaemon()
 	md.statusErr = fmt.Errorf("context deadline exceeded")
-	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
 	_, client, cleanup := startTestServer(t, r)
 	defer cleanup()
 
@@ -504,7 +508,7 @@ func TestDetailEndpoint_NoPeers(t *testing.T) {
 		Self: daemon.StatusNode{TailscaleIPs: []string{"100.64.1.1"}},
 		Peer: map[string]daemon.StatusNode{},
 	}
-	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil)
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
 	_, client, cleanup := startTestServer(t, r)
 	defer cleanup()
 

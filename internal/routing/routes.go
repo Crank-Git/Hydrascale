@@ -14,8 +14,8 @@ import (
 // Manager defines the interface for route management operations.
 type Manager interface {
 	PollStatus(nsName, socketPath string) ([]Route, error)
-	SyncRoutes(nsName string, routes []Route) error
-	ListRoutes(nsName string) ([]string, error)
+	SyncRoutes(nsName string, routes []Route, infraSubnet string) error
+	ListRoutes(nsName string, infraSubnet string) ([]string, error)
 }
 
 // RealManager implements Manager using real system calls.
@@ -30,12 +30,12 @@ func (m *RealManager) PollStatus(nsName, socketPath string) ([]Route, error) {
 	return PollStatus(nsName, socketPath)
 }
 
-func (m *RealManager) SyncRoutes(nsName string, routes []Route) error {
-	return SyncRoutes(nsName, routes)
+func (m *RealManager) SyncRoutes(nsName string, routes []Route, infraSubnet string) error {
+	return SyncRoutes(nsName, routes, infraSubnet)
 }
 
-func (m *RealManager) ListRoutes(nsName string) ([]string, error) {
-	return ListRoutes(nsName)
+func (m *RealManager) ListRoutes(nsName string, infraSubnet string) ([]string, error) {
+	return ListRoutes(nsName, infraSubnet)
 }
 
 // Route represents a Tailscale route.
@@ -94,19 +94,21 @@ func parseCIDR(network string) (net.IP, int, error) {
 
 // ListRoutes returns the route destinations currently configured in the namespace.
 // It parses the output of "ip netns exec <ns> ip route show".
-func ListRoutes(nsName string) ([]string, error) {
+func ListRoutes(nsName string, infraSubnet string) ([]string, error) {
 	output, err := exec.Command("ip", "netns", "exec", nsName, "ip", "route", "show").Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routes in %s: %w", nsName, err)
 	}
-	return parseRouteOutput(string(output)), nil
+	return parseRouteOutput(string(output), infraSubnet), nil
 }
 
 // parseRouteOutput extracts destination CIDRs from ip route show output.
 // Each line starts with the destination (e.g. "10.0.0.0/8 via 192.168.1.1 dev eth0").
 // Lines starting with "default" are skipped since they aren't CIDR routes we manage.
-func parseRouteOutput(output string) []string {
+func parseRouteOutput(output string, infraSubnet string) []string {
 	var routes []string
+	_, infraNet, _ := net.ParseCIDR(infraSubnet)
+
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -123,9 +125,13 @@ func parseRouteOutput(output string) []string {
 		}
 		// Validate it looks like a CIDR
 		if _, _, err := net.ParseCIDR(dest); err == nil {
-			// Skip veth infrastructure routes (10.200.x.0/30) managed by namespace setup
-			if strings.HasPrefix(dest, "10.200.") && strings.HasSuffix(dest, "/30") {
-				continue
+			// Skip veth infrastructure routes managed by namespace setup
+			if infraNet != nil {
+				if destIP, _, err := net.ParseCIDR(dest); err == nil {
+					if infraNet.Contains(destIP) {
+						continue
+					}
+				}
 			}
 			routes = append(routes, dest)
 		}
@@ -136,8 +142,8 @@ func parseRouteOutput(output string) []string {
 // SyncRoutes synchronizes routes to the specified namespace using a diff-based approach.
 // It compares desired routes against actual routes, adding missing and removing stale ones.
 // Individual failures are collected and returned as a combined error.
-func SyncRoutes(namespaceName string, routes []Route) error {
-	actual, err := ListRoutes(namespaceName)
+func SyncRoutes(namespaceName string, routes []Route, infraSubnet string) error {
+	actual, err := ListRoutes(namespaceName, infraSubnet)
 	if err != nil {
 		return fmt.Errorf("failed to list current routes: %w", err)
 	}
