@@ -53,13 +53,13 @@ func TestBuildTailscaleUpArgs(t *testing.T) {
 			name:       "no control URL (standard Tailscale)",
 			socketPath: "/tmp/test.sock",
 			controlURL: "",
-			wantArgs:   []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=false"},
+			wantArgs:   []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=true"},
 		},
 		{
 			name:       "with control URL (Headscale)",
 			socketPath: "/tmp/test.sock",
 			controlURL: "https://headscale.example.com",
-			wantArgs:   []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=false", "--login-server=https://headscale.example.com"},
+			wantArgs:   []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=true", "--login-server=https://headscale.example.com"},
 		},
 	}
 	for _, tt := range tests {

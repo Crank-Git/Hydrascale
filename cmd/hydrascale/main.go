@@ -401,7 +401,7 @@ func serveCmd() *cobra.Command {
 			if bindAddr == "" {
 				bindAddr = dns.DefaultBindAddress
 			}
-			forwarder, fwdErr := dns.NewForwarder(nil, 5*time.Second, bindAddr)
+			forwarder, fwdErr := dns.NewForwarderFromResolvConf(5*time.Second, bindAddr)
 			if fwdErr != nil {
 				fmt.Fprintf(os.Stderr, "DNS forwarder init warning: %v (starting without DNS)\n", fwdErr)
 			} else {

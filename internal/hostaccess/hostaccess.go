@@ -129,7 +129,7 @@ func (m *Manager) syncDNS() {
 		if peers.MagicDNSSuffix != "" {
 			domains = append(domains, peers.MagicDNSSuffix)
 			if peers.VethGateway != "" {
-				domainRoutes[peers.MagicDNSSuffix] = peers.VethGateway + ":53"
+				domainRoutes[peers.MagicDNSSuffix] = peers.VethGateway
 			}
 		}
 	}

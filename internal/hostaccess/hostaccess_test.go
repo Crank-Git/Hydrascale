@@ -152,11 +152,11 @@ func TestSyncDNS_SetsDomainRoutes(t *testing.T) {
 		t.Fatal("SetDomainRoutes was never called")
 	}
 	got := fwd.lastRoutes
-	if got["corp.ts.net"] != "10.200.0.2:53" {
-		t.Errorf("corp.ts.net route = %q, want %q", got["corp.ts.net"], "10.200.0.2:53")
+	if got["corp.ts.net"] != "10.200.0.2" {
+		t.Errorf("corp.ts.net route = %q, want %q", got["corp.ts.net"], "10.200.0.2")
 	}
-	if got["home.ts.net"] != "10.200.0.6:53" {
-		t.Errorf("home.ts.net route = %q, want %q", got["home.ts.net"], "10.200.0.6:53")
+	if got["home.ts.net"] != "10.200.0.6" {
+		t.Errorf("home.ts.net route = %q, want %q", got["home.ts.net"], "10.200.0.6")
 	}
 }
 
