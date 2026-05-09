@@ -13,11 +13,30 @@ var (
 	cgnatNet *net.IPNet
 	tsV6Net  *net.IPNet
 	magicDNS = "100.100.100.100"
+
+	// Tailscale exit-node split defaults. tailscaled installs these into
+	// the namespace's table 52 when an exit node is selected; they should
+	// never be replicated to the host's main routing table because doing
+	// so funnels every host packet (including DNS to public resolvers)
+	// into the namespace. See issue #21.
+	exitNodeSplitDefaults = map[string]struct{}{
+		"0.0.0.0/1":   {},
+		"128.0.0.0/1": {},
+		"::/1":        {},
+		"8000::/1":    {},
+	}
 )
 
 func init() {
 	_, cgnatNet, _ = net.ParseCIDR("100.64.0.0/10")
 	_, tsV6Net, _ = net.ParseCIDR("fd7a:115c:a1e0::/48")
+}
+
+// isExitNodeSplitDefault reports whether dest is one of the Tailscale
+// exit-node split-default routes (0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1).
+func isExitNodeSplitDefault(dest string) bool {
+	_, ok := exitNodeSplitDefaults[dest]
+	return ok
 }
 
 // isCGNAT reports whether dest is in the Tailscale CGNAT range 100.64.0.0/10.
@@ -129,6 +148,9 @@ func parseTableRoutes(output string, infraSubnet string) []string {
 		if dest == "default" || dest == "0.0.0.0/0" || dest == "::/0" {
 			continue
 		}
+		if isExitNodeSplitDefault(dest) {
+			continue
+		}
 		if dest == magicDNS {
 			continue
 		}
@@ -223,12 +245,85 @@ func listNsTableRoutesV6(nsName string) ([]string, error) {
 		if dest == "default" || dest == "::/0" {
 			continue
 		}
+		if isExitNodeSplitDefault(dest) {
+			continue
+		}
 		if isTailscaleV6(dest) {
 			continue
 		}
 		routes = append(routes, dest)
 	}
 	return routes, nil
+}
+
+// parseRouteGetOutput extracts the `dev` interface name and whether a `via`
+// gateway is present from the first line of `ip [-6] route get` output.
+// Examples:
+//
+//	"192.168.1.0 dev eth0 src 192.168.1.50"          -> dev=eth0, hasVia=false
+//	"10.42.0.0 via 192.168.1.1 dev eth0 src ..."     -> dev=eth0, hasVia=true
+//	"100.64.0.5 via 10.200.0.1 dev vh<hash> src ..." -> dev=vh<hash>, hasVia=true
+func parseRouteGetOutput(output string) (dev string, hasVia bool) {
+	line := strings.SplitN(strings.TrimSpace(output), "\n", 2)[0]
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		switch f {
+		case "dev":
+			if i+1 < len(fields) {
+				dev = fields[i+1]
+			}
+		case "via":
+			hasVia = true
+		}
+	}
+	return dev, hasVia
+}
+
+// wouldClobberDirectLAN reports whether installing a host route to dest
+// would shadow a directly-connected, non-vh* route (e.g. the LAN on eth0).
+// We probe with `ip [-6] route get <network-addr>`: if the kernel resolves
+// the destination via a non-vh* device with no `via` gateway, the destination
+// is on a directly-attached LAN and we must not replace its route. Issue #21.
+func wouldClobberDirectLAN(dest string, v6 bool) bool {
+	addr := dest
+	if i := strings.Index(addr, "/"); i >= 0 {
+		addr = addr[:i]
+	}
+	args := []string{"route", "get", addr}
+	if v6 {
+		args = []string{"-6", "route", "get", addr}
+	}
+	out, err := exec.Command("ip", args...).Output()
+	if err != nil {
+		// If the kernel can't resolve it (no route at all), installing
+		// our route is fine — there's nothing to clobber.
+		return false
+	}
+	dev, hasVia := parseRouteGetOutput(string(out))
+	if strings.HasPrefix(dev, "vh") {
+		// One of ours (or a sibling tailnet's). Replace is idempotent / safe.
+		return false
+	}
+	// Non-vh* dev with no `via` means the destination is reached directly
+	// over an attached LAN — installing our route would steal that traffic.
+	return !hasVia
+}
+
+// filterClobberingRoutes drops candidate destinations that would shadow a
+// directly-connected non-vh* route on the host. Skipped entries are logged.
+func filterClobberingRoutes(candidates []string, v6 bool) []string {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	out := make([]string, 0, len(candidates))
+	for _, dest := range candidates {
+		if wouldClobberDirectLAN(dest, v6) {
+			log.Printf("hostaccess: skipping route %s — would clobber a directly-connected host LAN route", dest)
+			continue
+		}
+		out = append(out, dest)
+	}
+	return out
 }
 
 // SyncHostRoutes synchronises host routing table entries for all peers in the
@@ -254,6 +349,13 @@ func SyncHostRoutes(peers TailnetPeers, infraSubnet string) error {
 		wantV4 = mergeRoutes(wantV4, nsV4)
 		wantV6 = mergeRoutes(wantV6, nsV6)
 	}
+
+	// Drop any candidate that would shadow a directly-connected host LAN
+	// route. Peer IPs are CGNAT (or fd7a:115c:a1e0::/48) so they never
+	// overlap a real LAN; the filter is meaningful for accepted subnet
+	// routes from table 52. See issue #21.
+	wantV4 = filterClobberingRoutes(wantV4, false)
+	wantV6 = filterClobberingRoutes(wantV6, true)
 
 	// Gather current host routes
 	v4Out, err := exec.Command("ip", "route", "show").Output()
