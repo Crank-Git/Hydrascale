@@ -110,6 +110,11 @@ func DeleteNamespace(namespaceName string, infraSubnet string) error {
 		return fmt.Errorf("failed to delete namespace %q: %s", namespaceName, output)
 	}
 
+	// Clean up /etc/netns/<ns>/ (resolv.conf override and the directory itself).
+	netnsDir := filepath.Join("/etc/netns", namespaceName)
+	_ = os.Remove(filepath.Join(netnsDir, "resolv.conf"))
+	_ = os.Remove(netnsDir)
+
 	log.Printf("Deleted namespace: %s", namespaceName)
 	return nil
 }
@@ -343,34 +348,44 @@ func SetupHostAccess(nsName string, index int, infraSubnet string) error {
 		}
 	}
 
-	// /etc/netns/NAME/resolv.conf
-	//
-	// Tailscaled's DNS proxy requires at least one reachable, non-loopback
-	// upstream resolver to answer queries — even for names it could satisfy
-	// locally from its peer table. If its resolver chain is empty (or only
-	// contains 100.100.100.100 itself, which it filters out as a self-loop),
-	// it returns SERVFAIL for every query. So write real host upstreams here,
-	// not 100.100.100.100. Queries that arrive at tailscaled via the veth DNAT
-	// path still work: tailscaled answers MagicDNS locally and forwards the
-	// rest to these upstreams.
-	netnsDir := filepath.Join("/etc/netns", nsName)
-	if err := os.MkdirAll(netnsDir, 0755); err != nil {
-		log.Printf("host-access: failed to create %s: %v", netnsDir, err)
-	} else {
-		resolvPath := filepath.Join(netnsDir, "resolv.conf")
-		upstreams := resolveHostUpstreams()
-		var buf strings.Builder
-		for _, ns := range upstreams {
-			buf.WriteString("nameserver ")
-			buf.WriteString(ns)
-			buf.WriteString("\n")
-		}
-		if err := os.WriteFile(resolvPath, []byte(buf.String()), 0644); err != nil {
-			log.Printf("host-access: failed to write %s: %v", resolvPath, err)
-		}
+	if err := WriteNamespaceResolvConf(nsName); err != nil {
+		log.Printf("host-access: failed to write resolv.conf for %s: %v", nsName, err)
 	}
 
 	log.Printf("Set up host access rules for namespace %s", nsName)
+	return nil
+}
+
+// WriteNamespaceResolvConf creates /etc/netns/<nsName>/resolv.conf so that
+// `ip netns exec` bind-mounts it over /etc/resolv.conf for processes spawned
+// in the namespace. Without this file, tailscaled --accept-dns=true rewrites
+// the host's /etc/resolv.conf on startup (pointing it at 100.100.100.100,
+// which only works inside the namespace), breaking host DNS — see issue #22.
+//
+// The contents are real, non-loopback host upstreams (resolveHostUpstreams).
+// Tailscaled's DNS proxy needs at least one reachable upstream to answer any
+// query, even names it can satisfy locally from its peer table; an empty or
+// loopback-only chain produces SERVFAIL. 127.0.0.0/8 is filtered because
+// loopback on the host is unreachable from inside the namespace. If no usable
+// upstream is found, 1.1.1.1 is used as a last resort.
+//
+// Idempotent: safe to call repeatedly.
+func WriteNamespaceResolvConf(nsName string) error {
+	netnsDir := filepath.Join("/etc/netns", nsName)
+	if err := os.MkdirAll(netnsDir, 0755); err != nil {
+		return fmt.Errorf("create %s: %w", netnsDir, err)
+	}
+	resolvPath := filepath.Join(netnsDir, "resolv.conf")
+	upstreams := resolveHostUpstreams()
+	var buf strings.Builder
+	for _, ns := range upstreams {
+		buf.WriteString("nameserver ")
+		buf.WriteString(ns)
+		buf.WriteString("\n")
+	}
+	if err := os.WriteFile(resolvPath, []byte(buf.String()), 0644); err != nil {
+		return fmt.Errorf("write %s: %w", resolvPath, err)
+	}
 	return nil
 }
 

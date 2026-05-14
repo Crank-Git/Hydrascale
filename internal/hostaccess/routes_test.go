@@ -155,6 +155,95 @@ func TestRouteSync_NoOp(t *testing.T) {
 	}
 }
 
+func TestParseTableRoutes_ExcludesExitNodeSplitDefaults(t *testing.T) {
+	const infraSubnet = "10.200.0.0/16"
+	// Both v4 split-defaults appear in table 52 when an exit node is in use.
+	// Real subnet routes should still pass through.
+	input := `0.0.0.0/1 via 100.64.0.1 dev tailscale0
+128.0.0.0/1 via 100.64.0.1 dev tailscale0
+192.168.42.0/24 via 100.64.0.1 dev tailscale0
+default via 100.64.0.1 dev tailscale0
+`
+	got := parseTableRoutes(input, infraSubnet)
+	for _, dest := range got {
+		if dest == "0.0.0.0/1" || dest == "128.0.0.0/1" {
+			t.Errorf("parseTableRoutes leaked exit-node split default %q (got %v)", dest, got)
+		}
+	}
+	if len(got) != 1 || got[0] != "192.168.42.0/24" {
+		t.Errorf("parseTableRoutes: got %v, want [192.168.42.0/24]", got)
+	}
+}
+
+func TestParseRouteGetOutput(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantDev    string
+		wantHasVia bool
+	}{
+		{
+			name:       "directly-connected LAN (no via)",
+			input:      "192.168.1.0 dev eth0 src 192.168.1.50 uid 0\n    cache",
+			wantDev:    "eth0",
+			wantHasVia: false,
+		},
+		{
+			name:       "default-routed via gateway",
+			input:      "10.42.0.0 via 192.168.1.1 dev eth0 src 192.168.1.50 uid 0",
+			wantDev:    "eth0",
+			wantHasVia: true,
+		},
+		{
+			name:       "vh* veth route",
+			input:      "100.64.0.5 via 10.200.0.1 dev vh123abc src 10.200.0.2",
+			wantDev:    "vh123abc",
+			wantHasVia: true,
+		},
+		{
+			name:       "leading whitespace",
+			input:      "   192.168.1.0 dev wlan0 scope link src 192.168.1.50",
+			wantDev:    "wlan0",
+			wantHasVia: false,
+		},
+		{
+			name:       "ipv6 directly-connected",
+			input:      "fe80::1 dev eth0 src fe80::cafe metric 256",
+			wantDev:    "eth0",
+			wantHasVia: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev, hasVia := parseRouteGetOutput(tt.input)
+			if dev != tt.wantDev {
+				t.Errorf("dev: got %q, want %q", dev, tt.wantDev)
+			}
+			if hasVia != tt.wantHasVia {
+				t.Errorf("hasVia: got %v, want %v", hasVia, tt.wantHasVia)
+			}
+		})
+	}
+}
+
+func TestIsExitNodeSplitDefault(t *testing.T) {
+	cases := map[string]bool{
+		"0.0.0.0/1":      true,
+		"128.0.0.0/1":    true,
+		"::/1":           true,
+		"8000::/1":       true,
+		"0.0.0.0/0":      false,
+		"default":        false,
+		"192.168.1.0/24": false,
+		"":               false,
+	}
+	for in, want := range cases {
+		if got := isExitNodeSplitDefault(in); got != want {
+			t.Errorf("isExitNodeSplitDefault(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestMergeRoutes(t *testing.T) {
 	tests := []struct {
 		name string

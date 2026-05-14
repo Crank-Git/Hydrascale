@@ -280,9 +280,16 @@ func (r *Reconciler) executeAction(action Action) error {
 		if err := r.ns.Create(action.TailnetID, r.infraSubnet); err != nil {
 			return err
 		}
+		nsName := r.ns.GetName(action.TailnetID)
+		// Always materialise /etc/netns/<ns>/resolv.conf so `ip netns exec`
+		// bind-mounts it over /etc/resolv.conf — otherwise tailscaled
+		// --accept-dns=true rewrites the host's /etc/resolv.conf to point
+		// at 100.100.100.100 and breaks host DNS. See issue #22.
+		if err := namespaces.WriteNamespaceResolvConf(nsName); err != nil {
+			log.Printf("namespace: failed to write resolv.conf for %s: %v", nsName, err)
+		}
 		// Set up host access iptables if enabled for this tailnet
 		if cfg, err := config.LoadConfig(r.configPath); err == nil && cfg.TailnetHostAccess(action.TailnetID) {
-			nsName := r.ns.GetName(action.TailnetID)
 			index := namespaces.VethIndex(nsName)
 			if err := namespaces.SetupHostAccess(nsName, index, r.infraSubnet); err != nil {
 				log.Printf("host-access: setup failed for %s: %v", nsName, err)
@@ -292,6 +299,13 @@ func (r *Reconciler) executeAction(action Action) error {
 	case ActionDeleteNS:
 		return r.ns.Delete(action.NsName, r.infraSubnet)
 	case ActionStartDaemon:
+		// Belt-and-braces: ensure the namespace's resolv.conf bind-mount
+		// override exists before tailscaled launches. ActionCreateNS already
+		// writes it on first creation, but on a daemon restart the namespace
+		// may already exist and we'd otherwise miss this. Idempotent. See #22.
+		if err := namespaces.WriteNamespaceResolvConf(action.NsName); err != nil {
+			log.Printf("namespace: failed to write resolv.conf for %s: %v", action.NsName, err)
+		}
 		return r.dm.Start(action.TailnetID, action.NsName)
 	case ActionStopDaemon:
 		return r.dm.Stop(action.NsName, action.TailnetID)
