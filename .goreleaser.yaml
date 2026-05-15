@@ -34,3 +34,6 @@ checksum:
 changelog:
   sort: asc
   use: github-native
+
+release:
+  prerelease: auto
