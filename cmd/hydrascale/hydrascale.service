@@ -1,0 +1,25 @@
+[Unit]
+Description=Hydrascale - Multi-Tailnet Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hydrascale serve --config /etc/hydrascale/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=/var/lib/hydrascale
+
+# Note: systemd sandboxing (ProtectSystem, NoNewPrivileges, ProtectHome)
+# is intentionally omitted. Hydrascale requires full access to iptables,
+# network namespaces (/run/netns), and mount propagation to the host.
+# Sandboxing breaks namespace visibility and iptables-legacy on some kernels.
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hydrascale
+
+[Install]
+WantedBy=multi-user.target
