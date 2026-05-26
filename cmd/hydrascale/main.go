@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"os"
@@ -25,6 +26,13 @@ import (
 )
 
 var cfgFile string
+
+// systemdUnit is the canonical content of /etc/systemd/system/hydrascale.service
+// written by `hydrascale install`. Must stay byte-identical to
+// contrib/hydrascale.service — enforced by TestSystemdUnitMatchesContrib.
+//
+//go:embed hydrascale.service
+var systemdUnit string
 
 func main() {
 	var rootCmd = &cobra.Command{
@@ -773,32 +781,7 @@ Run with --dry-run to see what would be done without making changes.`,
 				{
 					desc: "Install systemd unit",
 					fn: func() error {
-						unit := `[Unit]
-Description=Hydrascale - Multi-Tailnet Manager
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/hydrascale serve --config /etc/hydrascale/config.yaml
-ExecReload=/bin/kill -HUP $MAINPID
-Restart=on-failure
-RestartSec=5s
-WorkingDirectory=/var/lib/hydrascale
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/var/lib/hydrascale /run/netns /etc/hydrascale /var/log/hydrascale /run/tailscale
-ProtectHome=yes
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=hydrascale
-
-[Install]
-WantedBy=multi-user.target
-`
-						return os.WriteFile("/etc/systemd/system/hydrascale.service", []byte(unit), 0644)
+						return os.WriteFile("/etc/systemd/system/hydrascale.service", []byte(systemdUnit), 0644)
 					},
 				},
 				{
