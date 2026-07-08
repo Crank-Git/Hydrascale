@@ -51,6 +51,7 @@ reconciles toward it. GitOps for tailnets.`,
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is "+config.DefaultConfigPath+")")
 
 	rootCmd.AddCommand(initCmd())
+	rootCmd.AddCommand(nsDaemonCmd())
 	rootCmd.AddCommand(addCmd())
 	rootCmd.AddCommand(removeCmd())
 	rootCmd.AddCommand(listCmd())
