@@ -252,6 +252,19 @@ func TestResolveAuthKey_Neither(t *testing.T) {
 	}
 }
 
+func TestAuthKeyEnvVar(t *testing.T) {
+	cases := map[string]string{
+		"personal":  "HYDRASCALE_AUTHKEY_PERSONAL",
+		"corp-prod": "HYDRASCALE_AUTHKEY_CORP_PROD",
+		"home-lab-1": "HYDRASCALE_AUTHKEY_HOME_LAB_1",
+	}
+	for in, want := range cases {
+		if got := AuthKeyEnvVar(in); got != want {
+			t.Errorf("AuthKeyEnvVar(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestLoadConfigHostAccess(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

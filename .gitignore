@@ -21,3 +21,4 @@ test-config.yaml
 config.yaml
 .hydrascale.lock
 .worktrees/
+/vendor/
