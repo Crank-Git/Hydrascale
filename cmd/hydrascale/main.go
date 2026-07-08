@@ -50,6 +50,7 @@ reconciles toward it. GitOps for tailnets.`,
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is "+config.DefaultConfigPath+")")
 
+	rootCmd.AddCommand(initCmd())
 	rootCmd.AddCommand(addCmd())
 	rootCmd.AddCommand(removeCmd())
 	rootCmd.AddCommand(listCmd())
@@ -66,6 +67,7 @@ reconciles toward it. GitOps for tailnets.`,
 	rootCmd.AddCommand(wrapCmd())
 	rootCmd.AddCommand(envCmd())
 	rootCmd.AddCommand(installCmd())
+	rootCmd.AddCommand(uninstallCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

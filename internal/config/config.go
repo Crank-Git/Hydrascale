@@ -213,10 +213,17 @@ func ValidateBindAddress(addr string) error {
 	return nil
 }
 
+// AuthKeyEnvVar returns the environment variable name that overrides the auth
+// key for a tailnet: HYDRASCALE_AUTHKEY_<ID>, where <ID> is uppercased with
+// dashes replaced by underscores (e.g. "corp-prod" -> HYDRASCALE_AUTHKEY_CORP_PROD).
+func AuthKeyEnvVar(id string) string {
+	return "HYDRASCALE_AUTHKEY_" + strings.ToUpper(strings.ReplaceAll(id, "-", "_"))
+}
+
 // ResolveAuthKey returns the auth key for a tailnet, checking env var first, then config.
 // Env var format: HYDRASCALE_AUTHKEY_<ID> where ID is uppercased with dashes replaced by underscores.
 func ResolveAuthKey(tailnetID string, configKey string) string {
-	envKey := "HYDRASCALE_AUTHKEY_" + strings.ToUpper(strings.ReplaceAll(tailnetID, "-", "_"))
+	envKey := AuthKeyEnvVar(tailnetID)
 	if v := os.Getenv(envKey); v != "" {
 		return v
 	}

@@ -12,6 +12,7 @@
 - [Requirements](#requirements)
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [Uninstall](#uninstall)
 - [Host Access](#host-access) -- transparent access to all tailnet peers from the host
 - [Headscale / Custom Control Server](#headscale--custom-control-server)
 - [Config Reference](#config-reference)
@@ -41,6 +42,7 @@ The reconciler runs as a control loop: on each tick it reads the config, inspect
 - **iproute2** (`ip` command for namespace management)
 - **iptables** (NAT masquerading and forwarding rules)
 - **Kernel network namespace support** (`CONFIG_NET_NS`, standard on all modern kernels)
+- **Kernel policy routing** (`CONFIG_IP_MULTIPLE_TABLES`, `CONFIG_IPV6_MULTIPLE_TABLES`) — only needed for [Host Access](#host-access) route propagation (accepting subnet routes onto the host). Standard on most distro kernels; some SBC/Jetson kernels omit it, in which case host route propagation is silently a no-op.
 - **IP forwarding enabled**: `sudo sysctl -w net.ipv4.ip_forward=1`
 
 ## Install
@@ -71,6 +73,16 @@ sudo install hydrascale /usr/local/bin/
 
 ## Quick Start
 
+The fastest path is the interactive wizard. It runs preflight checks, generates
+the config, sets up authentication (auth key or browser login), brings your first
+tailnet up, and verifies it authenticated:
+
+```bash
+sudo hydrascale init
+```
+
+To configure manually instead:
+
 1. Create a config file at `/var/lib/hydrascale/config.yaml`:
 
 ```yaml
@@ -97,6 +109,21 @@ sudo hydrascale apply
 ```bash
 sudo hydrascale serve
 ```
+
+## Uninstall
+
+To completely remove Hydrascale — stop all tailnets, delete their namespaces,
+veths, iptables rules, host routes, and DNS entries, then remove the systemd
+service and `/var/lib/hydrascale`:
+
+```bash
+sudo hydrascale uninstall
+```
+
+By default each tailnet node is deregistered (logged out) so it doesn't linger
+in your tailnet admin; pass `--keep-nodes` to skip that. A plain `uninstall`
+leaves the binary and `/etc/hydrascale` in place so it stays re-runnable — add
+`--purge` to remove those too. Use `--yes` to skip the confirmation prompt.
 
 ## Host Access
 
@@ -337,6 +364,7 @@ hydrascale apply                      One-shot reconciliation (apply config to s
 hydrascale diff                       Show what would change without applying
 hydrascale env <tailnet-id>           Print shell environment for a tailnet namespace
 hydrascale exec <tailnet-id> -- <cmd> Run a command inside a tailnet's network namespace
+hydrascale init                       Interactive first-run setup wizard
 hydrascale install                    Install Hydrascale as a systemd service
 hydrascale list                       List all configured tailnets
 hydrascale ping <tailnet-id> <target> Ping a Tailscale peer from within a tailnet's namespace
@@ -348,6 +376,7 @@ hydrascale switch <id>                Switch the default namespace for direct ta
 hydrascale tailscale <tailnet-id> -- <args>
                                       Run an arbitrary tailscale command inside a tailnet's namespace
 hydrascale tui                        Open the monitoring TUI (requires running daemon via serve)
+hydrascale uninstall                  Completely tear down Hydrascale (--purge also removes the binary)
 hydrascale wrap <service> <tailnet-id>
                                       Generate systemd drop-in for namespace isolation
 ```
@@ -471,6 +500,25 @@ IP forwarding is not enabled. Check and enable it:
 ```bash
 sudo sysctl net.ipv4.ip_forward          # should print 1
 sudo sysctl -w net.ipv4.ip_forward=1     # enable if not set
+```
+
+**Host can't resolve public names / native tailscaled fights hydrascale's DNS**
+If the host also runs its own `tailscaled` with `accept-dns` on, it rewrites
+`/etc/resolv.conf` to point only at MagicDNS (`100.100.100.100`). If that tailnet
+has no public upstream configured, the host loses public DNS and hydrascale's
+resolver inherits the dead upstream. Disable the host tailscaled's DNS management
+and hand `/etc/resolv.conf` back to systemd-resolved:
+```bash
+sudo tailscale set --accept-dns=false
+sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+```
+`hydrascale init` detects this during preflight and offers to disable it.
+
+**"failed to listen on /var/lib/hydrascale/api.sock: no such file or directory"**
+The state directory doesn't exist yet. `hydrascale init` and `hydrascale install`
+create it; to do it manually:
+```bash
+sudo mkdir -p /var/lib/hydrascale/state
 ```
 
 **Docker blocking namespace traffic**
