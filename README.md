@@ -172,6 +172,8 @@ All of this is automatic and fully managed. Routes and DNS entries are synced ev
 > 1. **Namespace upstreams.** Each namespace gets `/etc/netns/<ns>/resolv.conf` populated with real host upstream resolvers (sourced from `/run/systemd/resolve/resolv.conf` or `/etc/resolv.conf`, loopbacks filtered, falling back to `1.1.1.1`). Writing `100.100.100.100` there would leave tailscaled's resolver chain empty, because tailscaled filters its own address as a self-loop — and an empty chain returns SERVFAIL for every query, including names it could answer locally from the peer table.
 >
 > 2. **Daemon restart refresh.** When the reconciler restarts an unhealthy tailscaled, the new process loads state from disk but does not re-read `resolv.conf`, which can leave its MagicDNS proxy wedged. Hydrascale waits for `BackendState=Running` and then toggles `--accept-dns=false` → `--accept-dns=true` to force a resolver-chain rebuild. This recovers DNS automatically on every restart — no manual `tailscale set` required.
+>
+> 3. **Host `/etc/resolv.conf` protection.** tailscaled rewrites `/etc/resolv.conf` (via an atomic temp-file + rename) whenever its DNS config changes. A single-file bind-mount can't contain a rename — it lands in the shared host `/etc` and clobbers host DNS. So Hydrascale launches each namespaced tailscaled under a per-namespace **overlay mount on `/etc`** (lower = host `/etc`, upper = a per-tailnet dir): every `/etc` write, including that rename, stays namespace-local, while the daemon still reads host `/etc` (certs, `nsswitch.conf`) through the lower layer. The host's `/etc/resolv.conf` is never touched.
 
 ### Accepted Subnet Routes
 
