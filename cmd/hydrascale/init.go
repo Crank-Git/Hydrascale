@@ -7,8 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"hydrascale/internal/config"
+	"hydrascale/internal/daemon"
+	"hydrascale/internal/namespaces"
 
 	"github.com/spf13/cobra"
 )
@@ -103,9 +106,107 @@ func runInit(force bool) error {
 		fmt.Printf("  Persist for restarts: export %s=<your-key>\n", config.AuthKeyEnvVar(id))
 	}
 
+	return firstRunAndVerify(p, cfg, answers)
+}
+
+// firstRunAndVerify reconciles the new config to bring tailnets up, verifies
+// each one authenticated (retrying auth-key logins that raced), prints the
+// namespace cheat-sheet, and offers to install the boot service.
+func firstRunAndVerify(p *prompter, cfg *config.Config, answers []tailnetAnswers) error {
+	fmt.Println("\nBringing tailnets up...")
+	r := newReconciler()
+	r.ResetAllErrors()
+	if err := r.Reconcile(); err != nil {
+		fmt.Printf("  reconcile reported: %v\n", err)
+	}
+
+	fmt.Println("\nAuthentication:")
+	for _, a := range answers {
+		verifyAuth(a)
+	}
+
 	printCheatSheet()
-	fmt.Println("\nNext: run 'sudo hydrascale apply' to bring your tailnets up.")
+
+	if p.yesNo("\nInstall as a systemd service so tailnets start on boot?", false) {
+		self, err := os.Executable()
+		if err != nil {
+			fmt.Printf("  cannot locate own binary: %v\n", err)
+			return nil
+		}
+		c := exec.Command(self, "install")
+		c.Stdout, c.Stderr = os.Stdout, os.Stderr
+		if err := c.Run(); err != nil {
+			fmt.Printf("  install failed: %v\n", err)
+		}
+	}
 	return nil
+}
+
+// verifyAuth checks that a tailnet's namespace is authenticated. For auth-key
+// tailnets it retries `up --authkey` once if the initial login raced; for
+// browser tailnets it prints the login URL and polls until logged in.
+func verifyAuth(a tailnetAnswers) {
+	status, _ := nsTailscaleStatus(a.ID)
+	if isLoggedIn(status) {
+		fmt.Printf("  ✓ %s: authenticated\n", a.ID)
+		return
+	}
+
+	if a.UseKey {
+		if key := os.Getenv(config.AuthKeyEnvVar(a.ID)); key != "" {
+			ns := namespaces.GetNamespaceName(a.ID)
+			sock := daemon.SocketPath(a.ID)
+			_ = exec.Command("ip", "netns", "exec", ns, "tailscale", "--socket="+sock,
+				"up", "--accept-dns=true", "--authkey="+key).Run()
+			if status, _ = nsTailscaleStatus(a.ID); isLoggedIn(status) {
+				fmt.Printf("  ✓ %s: authenticated (after retry)\n", a.ID)
+				return
+			}
+		}
+		fmt.Printf("  ✗ %s: not authenticated — verify the auth key and re-run\n", a.ID)
+		return
+	}
+
+	url := loginURL(status)
+	if url == "" {
+		fmt.Printf("  ✗ %s: no login URL available yet — check 'hydrascale tailscale %s -- status'\n", a.ID, a.ID)
+		return
+	}
+	fmt.Printf("  → %s: open this URL to log in:\n      %s\n    waiting up to 2m...\n", a.ID, url)
+	for i := 0; i < 40; i++ {
+		time.Sleep(3 * time.Second)
+		if status, _ = nsTailscaleStatus(a.ID); isLoggedIn(status) {
+			fmt.Printf("  ✓ %s: authenticated\n", a.ID)
+			return
+		}
+	}
+	fmt.Printf("  ✗ %s: timed out waiting for browser login\n", a.ID)
+}
+
+// nsTailscaleStatus returns the output of `tailscale status` inside a tailnet's namespace.
+func nsTailscaleStatus(id string) (string, error) {
+	ns := namespaces.GetNamespaceName(id)
+	sock := daemon.SocketPath(id)
+	out, err := exec.Command("ip", "netns", "exec", ns, "tailscale", "--socket="+sock, "status").CombinedOutput()
+	return string(out), err
+}
+
+// isLoggedIn reports whether a `tailscale status` output indicates an authenticated node.
+func isLoggedIn(status string) bool {
+	if strings.Contains(status, "Logged out") || strings.Contains(status, "Log in at") || strings.Contains(status, "NeedsLogin") {
+		return false
+	}
+	return strings.TrimSpace(status) != ""
+}
+
+// loginURL extracts the interactive login URL from a `tailscale status` output.
+func loginURL(status string) string {
+	for _, f := range strings.Fields(status) {
+		if strings.HasPrefix(f, "https://login.tailscale.com/") {
+			return f
+		}
+	}
+	return ""
 }
 
 // promptTailnet collects answers for one tailnet, returning the answers and the
