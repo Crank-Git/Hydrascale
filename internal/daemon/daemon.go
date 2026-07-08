@@ -117,8 +117,23 @@ func StartDaemon(tailnetID string, namespaceName string) error {
 	os.Remove(socketPath)
 	stateFile := filepath.Join(stateDir, "tailscaled.state")
 
+	// Launch tailscaled through the hydrascale __nsdaemon helper, which mounts a
+	// per-namespace overlay on /etc first. tailscaled replaces /etc/resolv.conf
+	// via rename; a single-file bind-mount can't contain that, so writes would
+	// otherwise land in the host's shared /etc and clobber host DNS. The overlay
+	// keeps every /etc write namespace-local. See issue #28.
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot locate hydrascale binary: %w", err)
+	}
+	etcUpper := filepath.Join(stateDir, "etc-upper")
+	etcWork := filepath.Join(stateDir, "etc-work")
 	args := []string{
 		"netns", "exec", namespaceName,
+		self, "__nsdaemon",
+		"--etc-upper", etcUpper,
+		"--etc-work", etcWork,
+		"--",
 		"tailscaled",
 		"--state=" + stateFile,
 		"--socket=" + socketPath,
