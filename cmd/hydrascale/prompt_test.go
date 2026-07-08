@@ -39,9 +39,10 @@ func TestPromptYesNo(t *testing.T) {
 	}
 }
 
-func TestPromptSecretTrims(t *testing.T) {
-	p := newPrompter(strings.NewReader(""), io.Discard)
-	p.secretFn = func() (string, error) { return "tskey-abc  ", nil }
+func TestPromptSecretFromReader(t *testing.T) {
+	// Under `go test`, stdin is not a terminal, so secret reads a trimmed line
+	// from the same buffered reader as line/yesNo.
+	p := newPrompter(strings.NewReader("tskey-abc  \n"), io.Discard)
 	got, err := p.secret("auth key")
 	if err != nil || got != "tskey-abc" {
 		t.Fatalf("secret = %q err=%v, want tskey-abc", got, err)

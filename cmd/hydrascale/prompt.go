@@ -67,11 +67,16 @@ func (p *prompter) yesNo(question string, def bool) bool {
 	}
 }
 
-// secret asks for a value read without echo (e.g. an auth key) and returns it
-// trimmed.
+// secret asks for a value and returns it trimmed. On a real terminal the input
+// is read without echo (masked); otherwise (piped input) it is read as a normal
+// line from the same buffered reader, so it stays consistent with line/yesNo.
 func (p *prompter) secret(question string) (string, error) {
 	fmt.Fprintf(p.out, "%s: ", question)
-	v, err := p.secretFn()
-	fmt.Fprintln(p.out)
-	return strings.TrimSpace(v), err
+	if term.IsTerminal(os.Stdin.Fd()) {
+		v, err := p.secretFn()
+		fmt.Fprintln(p.out)
+		return strings.TrimSpace(v), err
+	}
+	line, err := p.in.ReadString('\n')
+	return strings.TrimSpace(line), err
 }
