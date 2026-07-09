@@ -17,6 +17,26 @@ import (
 	"hydrascale/internal/routing"
 )
 
+func TestSafeStateDir(t *testing.T) {
+	valid := map[string]string{
+		"corp-prod": filepath.Join(daemon.DefaultStateDir, "corp-prod"),
+		"personal":  filepath.Join(daemon.DefaultStateDir, "personal"),
+		"a.b_c-1":   filepath.Join(daemon.DefaultStateDir, "a.b_c-1"),
+	}
+	for id, want := range valid {
+		got, ok := safeStateDir(id)
+		if !ok || got != want {
+			t.Errorf("safeStateDir(%q) = %q,%v; want %q,true", id, got, ok, want)
+		}
+	}
+	// Path-traversal and otherwise-invalid ids must be rejected (never RemoveAll'd).
+	for _, bad := range []string{"", "..", "../etc", "a/b", "foo/../..", ".", "/", "../../root"} {
+		if got, ok := safeStateDir(bad); ok {
+			t.Errorf("safeStateDir(%q) = %q,true; want rejected", bad, got)
+		}
+	}
+}
+
 // --- Mock implementations ---
 
 type mockNS struct {

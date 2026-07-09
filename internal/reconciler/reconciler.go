@@ -274,6 +274,21 @@ func (r *Reconciler) Apply(actions []Action) {
 	}
 }
 
+// safeStateDir returns the state directory for a tailnet id and whether it is
+// safe to operate on. It guards the root-level state-dir RemoveAll (#32) against
+// path traversal: the id must be a valid tailnet id AND resolve to a direct
+// child of the state dir, so a crafted id (e.g. "..", "a/b") can never escape.
+func safeStateDir(tailnetID string) (string, bool) {
+	if !config.IsValidID(tailnetID) {
+		return "", false
+	}
+	dir := filepath.Join(daemon.DefaultStateDir, tailnetID)
+	if filepath.Dir(dir) != filepath.Clean(daemon.DefaultStateDir) {
+		return "", false
+	}
+	return dir, true
+}
+
 func (r *Reconciler) executeAction(action Action) error {
 	switch action.Type {
 	case ActionCreateNS:
@@ -304,8 +319,11 @@ func (r *Reconciler) executeAction(action Action) error {
 		// overlay upper/work dirs) so `remove` leaves nothing behind — otherwise
 		// stale per-tailnet dirs accumulate under /var/lib/hydrascale/state.
 		// Best-effort; a failure here doesn't fail the teardown. See issue #32.
-		if action.TailnetID != "" {
-			stateDir := filepath.Join(daemon.DefaultStateDir, action.TailnetID)
+		//
+		// The id is derived from a live namespace name (not the IsValidID-
+		// validated config), so validate the path before this root-level
+		// RemoveAll — never let a crafted id (e.g. "..") traverse out.
+		if stateDir, ok := safeStateDir(action.TailnetID); ok {
 			if err := os.RemoveAll(stateDir); err != nil {
 				log.Printf("reconciler: failed to remove state dir %s: %v", stateDir, err)
 			}
