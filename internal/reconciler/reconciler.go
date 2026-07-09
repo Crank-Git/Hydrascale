@@ -297,7 +297,20 @@ func (r *Reconciler) executeAction(action Action) error {
 		}
 		return nil
 	case ActionDeleteNS:
-		return r.ns.Delete(action.NsName, r.infraSubnet)
+		if err := r.ns.Delete(action.NsName, r.infraSubnet); err != nil {
+			return err
+		}
+		// Remove the tailnet's state dir (tailscaled state/socket + the #28
+		// overlay upper/work dirs) so `remove` leaves nothing behind — otherwise
+		// stale per-tailnet dirs accumulate under /var/lib/hydrascale/state.
+		// Best-effort; a failure here doesn't fail the teardown. See issue #32.
+		if action.TailnetID != "" {
+			stateDir := filepath.Join(daemon.DefaultStateDir, action.TailnetID)
+			if err := os.RemoveAll(stateDir); err != nil {
+				log.Printf("reconciler: failed to remove state dir %s: %v", stateDir, err)
+			}
+		}
+		return nil
 	case ActionStartDaemon:
 		// Belt-and-braces: ensure the namespace's resolv.conf bind-mount
 		// override exists before tailscaled launches. ActionCreateNS already
