@@ -44,16 +44,23 @@ func TestSocketPath(t *testing.T) {
 
 func TestBuildTailscaleUpArgs(t *testing.T) {
 	tests := []struct {
-		name       string
-		socketPath string
-		controlURL string
-		wantArgs   []string
+		name        string
+		socketPath  string
+		controlURL  string
+		authKeyFile string
+		wantArgs    []string
 	}{
 		{
-			name:       "no control URL (standard Tailscale)",
+			name:       "no key, no control URL (interactive/browser login)",
 			socketPath: "/tmp/test.sock",
 			controlURL: "",
 			wantArgs:   []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=true"},
+		},
+		{
+			name:        "with auth key file",
+			socketPath:  "/tmp/test.sock",
+			authKeyFile: "/var/lib/hydrascale/state/corp/authkey-123",
+			wantArgs:    []string{"tailscale", "--socket=/tmp/test.sock", "up", "--accept-dns=true", "--auth-key=file:/var/lib/hydrascale/state/corp/authkey-123"},
 		},
 		{
 			name:       "with control URL (Headscale)",
@@ -64,7 +71,7 @@ func TestBuildTailscaleUpArgs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildTailscaleUpArgs(tt.socketPath, tt.controlURL)
+			got := buildTailscaleUpArgs(tt.socketPath, tt.controlURL, tt.authKeyFile)
 			if len(got) != len(tt.wantArgs) {
 				t.Fatalf("buildTailscaleUpArgs() = %v, want %v", got, tt.wantArgs)
 			}

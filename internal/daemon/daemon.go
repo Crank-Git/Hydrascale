@@ -265,11 +265,19 @@ func CheckHealth(namespaceName string, tailnetID string) (bool, error) {
 
 // buildTailscaleUpArgs constructs the argument list for `tailscale up`.
 // When controlURL is non-empty, --login-server is appended (for Headscale).
-func buildTailscaleUpArgs(socketPath, controlURL string) []string {
+func buildTailscaleUpArgs(socketPath, controlURL, authKeyFile string) []string {
 	// --accept-dns=true is required so tailscaled enables its MagicDNS proxy
 	// at 100.100.100.100:53 inside the namespace. The hostaccess forwarder
 	// routes per-tailnet queries to that endpoint via DNAT on the veth.
 	args := []string{"tailscale", "--socket=" + socketPath, "up", "--accept-dns=true"}
+	// `tailscale up` reads the auth key from the --auth-key flag, NOT from the
+	// TS_AUTHKEY environment variable (that is consumed by tailscaled, not the
+	// CLI) — passing it via the env makes `up` fall back to interactive login
+	// and time out. The file: form keeps the key out of argv (ps) and the
+	// environment. See issue #31.
+	if authKeyFile != "" {
+		args = append(args, "--auth-key=file:"+authKeyFile)
+	}
 	if controlURL != "" {
 		args = append(args, "--login-server="+controlURL)
 	}
@@ -302,14 +310,33 @@ func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	tsArgs := buildTailscaleUpArgs(socketPath, controlURL)
+	// tailscale up takes the key from --auth-key, not TS_AUTHKEY. Stage it in a
+	// 0600 temp file under the (root-only) state dir and pass --auth-key=file:<path>
+	// so the secret never appears in argv or the environment. See issue #31.
+	var authKeyFile string
+	if authKey != "" {
+		stateDir := filepath.Join(DefaultStateDir, tailnetID)
+		f, err := os.CreateTemp(stateDir, "authkey-*")
+		if err != nil {
+			return fmt.Errorf("stage auth key for %s: %w", tailnetID, err)
+		}
+		authKeyFile = f.Name()
+		defer os.Remove(authKeyFile)
+		_ = f.Chmod(0600)
+		if _, err := f.WriteString(authKey); err != nil {
+			f.Close()
+			return fmt.Errorf("write auth key for %s: %w", tailnetID, err)
+		}
+		f.Close()
+	}
+
+	tsArgs := buildTailscaleUpArgs(socketPath, controlURL, authKeyFile)
 	cmdArgs := append([]string{"netns", "exec", nsName}, tsArgs...)
 	cmd := exec.CommandContext(ctx, "ip", cmdArgs...)
-	// Minimal environment for the child process to avoid leaking parent env vars
+	// Minimal environment for the child process to avoid leaking parent env vars.
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
-		"TS_AUTHKEY=" + authKey,
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
