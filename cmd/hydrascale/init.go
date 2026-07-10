@@ -92,7 +92,7 @@ func runInit(force bool) error {
 
 	promptGUIAccess(p, cfg)
 
-	for _, d := range []string{"/var/lib/hydrascale/state", "/var/log/hydrascale"} {
+	for _, d := range []string{"/etc/hydrascale", "/var/lib/hydrascale/state", "/var/log/hydrascale"} {
 		if err := os.MkdirAll(d, 0750); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}

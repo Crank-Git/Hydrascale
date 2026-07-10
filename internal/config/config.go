@@ -19,7 +19,10 @@ import (
 var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
 // DefaultConfigPath is the default location for the Hydrascale config file.
-const DefaultConfigPath = "/var/lib/hydrascale/config.yaml"
+// Config lives in /etc (declarative system config); runtime state and the API
+// socket live under /var/lib/hydrascale. This matches the systemd unit, so the
+// CLI and the service always read the same file.
+const DefaultConfigPath = "/etc/hydrascale/config.yaml"
 
 // Tailnet represents a single Tailscale tailnet configuration.
 type Tailnet struct {
