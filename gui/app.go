@@ -15,14 +15,19 @@ type App struct {
 	tun      *tunnel
 }
 
-// NewApp builds the app and its initial data source from settings.
+// NewApp builds the app. The data source/tunnel is established in startup,
+// once the Wails runtime (and the app's full process environment) is up —
+// spawning ssh during construction, before wails.Run, is unreliable.
 func NewApp(s Settings) *App {
-	a := &App{settings: s}
-	a.applyConnection()
-	return a
+	return &App{settings: s, src: newMockSource()}
 }
 
-func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applyConnection()
+}
 
 func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
