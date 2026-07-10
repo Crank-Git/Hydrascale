@@ -56,6 +56,9 @@ jobs:
     defaults:
       run:
         working-directory: gui
+        # bash on every runner (Windows included) so $REF/$PLATFORM resolve the
+        # same way — the Windows default is pwsh, where bash vars are empty.
+        shell: bash
     # Pass workflow context through env, never inline into run: scripts — a
     # crafted ref/tag name interpolated directly would be a command-injection.
     env:
@@ -100,8 +103,7 @@ jobs:
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
-        run: Copy-Item build/bin/Hydrascale.exe "Hydrascale_$($env:REF)_windows_amd64.exe"
-        shell: pwsh
+        run: cp build/bin/Hydrascale.exe "Hydrascale_${REF}_windows_amd64.exe"
 
       # Always upload as a workflow artifact (lets workflow_dispatch verify builds).
       - name: Upload build artifact
