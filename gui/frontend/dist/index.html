@@ -618,8 +618,10 @@ body { margin:0; }
   .win { width:100vw; height:100vh; border:none; border-radius:0; box-shadow:none;
          resize:none; min-width:0; min-height:0; }
   .titlebar { display:none; }
-  /* Reserve space for the inset traffic-light buttons on macOS. */
-  .hd { --wails-draggable:drag; padding-left:78px; }
+  /* Clear the inset macOS traffic-light buttons (top-left): push the rail's
+     logo/nav below them, and give the header a draggable strip + left inset. */
+  .rail { padding-top:34px; }
+  .hd { --wails-draggable:drag; padding-left:20px; }
 </style>
 <script>
   // Inside Wails, window.go.main.App is injected — pull live data and render.
