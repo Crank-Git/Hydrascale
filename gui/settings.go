@@ -64,6 +64,7 @@ func saveSettings(s Settings) error {
 type tunnel struct {
 	cmd       *exec.Cmd
 	localSock string
+	dir       string // private 0700 temp dir holding localSock
 }
 
 func (t *tunnel) close() {
@@ -73,7 +74,11 @@ func (t *tunnel) close() {
 	if t.cmd != nil && t.cmd.Process != nil {
 		t.cmd.Process.Kill()
 	}
-	os.Remove(t.localSock)
+	if t.dir != "" {
+		os.RemoveAll(t.dir)
+	} else {
+		os.Remove(t.localSock)
+	}
 }
 
 // startTunnel forwards remoteSock on sshHost to a local unix socket and waits
@@ -89,27 +94,36 @@ func startTunnel(sshHost, remoteSock string) (*tunnel, error) {
 	if !strings.HasPrefix(remoteSock, "/") || strings.ContainsAny(remoteSock, " \t\r\n:") {
 		return nil, fmt.Errorf("invalid remote socket path (must be an absolute path with no ':' )")
 	}
-	local := filepath.Join(os.TempDir(), "hydrascale-gui.sock")
-	os.Remove(local)
+	// Put the forwarded socket in a private, unpredictable 0700 dir rather than a
+	// fixed name in shared /tmp — the latter is squattable/symlink-race prone on
+	// Linux (a local attacker could pre-create the path and redirect the forward).
+	dir, err := os.MkdirTemp("", "hydrascale-tunnel-")
+	if err != nil {
+		return nil, fmt.Errorf("create tunnel dir: %w", err)
+	}
+	local := filepath.Join(dir, "api.sock")
 	cmd := exec.Command("ssh", "-N",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "StreamLocalBindUnlink=yes",
 		"-o", "BatchMode=yes",
 		"-L", local+":"+remoteSock, "--", sshHost)
 	if err := cmd.Start(); err != nil {
+		os.RemoveAll(dir)
 		return nil, fmt.Errorf("start ssh: %w", err)
 	}
 	// Poll for the forwarded socket to appear.
 	for i := 0; i < 50; i++ {
 		if _, err := os.Stat(local); err == nil {
-			return &tunnel{cmd: cmd, localSock: local}, nil
+			return &tunnel{cmd: cmd, localSock: local, dir: dir}, nil
 		}
 		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			os.RemoveAll(dir)
 			return nil, fmt.Errorf("ssh exited before forward was ready (check host/keys)")
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	cmd.Process.Kill()
+	os.RemoveAll(dir)
 	return nil, fmt.Errorf("timed out waiting for ssh forward to %s", sshHost)
 }
 
