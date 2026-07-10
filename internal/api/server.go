@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/user"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -21,11 +24,16 @@ import (
 
 // Server is an HTTP server listening on a Unix socket.
 type Server struct {
-	reconciler *reconciler.Reconciler
-	listener   net.Listener
-	httpServer *http.Server
-	socketPath string
+	reconciler  *reconciler.Reconciler
+	listener    net.Listener
+	httpServer  *http.Server
+	socketPath  string
+	socketGroup string
 }
+
+// SetSocketGroup configures a unix group that may reach the control socket.
+// Empty (default) keeps the socket root-only (0600). Must be called before Start.
+func (s *Server) SetSocketGroup(group string) { s.socketGroup = group }
 
 // NewServer creates a new Server that will listen on socketPath.
 func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
@@ -81,6 +89,13 @@ func (s *Server) Start() error {
 	if err := os.Chmod(s.socketPath, 0600); err != nil {
 		ln.Close()
 		return fmt.Errorf("failed to set socket permissions: %w", err)
+	}
+	if s.socketGroup != "" {
+		if err := applySocketGroup(s.socketPath, s.socketGroup); err != nil {
+			ln.Close()
+			return fmt.Errorf("failed to apply socket group %q: %w", s.socketGroup, err)
+		}
+		log.Printf("api: socket group access enabled for %q", s.socketGroup)
 	}
 	s.listener = ln
 
@@ -167,6 +182,35 @@ func (s *Server) writeReconcileResponse(w http.ResponseWriter, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// applySocketGroup makes the control socket reachable by members of group:
+// the parent dir gets root:<group> 0750 (group can traverse to the socket) and
+// the socket itself root:<group> 0660 (group can connect). The daemon still
+// owns both as root; only the named group is additionally granted access.
+func applySocketGroup(socketPath, group string) error {
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		return fmt.Errorf("lookup group %q: %w", group, err)
+	}
+	gid, err := strconv.Atoi(g.Gid)
+	if err != nil {
+		return fmt.Errorf("parse gid for %q: %w", group, err)
+	}
+	dir := filepath.Dir(socketPath)
+	if err := os.Chown(dir, 0, gid); err != nil {
+		return fmt.Errorf("chown %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0750); err != nil {
+		return fmt.Errorf("chmod %s: %w", dir, err)
+	}
+	if err := os.Chown(socketPath, 0, gid); err != nil {
+		return fmt.Errorf("chown %s: %w", socketPath, err)
+	}
+	if err := os.Chmod(socketPath, 0660); err != nil {
+		return fmt.Errorf("chmod %s: %w", socketPath, err)
+	}
+	return nil
 }
 
 // isValidControlURL reports whether s is an absolute http(s) URL with a host,

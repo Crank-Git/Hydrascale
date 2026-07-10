@@ -90,7 +90,9 @@ func runInit(force bool) error {
 		cfg = buildConfig(answers, false)
 	}
 
-	for _, d := range []string{"/var/lib/hydrascale/state", "/var/log/hydrascale"} {
+	promptGUIAccess(p, cfg)
+
+	for _, d := range []string{"/etc/hydrascale", "/var/lib/hydrascale/state", "/var/log/hydrascale"} {
 		if err := os.MkdirAll(d, 0750); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
@@ -234,6 +236,34 @@ func promptTailnet(p *prompter) (tailnetAnswers, string) {
 		return a, key
 	}
 	return a, ""
+}
+
+// promptGUIAccess optionally grants non-root access to the control socket via a
+// unix group. The Hydrascale desktop app (and any SSH-forwarded remote client)
+// connects as a non-root user, so this is required for the GUI to work.
+func promptGUIAccess(p *prompter, cfg *config.Config) {
+	fmt.Println("\nGUI / remote access:")
+	fmt.Println("  The daemon's control socket is root-only by default. The Hydrascale")
+	fmt.Println("  desktop app — and any non-root or SSH-forwarded client — needs group")
+	fmt.Println("  access to it. This is required for the GUI.")
+	if !p.yesNo("  Enable non-root access via a unix group?", true) {
+		return
+	}
+	group := p.line("  Group name", "hydrascale")
+	user := p.line("  User to add to the group", os.Getenv("SUDO_USER"))
+	if out, err := exec.Command("groupadd", "-f", group).CombinedOutput(); err != nil {
+		fmt.Printf("  groupadd failed: %v (%s)\n", err, strings.TrimSpace(string(out)))
+		return
+	}
+	if user != "" {
+		if out, err := exec.Command("usermod", "-aG", group, user).CombinedOutput(); err != nil {
+			fmt.Printf("  usermod failed: %v (%s)\n", err, strings.TrimSpace(string(out)))
+		} else {
+			fmt.Printf("  ✓ added %s to group %q (log out/in for it to take effect)\n", user, group)
+		}
+	}
+	cfg.SocketGroup = group
+	fmt.Printf("  ✓ socket_group set to %q — the daemon will make the socket group-accessible\n", group)
 }
 
 // runPreflight reports environment readiness and offers to fix common problems.

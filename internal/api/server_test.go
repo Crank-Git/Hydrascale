@@ -591,6 +591,13 @@ func TestDetailEndpoint_NoPeers(t *testing.T) {
 	}
 }
 
+func TestApplySocketGroup_UnknownGroup(t *testing.T) {
+	// An unknown group is a config error, surfaced before any chown/chmod.
+	if err := applySocketGroup("/tmp/hydrascale-test.sock", "no-such-group-9c3f1a"); err == nil {
+		t.Error("expected error for unknown group, got nil")
+	}
+}
+
 func TestAddTailnet_PersistsControlURLAndHostAccess(t *testing.T) {
 	cfgPath := writeTestConfig(t) // start empty
 	r := reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
