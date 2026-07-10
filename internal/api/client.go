@@ -121,9 +121,10 @@ func (c *Client) postJSON(path string, body interface{}, result interface{}) err
 	return nil
 }
 
-// AddTailnet calls POST /api/tailnet/add.
-func (c *Client) AddTailnet(id, authKey, exitNode string) (*ReconcileResponse, error) {
-	req := TailnetRequest{ID: id, AuthKey: authKey, ExitNode: exitNode}
+// AddTailnet calls POST /api/tailnet/add. The request carries the full tailnet
+// spec (id, auth key, exit node, control URL, host access); zero-value fields
+// are omitted from the JSON body.
+func (c *Client) AddTailnet(req TailnetRequest) (*ReconcileResponse, error) {
 	var result ReconcileResponse
 	if err := c.postJSON("/api/tailnet/add", req, &result); err != nil {
 		return nil, err

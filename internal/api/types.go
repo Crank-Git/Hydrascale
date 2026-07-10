@@ -34,9 +34,11 @@ type ReconcileResponse struct {
 
 // TailnetRequest is the request body for tailnet management endpoints.
 type TailnetRequest struct {
-	ID       string `json:"id"`
-	AuthKey  string `json:"auth_key,omitempty"`
-	ExitNode string `json:"exit_node,omitempty"`
+	ID         string `json:"id"`
+	AuthKey    string `json:"auth_key,omitempty"`
+	ExitNode   string `json:"exit_node,omitempty"`
+	ControlURL string `json:"control_url,omitempty"`
+	HostAccess *bool  `json:"host_access,omitempty"`
 }
 
 // DNSConfigRequest is the request body for POST /api/config/dns.
