@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -78,13 +79,23 @@ func (t *tunnel) close() {
 // startTunnel forwards remoteSock on sshHost to a local unix socket and waits
 // (briefly) for the forward to come up.
 func startTunnel(sshHost, remoteSock string) (*tunnel, error) {
+	// Guard against argv flag smuggling: sshHost/remoteSock come from user
+	// settings (settings.json), and a value like "-oProxyCommand=..." would be
+	// parsed by ssh as an option → arbitrary command execution. Reject flag-like
+	// and whitespace-bearing input, and end ssh's option parsing with "--".
+	if sshHost == "" || strings.HasPrefix(sshHost, "-") || strings.ContainsAny(sshHost, " \t\r\n") {
+		return nil, fmt.Errorf("invalid ssh host")
+	}
+	if !strings.HasPrefix(remoteSock, "/") || strings.ContainsAny(remoteSock, " \t\r\n:") {
+		return nil, fmt.Errorf("invalid remote socket path (must be an absolute path with no ':' )")
+	}
 	local := filepath.Join(os.TempDir(), "hydrascale-gui.sock")
 	os.Remove(local)
 	cmd := exec.Command("ssh", "-N",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "StreamLocalBindUnlink=yes",
 		"-o", "BatchMode=yes",
-		"-L", local+":"+remoteSock, sshHost)
+		"-L", local+":"+remoteSock, "--", sshHost)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start ssh: %w", err)
 	}
