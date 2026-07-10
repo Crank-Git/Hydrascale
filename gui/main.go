@@ -12,6 +12,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// appVersion is this app's own version, injected at release via
+// -ldflags "-X main.appVersion=<tag>". "dev" for local builds. (The statusbar
+// separately shows the version of the daemon it's connected to.)
+var appVersion = "dev"
+
 func main() {
 	// Connection comes from persisted settings (Settings modal), overridable by
 	// the HYDRASCALE_SOCKET env var. Defaults to the built-in mock so the app
@@ -35,7 +40,7 @@ func main() {
 			TitleBar: mac.TitleBarHiddenInset(),
 			About: &mac.AboutInfo{
 				Title:   "Hydrascale",
-				Message: "Manage multiple Tailscale tailnets.",
+				Message: "Manage multiple Tailscale tailnets.\nVersion " + appVersion,
 			},
 		},
 	})
