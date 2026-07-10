@@ -750,7 +750,7 @@ body { margin:0; }
           '<span>reconcile ' + m.reconcileSec + 's</span>' +
           '<span>host ' + esc(d.host) + '</span>' +
           '<span style="margin-left:auto">' + d.tailnets.length + ' tailnets · ' + m.peers + ' peers</span>' +
-          '<span>hydrascale ' + esc(d.version) + '</span>';
+          '<span>hydrascale' + (d.version ? ' ' + esc(d.version) : '') + '</span>';
       }
       // Rebound rows: fetch + render the detail view from Go on click.
       Array.prototype.forEach.call(document.querySelectorAll('#v-list .tbl tbody tr'), function (tr) {

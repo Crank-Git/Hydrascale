@@ -27,6 +27,10 @@ import (
 
 var cfgFile string
 
+// version is the Hydrascale version, injected at release time via
+// -ldflags "-X main.version=<tag>". "dev" for source/local builds.
+var version = "dev"
+
 // systemdUnit is the canonical content of /etc/systemd/system/hydrascale.service
 // written by `hydrascale install`. Must stay byte-identical to
 // contrib/hydrascale.service — enforced by TestSystemdUnitMatchesContrib.
@@ -36,8 +40,9 @@ var systemdUnit string
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "hydrascale",
-		Short: "Hydrascale - Run multiple Tailscale tailnets simultaneously",
+		Use:     "hydrascale",
+		Version: version,
+		Short:   "Hydrascale - Run multiple Tailscale tailnets simultaneously",
 		Long: `Hydrascale is a Linux-only Go service that lets a single user run
 multiple Tailscale tailnets simultaneously by using network namespaces for isolation.
 
@@ -69,10 +74,21 @@ reconciles toward it. GitOps for tailnets.`,
 	rootCmd.AddCommand(envCmd())
 	rootCmd.AddCommand(installCmd())
 	rootCmd.AddCommand(uninstallCmd())
+	rootCmd.AddCommand(versionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the Hydrascale version",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("hydrascale", version)
+		},
 	}
 }
 
@@ -468,6 +484,7 @@ func serveCmd() *cobra.Command {
 			// Start API server
 			apiServer := api.NewServer(api.DefaultSocketPath, r)
 			apiServer.SetSocketGroup(cfg.SocketGroup)
+			apiServer.SetVersion(version)
 			go func() {
 				if err := apiServer.Start(); err != nil {
 					fmt.Fprintf(os.Stderr, "API server start error: %v\n", err)

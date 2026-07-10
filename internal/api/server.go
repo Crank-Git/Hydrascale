@@ -29,11 +29,15 @@ type Server struct {
 	httpServer  *http.Server
 	socketPath  string
 	socketGroup string
+	version     string
 }
 
 // SetSocketGroup configures a unix group that may reach the control socket.
 // Empty (default) keeps the socket root-only (0600). Must be called before Start.
 func (s *Server) SetSocketGroup(group string) { s.socketGroup = group }
+
+// SetVersion records the daemon version, surfaced to clients via /api/status.
+func (s *Server) SetVersion(v string) { s.version = v }
 
 // NewServer creates a new Server that will listen on socketPath.
 func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
@@ -148,6 +152,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		PausedStates:  s.reconciler.PausedStates(),
 		FailureCounts: s.reconciler.FailureCounts(),
 		LastErrors:    s.reconciler.LastErrors(),
+		ServerVersion: s.version,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

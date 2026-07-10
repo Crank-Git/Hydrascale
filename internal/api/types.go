@@ -19,6 +19,7 @@ type StatusResponse struct {
 	PausedStates  map[string]bool                     `json:"paused_states"`
 	FailureCounts map[string]int                      `json:"failure_counts"`
 	LastErrors    map[string]string                   `json:"last_errors"`
+	ServerVersion string                              `json:"server_version,omitempty"`
 }
 
 // EventsResponse is the JSON response for GET /api/events.
