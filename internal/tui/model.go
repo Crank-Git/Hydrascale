@@ -202,7 +202,7 @@ func triggerReconcile(c *api.Client) tea.Cmd {
 
 func doAddTailnet(c *api.Client, id, authKey, exitNode string) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := c.AddTailnet(id, authKey, exitNode)
+		resp, err := c.AddTailnet(api.TailnetRequest{ID: id, AuthKey: authKey, ExitNode: exitNode})
 		if err != nil {
 			return mutationMsg{err: err}
 		}
@@ -994,4 +994,3 @@ func truncateVisible(s string, maxWidth int) string {
 	}
 	return s
 }
-

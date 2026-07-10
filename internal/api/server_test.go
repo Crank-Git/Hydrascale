@@ -591,6 +591,65 @@ func TestDetailEndpoint_NoPeers(t *testing.T) {
 	}
 }
 
+func TestAddTailnet_PersistsControlURLAndHostAccess(t *testing.T) {
+	cfgPath := writeTestConfig(t) // start empty
+	r := reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	enabled := true
+	if _, err := client.AddTailnet(TailnetRequest{
+		ID:         "gamma",
+		AuthKey:    "tskey-secret",
+		ControlURL: "https://headscale.example.com",
+		HostAccess: &enabled,
+	}); err != nil {
+		t.Fatalf("AddTailnet: %v", err)
+	}
+
+	// The reconcile outcome is orthogonal; assert the config file persisted the fields.
+	cfg, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	var gamma *config.Tailnet
+	for i := range cfg.Tailnets {
+		if cfg.Tailnets[i].ID == "gamma" {
+			gamma = &cfg.Tailnets[i]
+		}
+	}
+	if gamma == nil {
+		t.Fatal("gamma not persisted")
+	}
+	if gamma.ControlURL != "https://headscale.example.com" {
+		t.Errorf("ControlURL: got %q", gamma.ControlURL)
+	}
+	if gamma.HostAccess == nil || !*gamma.HostAccess {
+		t.Errorf("HostAccess: got %v, want true", gamma.HostAccess)
+	}
+}
+
+func TestAddTailnet_RejectsInvalidControlURL(t *testing.T) {
+	cfgPath := writeTestConfig(t)
+	r := reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	if _, err := client.AddTailnet(TailnetRequest{ID: "gamma", ControlURL: "not-a-url"}); err == nil {
+		t.Fatal("expected error for invalid control_url, got nil")
+	}
+	// Nothing should have been persisted on a rejected request.
+	cfg, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	for _, tn := range cfg.Tailnets {
+		if tn.ID == "gamma" {
+			t.Error("gamma should not have been persisted on invalid control_url")
+		}
+	}
+}
+
 // TestTailnetDetailClient_HTTP500 verifies that Client.TailnetDetail returns an
 // error when the server responds with a non-200, non-404 status code.
 func TestTailnetDetailClient_HTTP500(t *testing.T) {
