@@ -11,10 +11,29 @@ cross-platform build. The GUI depends only on the JSON contract.
 
 ## Status
 
-Milestone 2, first cut: the window shell renders the dashboard from the Go backend.
-Data currently comes from a built-in mock (`datasource.go`) so the app runs standalone
-with no daemon attached. The live transport (SSH-tunnel to the daemon's unix socket)
-lands next.
+The window renders the dashboard, tailnet detail, add-tailnet wizard, and remove flow,
+all round-tripping through Go bound methods.
+
+Two data sources (`DataSource` interface):
+- **mock** (`datasource.go`) — built-in fixtures; the default, so the app runs standalone.
+- **socket** (`socketsource.go`) — live HTTP over the daemon's unix socket.
+
+## Live data (remote client)
+
+Set `HYDRASCALE_SOCKET` to a daemon control socket and the app talks to it live:
+
+```sh
+# Local (on the Linux host running the daemon):
+HYDRASCALE_SOCKET=/var/lib/hydrascale/api.sock ./hydrascale-gui
+
+# Remote (macOS/Windows) — forward the daemon's socket over SSH, then point at it:
+ssh -N -L /tmp/hydrascale.sock:/var/lib/hydrascale/api.sock user@linux-host
+HYDRASCALE_SOCKET=/tmp/hydrascale.sock ./hydrascale-gui
+```
+
+Note: the daemon's `api.sock` is `0600` and root-owned, so the SSH login user must be
+able to read it — SSH as a user with access, relax the socket mode, or bridge it
+(`socat`) as root. A built-in connection UI is planned.
 
 ## Develop
 

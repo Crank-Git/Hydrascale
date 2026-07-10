@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -13,9 +14,14 @@ import (
 var assets embed.FS
 
 func main() {
-	// Data source: fixtures for now so the app runs standalone. The SSH-tunnel
-	// socket source is selected here once it lands (M3).
+	// Data source: if HYDRASCALE_SOCKET points at a daemon control socket
+	// (locally, or an `ssh -L` forward of a remote daemon's api.sock), talk to
+	// it live; otherwise fall back to built-in fixtures so the app runs
+	// standalone with no daemon attached.
 	var src DataSource = newMockSource()
+	if sock := os.Getenv("HYDRASCALE_SOCKET"); sock != "" {
+		src = newSocketSource(sock)
+	}
 
 	app := NewApp(src)
 
