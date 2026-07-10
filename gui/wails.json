@@ -1,7 +1,7 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "hydrascale-gui",
-  "outputfilename": "hydrascale-gui",
+  "name": "Hydrascale",
+  "outputfilename": "Hydrascale",
   "frontend:install": "",
   "frontend:build": "",
   "frontend:dev:watcher": "",

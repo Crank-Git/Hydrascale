@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -14,16 +13,10 @@ import (
 var assets embed.FS
 
 func main() {
-	// Data source: if HYDRASCALE_SOCKET points at a daemon control socket
-	// (locally, or an `ssh -L` forward of a remote daemon's api.sock), talk to
-	// it live; otherwise fall back to built-in fixtures so the app runs
-	// standalone with no daemon attached.
-	var src DataSource = newMockSource()
-	if sock := os.Getenv("HYDRASCALE_SOCKET"); sock != "" {
-		src = newSocketSource(sock)
-	}
-
-	app := NewApp(src)
+	// Connection comes from persisted settings (Settings modal), overridable by
+	// the HYDRASCALE_SOCKET env var. Defaults to the built-in mock so the app
+	// runs standalone with no daemon attached.
+	app := NewApp(loadSettings())
 
 	err := wails.Run(&options.App{
 		Title:     "Hydrascale",
@@ -36,6 +29,7 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 13, G: 16, B: 19, A: 1},
 		OnStartup:        app.startup,
+		OnShutdown:       app.shutdown,
 		Bind:             []interface{}{app},
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),

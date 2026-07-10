@@ -545,6 +545,31 @@ body { margin:0; }
       </div>
     </div>
   </div>
+
+  <div class="scrim" id="settings" hidden>
+    <div class="cf" role="dialog" aria-label="Settings" style="width:min(520px,100%)">
+      <div class="cfh">
+        <div class="cfi" style="color:var(--blue);background:color-mix(in srgb,var(--blue) 13%,transparent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="2.6"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.2a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 6.6 21a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H.6a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 3 6.6a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H7.5A1.6 1.6 0 0 0 9 .6V.4a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 3a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></div>
+        <div><h2>Settings</h2><p>Where should Hydrascale get its data?</p></div>
+      </div>
+      <div class="cfb" style="padding-left:22px;display:flex;flex-direction:column;gap:13px">
+        <div class="opts">
+          <div class="opt" data-mode="mock"><span class="rd"></span><div class="ot"><b>Demo</b><small>Built-in sample data — no daemon needed</small></div></div>
+          <div class="opt" data-mode="socket"><span class="rd"></span><div class="ot"><b>Connect to a daemon</b><small>Local socket, or a remote host over SSH</small></div></div>
+        </div>
+        <div id="set-conn" hidden style="display:flex;flex-direction:column;gap:12px">
+          <div class="ff"><label class="l">SSH host <span style="text-transform:none;letter-spacing:0;color:var(--dim)">— blank for local</span></label><input type="text" id="set-ssh" placeholder="phobos@192.168.1.221"></div>
+          <div class="ff"><label class="l">Daemon socket path</label><input type="text" id="set-sock" placeholder="/var/lib/hydrascale/api.sock"></div>
+          <div class="cfnote" style="margin:0">Remote note: the daemon only accepts root over its socket, so a plain SSH forward is refused — the SSH login must reach it as root (or via a root relay). Otherwise you'll see a connection error.</div>
+        </div>
+        <div id="set-err" style="display:none;color:var(--crit);font-size:12px;font-family:var(--mono)"></div>
+      </div>
+      <div class="foot">
+        <button class="btn" id="set-cancel">Cancel</button>
+        <button class="add" id="set-save">Save &amp; connect</button>
+      </div>
+    </div>
+  </div>
 </div>
 </div>
 
@@ -819,6 +844,46 @@ body { margin:0; }
         App.RemoveTailnet(currentDetailId).then(refresh).catch(function (e) { console.error('RemoveTailnet', e); });
       }
     });
+
+    // ---- settings modal ----
+    var settingsM = document.getElementById('settings');
+    function setMode(mode) {
+      Array.prototype.forEach.call(settingsM.querySelectorAll('.opt'), function (o) {
+        o.classList.toggle('sel', o.getAttribute('data-mode') === mode);
+      });
+      document.getElementById('set-conn').hidden = mode !== 'socket';
+    }
+    function openSettings() {
+      App.GetSettings().then(function (s) {
+        setMode(s.mode || 'mock');
+        document.getElementById('set-ssh').value = s.sshHost || '';
+        document.getElementById('set-sock').value = (s.sshHost ? s.remoteSocket : s.socketPath) || '/var/lib/hydrascale/api.sock';
+        document.getElementById('set-err').style.display = 'none';
+        settingsM.hidden = false;
+      });
+    }
+    Array.prototype.forEach.call(settingsM.querySelectorAll('.opt'), function (o) {
+      o.addEventListener('click', function () { setMode(o.getAttribute('data-mode')); });
+    });
+    document.getElementById('set-cancel').addEventListener('click', function () { settingsM.hidden = true; });
+    settingsM.addEventListener('click', function (e) { if (e.target === settingsM) settingsM.hidden = true; });
+    document.getElementById('set-save').addEventListener('click', function () {
+      var sel = settingsM.querySelector('.opt.sel');
+      var mode = sel ? sel.getAttribute('data-mode') : 'mock';
+      var ssh = document.getElementById('set-ssh').value.trim();
+      var sock = document.getElementById('set-sock').value.trim() || '/var/lib/hydrascale/api.sock';
+      var errEl = document.getElementById('set-err');
+      errEl.style.display = 'none';
+      App.SaveSettings({ mode: mode, sshHost: ssh, socketPath: sock, remoteSocket: sock }).then(function () {
+        settingsM.hidden = true;
+        refresh();
+      }).catch(function (e) {
+        errEl.textContent = String(e).replace(/^Error:\s*/, '');
+        errEl.style.display = 'block';
+      });
+    });
+    var settingsBtn = document.querySelector('.nb[title="Settings"]');
+    if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
 
     refresh();
   })();
