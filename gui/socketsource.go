@@ -82,8 +82,9 @@ type apiConfig struct {
 }
 
 type apiStatus struct {
-	ErrorStates  map[string]bool `json:"error_states"`
-	PausedStates map[string]bool `json:"paused_states"`
+	ServerVersion string          `json:"server_version"`
+	ErrorStates   map[string]bool `json:"error_states"`
+	PausedStates  map[string]bool `json:"paused_states"`
 	// Actual/TailnetState is marshaled with Go field names (no json tags).
 	Actual map[string]struct {
 		NsName        string `json:"NsName"`
@@ -190,7 +191,7 @@ func (s *socketSource) Dashboard() (Dashboard, error) {
 		Host:    hostName(st),
 		Healthy: healthy,
 		DNSOK:   true,
-		Version: "",
+		Version: st.ServerVersion,
 		Metrics: Metrics{
 			Tailnets: len(rows), Reconnecting: reconnecting, Peers: peersTotal,
 			HostAccessOn: haOn, ReconcileSec: 10, Uptime: "",
