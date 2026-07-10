@@ -13,12 +13,12 @@ const DefaultSocketPath = "/var/lib/hydrascale/api.sock"
 
 // StatusResponse is the JSON response for GET /api/status.
 type StatusResponse struct {
-	Desired       map[string]config.Tailnet        `json:"desired"`
+	Desired       map[string]config.Tailnet           `json:"desired"`
 	Actual        map[string]*reconciler.TailnetState `json:"actual"`
-	ErrorStates   map[string]bool                  `json:"error_states"`
-	PausedStates  map[string]bool                  `json:"paused_states"`
-	FailureCounts map[string]int                   `json:"failure_counts"`
-	LastErrors    map[string]string                `json:"last_errors"`
+	ErrorStates   map[string]bool                     `json:"error_states"`
+	PausedStates  map[string]bool                     `json:"paused_states"`
+	FailureCounts map[string]int                      `json:"failure_counts"`
+	LastErrors    map[string]string                   `json:"last_errors"`
 }
 
 // EventsResponse is the JSON response for GET /api/events.
@@ -47,9 +47,10 @@ type DNSConfigRequest struct {
 
 // RedactedTailnet is a Tailnet with the auth key hidden.
 type RedactedTailnet struct {
-	ID       string `json:"id"`
-	ExitNode string `json:"exit_node,omitempty"`
-	AuthKey  string `json:"auth_key,omitempty"`
+	ID         string `json:"id"`
+	ExitNode   string `json:"exit_node,omitempty"`
+	AuthKey    string `json:"auth_key,omitempty"`
+	HostAccess *bool  `json:"host_access,omitempty"`
 }
 
 // RedactedConfig mirrors config.Config but with auth keys redacted.
@@ -64,15 +65,29 @@ type ConfigResponse struct {
 	Config RedactedConfig `json:"config"`
 }
 
+// PeerInfo is a single peer within a tailnet, derived from tailscale status --json.
+type PeerInfo struct {
+	HostName     string    `json:"host_name"`
+	DNSName      string    `json:"dns_name,omitempty"`
+	OS           string    `json:"os,omitempty"`
+	TailscaleIPs []string  `json:"tailscale_ips,omitempty"`
+	AllowedIPs   []string  `json:"allowed_ips,omitempty"`
+	Online       bool      `json:"online"`
+	LastSeen     time.Time `json:"last_seen,omitempty"`
+}
+
 // TailnetDetailResponse is the JSON response for GET /api/tailnet/{id}/detail.
 // It contains live data fetched from inside the tailnet's network namespace.
-// Routes and config fields (ExitNode, HostAccess) are NOT included here —
-// the TUI assembles those from the background status poll (m.status).
-// Error is set (with HTTP 200) when the live fetch fails; the TUI renders it inline.
+// Config fields (ExitNode, HostAccess) and reconciler route state are NOT included
+// here — clients assemble those from GET /api/status and GET /api/config.
+// Error is set (with HTTP 200) when the live fetch fails; clients render it inline.
 type TailnetDetailResponse struct {
-	TailscaleIPs []string  `json:"tailscale_ips"`
-	PeerCount    int       `json:"peer_count"`
-	OnlinePeers  int       `json:"online_peers"`
-	FetchedAt    time.Time `json:"fetched_at"`
-	Error        string    `json:"error,omitempty"`
+	TailscaleIPs   []string   `json:"tailscale_ips"`
+	MagicDNSName   string     `json:"magic_dns_name,omitempty"`
+	MagicDNSSuffix string     `json:"magic_dns_suffix,omitempty"`
+	PeerCount      int        `json:"peer_count"`
+	OnlinePeers    int        `json:"online_peers"`
+	Peers          []PeerInfo `json:"peers,omitempty"`
+	FetchedAt      time.Time  `json:"fetched_at"`
+	Error          string     `json:"error,omitempty"`
 }

@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -359,8 +361,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	for i, tn := range cfg.Tailnets {
 		rt := RedactedTailnet{
-			ID:       tn.ID,
-			ExitNode: tn.ExitNode,
+			ID:         tn.ID,
+			ExitNode:   tn.ExitNode,
+			HostAccess: tn.HostAccess,
 		}
 		if tn.AuthKey != "" {
 			rt.AuthKey = "***"
@@ -416,16 +419,31 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	// FetchedAt stamps when the live data was actually obtained (after the subprocess).
 	resp.FetchedAt = time.Now()
 	resp.TailscaleIPs = status.Self.TailscaleIPs
+	resp.MagicDNSName = strings.TrimSuffix(status.Self.DNSName, ".")
+	resp.MagicDNSSuffix = status.MagicDNSSuffix
 	resp.PeerCount = len(status.Peer)
+	resp.Peers = make([]PeerInfo, 0, len(status.Peer))
 	for _, peer := range status.Peer {
 		if peer.Online {
 			resp.OnlinePeers++
 		}
+		resp.Peers = append(resp.Peers, PeerInfo{
+			HostName:     peer.HostName,
+			DNSName:      strings.TrimSuffix(peer.DNSName, "."),
+			OS:           peer.OS,
+			TailscaleIPs: peer.TailscaleIPs,
+			AllowedIPs:   peer.AllowedIPs,
+			Online:       peer.Online,
+			LastSeen:     peer.LastSeen,
+		})
 	}
+	// Deterministic order: tailscale's Peer map is keyed by node key.
+	sort.Slice(resp.Peers, func(i, j int) bool {
+		return resp.Peers[i].HostName < resp.Peers[j].HostName
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
 		log.Printf("handleTailnetDetail: encode success response: %v", encErr)
 	}
 }
-
