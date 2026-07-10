@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -168,6 +169,16 @@ func (s *Server) writeReconcileResponse(w http.ResponseWriter, err error) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// isValidControlURL reports whether s is an absolute http(s) URL with a host,
+// as required for a Headscale/custom coordination server (--login-server).
+func isValidControlURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
 func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -182,6 +193,10 @@ func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ID == "" {
 		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+	if req.ControlURL != "" && !isValidControlURL(req.ControlURL) {
+		http.Error(w, "control_url must be an absolute http(s) URL", http.StatusBadRequest)
 		return
 	}
 
@@ -200,9 +215,11 @@ func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg.Tailnets = append(cfg.Tailnets, config.Tailnet{
-		ID:       req.ID,
-		AuthKey:  req.AuthKey,
-		ExitNode: req.ExitNode,
+		ID:         req.ID,
+		AuthKey:    req.AuthKey,
+		ExitNode:   req.ExitNode,
+		ControlURL: req.ControlURL,
+		HostAccess: req.HostAccess,
 	})
 
 	if err := config.SaveConfig(cfgPath, cfg); err != nil {
