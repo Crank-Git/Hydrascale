@@ -180,7 +180,9 @@ body { margin:0; }
 @media (prefers-reduced-motion:reduce){ *{animation:none!important;} }
 
 /* --- view switching (list <-> detail) --- */
-#v-list, #v-detail { display:flex; flex-direction:column; flex:1; min-height:0; }
+#v-list, #v-detail, #v-peers, #v-activity { display:flex; flex-direction:column; flex:1; min-height:0; }
+#v-peers .tblwrap, #v-activity .evs { flex:1; min-height:0; overflow-y:auto; }
+#v-activity .evs { padding-top:6px; }
 [hidden] { display:none !important; }
 
 /* detail: back button + row actions */
@@ -455,6 +457,27 @@ body { margin:0; }
         </aside>
       </div>
     </div><!-- /#v-detail -->
+
+    <div id="v-peers" hidden>
+      <header class="hd">
+        <span class="crumb">host <span class="mono">mars</span> / <span class="mono" style="color:var(--muted)">all peers</span></span>
+      </header>
+      <div class="sub">Peers <span class="c" id="peers-count">—</span></div>
+      <div class="tblwrap">
+        <table class="tbl pl">
+          <thead><tr><th>Tailnet</th><th>Peer</th><th>Address</th><th>OS</th><th>Routes</th><th>Last seen</th></tr></thead>
+          <tbody id="peers-body"></tbody>
+        </table>
+      </div>
+    </div><!-- /#v-peers -->
+
+    <div id="v-activity" hidden>
+      <header class="hd">
+        <span class="crumb">host <span class="mono">mars</span> / <span class="mono" style="color:var(--muted)">activity</span></span>
+        <div class="r"><span class="live" style="font-family:var(--mono);font-size:10px;color:var(--good);display:flex;align-items:center;gap:5px"><span class="d good" style="width:6px;height:6px"></span>live</span></div>
+      </header>
+      <div class="evs" id="activity-body"></div>
+    </div><!-- /#v-activity -->
   </div>
   </div><!-- /.app -->
   <div class="statusbar">
@@ -810,10 +833,7 @@ body { margin:0; }
       currentDetailId = id;
       App.GetTailnetDetail(id).then(function (d) {
         renderDetail(d);
-        document.getElementById('v-list').hidden = true;
-        document.getElementById('v-detail').hidden = false;
-        var mw = document.querySelector('.mainwrap');
-        if (mw) mw.scrollTop = 0;
+        showView('detail');
       }).catch(function (e) { console.error('GetTailnetDetail', e); });
     }
 
@@ -884,6 +904,65 @@ body { margin:0; }
     });
     var settingsBtn = document.querySelector('.nb[title="Settings"]');
     if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+
+    // ---- top-level view switching (rail: Tailnets / Peers / Activity) ----
+    function showView(name) {
+      ['list', 'detail', 'peers', 'activity'].forEach(function (v) {
+        var el = document.getElementById('v-' + v);
+        if (el) el.hidden = v !== name;
+      });
+      var active = { list: 'Tailnets', detail: 'Tailnets', peers: 'Peers', activity: 'Activity' }[name];
+      Array.prototype.forEach.call(document.querySelectorAll('.rail .nb'), function (nb) {
+        var t = nb.getAttribute('title');
+        if (t === 'Tailnets' || t === 'Peers' || t === 'Activity') nb.classList.toggle('on', t === active);
+      });
+      var mw = document.querySelector('.mainwrap');
+      if (mw) mw.scrollTop = 0;
+    }
+
+    function aggPeerRow(tailnet, p) {
+      var dot = p.status === 'warn' ? 'warn' : (p.status === 'dim' ? 'dimdot' : 'good');
+      var routes = p.routes ? esc(p.routes) : '<span class="addr dim">—</span>';
+      return '<tr>' +
+        '<td class="addr">' + esc(tailnet) + '</td>' +
+        '<td><div class="nm"><span class="s ' + dot + '"></span><span class="txt"><b>' + esc(p.hostName) + '</b></span></div></td>' +
+        '<td class="addr">' + esc(p.address) + '</td>' +
+        '<td class="os">' + esc(p.os) + '</td>' +
+        '<td class="addr">' + routes + '</td>' +
+        '<td class="seen">' + esc(p.lastSeen) + '</td></tr>';
+    }
+
+    function showPeers() {
+      showView('peers');
+      App.GetDashboard().then(function (d) {
+        var tailnets = d.tailnets || [];
+        return Promise.all(tailnets.map(function (t) {
+          return App.GetTailnetDetail(t.id).then(function (det) { return { id: t.id, det: det }; })
+            .catch(function () { return { id: t.id, det: { peers: [] } }; });
+        }));
+      }).then(function (all) {
+        var rows = [];
+        all.forEach(function (x) { (x.det.peers || []).forEach(function (p) { rows.push(aggPeerRow(x.id, p)); }); });
+        document.getElementById('peers-count').textContent = rows.length;
+        document.getElementById('peers-body').innerHTML = rows.join('') ||
+          '<tr><td colspan="6" style="padding:16px 20px;color:var(--dim)">No peers reported.</td></tr>';
+      });
+    }
+
+    function showActivity() {
+      showView('activity');
+      App.GetDashboard().then(function (d) {
+        document.getElementById('activity-body').innerHTML = (d.events || []).map(eventRow).join('') ||
+          '<div class="e info" style="padding:14px 16px"><div class="m">No activity yet.</div></div>';
+      });
+    }
+
+    var railTailnets = document.querySelector('.nb[title="Tailnets"]');
+    if (railTailnets) railTailnets.addEventListener('click', function () { showView('list'); });
+    var railPeers = document.querySelector('.nb[title="Peers"]');
+    if (railPeers) railPeers.addEventListener('click', showPeers);
+    var railActivity = document.querySelector('.nb[title="Activity"]');
+    if (railActivity) railActivity.addEventListener('click', showActivity);
 
     refresh();
   })();
