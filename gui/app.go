@@ -27,3 +27,13 @@ func (a *App) GetDashboard() (Dashboard, error) {
 func (a *App) GetTailnetDetail(id string) (TailnetDetail, error) {
 	return a.src.TailnetDetail(id)
 }
+
+// AddTailnet creates a tailnet from the wizard's submission.
+func (a *App) AddTailnet(req AddTailnetRequest) error {
+	return a.src.AddTailnet(req)
+}
+
+// RemoveTailnet tears a tailnet down.
+func (a *App) RemoveTailnet(id string) error {
+	return a.src.RemoveTailnet(id)
+}

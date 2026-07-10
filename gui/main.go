@@ -15,7 +15,7 @@ var assets embed.FS
 func main() {
 	// Data source: fixtures for now so the app runs standalone. The SSH-tunnel
 	// socket source is selected here once it lands (M3).
-	var src DataSource = mockSource{}
+	var src DataSource = newMockSource()
 
 	app := NewApp(src)
 

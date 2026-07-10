@@ -6,6 +6,15 @@ package main
 // client: it only needs the JSON contract, and the Go backend pre-formats data
 // into these display-ready shapes so the frontend stays dumb.
 
+// AddTailnetRequest is what the wizard submits to create a tailnet.
+type AddTailnetRequest struct {
+	ID         string `json:"id"`
+	AuthKey    string `json:"authKey"`
+	ControlURL string `json:"controlUrl"`
+	ExitNode   string `json:"exitNode"`
+	HostAccess bool   `json:"hostAccess"`
+}
+
 // Metrics is the summary strip on the dashboard.
 type Metrics struct {
 	Tailnets     int    `json:"tailnets"`

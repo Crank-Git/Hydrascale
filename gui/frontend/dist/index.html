@@ -706,12 +706,9 @@ body { margin:0; }
           '<span style="margin-left:auto">' + d.tailnets.length + ' tailnets · ' + m.peers + ' peers</span>' +
           '<span>hydrascale ' + esc(d.version) + '</span>';
       }
-      // Rebound rows lose the mockup's click handler; re-wire to open detail.
+      // Rebound rows: fetch + render the detail view from Go on click.
       Array.prototype.forEach.call(document.querySelectorAll('#v-list .tbl tbody tr'), function (tr) {
-        tr.addEventListener('click', function () {
-          var vList = document.getElementById('v-list'), vDetail = document.getElementById('v-detail');
-          if (vList && vDetail) { vList.hidden = true; vDetail.hidden = false; }
-        });
+        tr.addEventListener('click', function () { openDetail(tr.getAttribute('data-id')); });
       });
     }
 
@@ -719,9 +716,107 @@ body { margin:0; }
       return '<div class="m"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>';
     }
 
-    App.GetDashboard().then(renderDashboard).catch(function (e) {
-      console.error('GetDashboard failed', e);
+    function refresh() {
+      return App.GetDashboard().then(renderDashboard).catch(function (e) {
+        console.error('GetDashboard failed', e);
+      });
+    }
+
+    // ---- detail view ----
+    var currentDetailId = null;
+
+    function kv(row) {
+      return '<div class="kv"><span class="k">' + esc(row.key) + '</span><span class="v' +
+        (row.dim ? ' dim' : '') + '">' + esc(row.value) + '</span></div>';
+    }
+    function card(title, badge, rows) {
+      var h = '<h3>' + esc(title) + (badge ? ' <span class="badge ' + badge.cls + '">' + badge.text + '</span>' : '') + '</h3>';
+      return '<div class="card">' + h + (rows || []).map(kv).join('') + '</div>';
+    }
+    function peerRow(p) {
+      var dot = p.status === 'warn' ? 'warn' : (p.status === 'dim' ? 'dimdot' : 'good');
+      var routes = p.routes ? esc(p.routes) : '<span class="addr dim">—</span>';
+      return '<tr><td><div class="nm"><span class="s ' + dot + '"></span><span class="txt"><b>' +
+        esc(p.hostName) + '</b></span></div></td>' +
+        '<td class="addr">' + esc(p.address) + '</td>' +
+        '<td class="os">' + esc(p.os) + '</td>' +
+        '<td class="addr">' + routes + '</td>' +
+        '<td class="seen">' + esc(p.lastSeen) + '</td></tr>';
+    }
+
+    function renderDetail(d) {
+      var root = document.getElementById('v-detail');
+      if (d.error) { console.error('detail:', d.error); }
+      var crumb = $('.crumb', root);
+      if (crumb) crumb.innerHTML = 'host <span class="mono">' + esc(d.namespace ? 'mars' : 'mars') +
+        '</span> / <span class="mono" style="color:var(--muted)">' + esc(d.id) + '</span>';
+      var metrics = $('.metrics', root);
+      if (metrics) metrics.innerHTML =
+        '<div class="m"><span class="k">Status</span><span class="v"><span class="d ' +
+          (d.status === 'connected' ? 'good' : 'warn') + '"></span>' + esc(d.status) + '</span></div>' +
+        '<div class="m"><span class="k">Address</span><span class="v" style="font-size:14px">' + esc(d.address) + '</span></div>' +
+        '<div class="m"><span class="k">Peers</span><span class="v">' + d.peerCount + '</span></div>' +
+        '<div class="m"><span class="k">Namespace</span><span class="v" style="font-size:14px">' + esc(d.namespace) + '</span></div>' +
+        '<div class="m"><span class="k">Uptime</span><span class="v">' + esc(d.uptime) + '</span></div>';
+      var cfg = $('.cfg', root);
+      if (cfg) {
+        var haOn = (d.hostAccess || []).length > 1;
+        cfg.innerHTML =
+          card('Network', null, d.network) +
+          card('DNS', { cls: 'on', text: 'accept' }, d.dns) +
+          card('Host access', haOn ? { cls: 'on', text: 'enabled' } : { cls: 'off', text: 'disabled' }, d.hostAccess) +
+          card('Routes', null, d.routes);
+      }
+      var subC = $('.sub .c', root);
+      if (subC) subC.textContent = (d.peers || []).length;
+      var pbody = $('.pl tbody', root);
+      if (pbody) pbody.innerHTML = (d.peers || []).map(peerRow).join('');
+      var lh = $('.log .lh h2', root);
+      if (lh) lh.textContent = d.id + ' activity';
+      var evs = $('.log .evs', root);
+      if (evs) evs.innerHTML = (d.events || []).map(eventRow).join('');
+    }
+
+    function openDetail(id) {
+      currentDetailId = id;
+      App.GetTailnetDetail(id).then(function (d) {
+        renderDetail(d);
+        document.getElementById('v-list').hidden = true;
+        document.getElementById('v-detail').hidden = false;
+        var mw = document.querySelector('.mainwrap');
+        if (mw) mw.scrollTop = 0;
+      }).catch(function (e) { console.error('GetTailnetDetail', e); });
+    }
+
+    // ---- wizard submit ----
+    function wizardValues() {
+      var name = '';
+      var nameInput = $('#wizard input[type=text]');
+      if (nameInput) name = nameInput.value.trim();
+      var hostAccess = false;
+      Array.prototype.forEach.call(document.querySelectorAll('#wizard .tog'), function (t) {
+        if (t.textContent.indexOf('Host access') >= 0) {
+          hostAccess = !!$('.sw.on', t);
+        }
+      });
+      return { id: name, authKey: '', controlUrl: '', exitNode: '', hostAccess: hostAccess };
+    }
+    var wzNext = document.getElementById('wz-next');
+    if (wzNext) wzNext.addEventListener('click', function () {
+      if (this.textContent.indexOf('Create') >= 0) {
+        App.AddTailnet(wizardValues()).then(refresh).catch(function (e) { console.error('AddTailnet', e); });
+      }
     });
+
+    // ---- remove confirm ----
+    var cfRemove = document.getElementById('cf-remove');
+    if (cfRemove) cfRemove.addEventListener('click', function () {
+      if (currentDetailId) {
+        App.RemoveTailnet(currentDetailId).then(refresh).catch(function (e) { console.error('RemoveTailnet', e); });
+      }
+    });
+
+    refresh();
   })();
 </script>
 </body>
