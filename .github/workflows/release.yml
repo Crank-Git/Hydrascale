@@ -56,6 +56,11 @@ jobs:
     defaults:
       run:
         working-directory: gui
+    # Pass workflow context through env, never inline into run: scripts — a
+    # crafted ref/tag name interpolated directly would be a command-injection.
+    env:
+      REF: ${{ github.ref_name }}
+      PLATFORM: ${{ matrix.platform }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,23 +84,23 @@ jobs:
 
       - name: Build (Linux — WebKit 4.1 tag)
         if: matrix.os == 'ubuntu-latest'
-        run: wails build -platform ${{ matrix.platform }} -tags webkit2_41 -ldflags "-X main.appVersion=${{ github.ref_name }}"
+        run: wails build -platform "$PLATFORM" -tags webkit2_41 -ldflags "-X main.appVersion=$REF"
 
       - name: Build (macOS / Windows)
         if: matrix.os != 'ubuntu-latest'
-        run: wails build -platform ${{ matrix.platform }} -ldflags "-X main.appVersion=${{ github.ref_name }}"
+        run: wails build -platform "$PLATFORM" -ldflags "-X main.appVersion=$REF"
 
       - name: Package (macOS)
         if: matrix.os == 'macos-latest'
-        run: ditto -c -k --keepParent build/bin/Hydrascale.app "Hydrascale_${{ github.ref_name }}_macos.zip"
+        run: ditto -c -k --keepParent build/bin/Hydrascale.app "Hydrascale_${REF}_macos.zip"
 
       - name: Package (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: tar czf "Hydrascale_${{ github.ref_name }}_linux_amd64.tar.gz" -C build/bin Hydrascale
+        run: tar czf "Hydrascale_${REF}_linux_amd64.tar.gz" -C build/bin Hydrascale
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
-        run: Copy-Item build/bin/Hydrascale.exe "Hydrascale_${{ github.ref_name }}_windows_amd64.exe"
+        run: Copy-Item build/bin/Hydrascale.exe "Hydrascale_$($env:REF)_windows_amd64.exe"
         shell: pwsh
 
       # Always upload as a workflow artifact (lets workflow_dispatch verify builds).
@@ -109,6 +114,6 @@ jobs:
       # Attach to the GitHub Release only on a tag.
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
-        run: gh release upload "${{ github.ref_name }}" Hydrascale_* --clobber
+        run: gh release upload "$REF" Hydrascale_* --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
