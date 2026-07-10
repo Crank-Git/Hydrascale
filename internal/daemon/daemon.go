@@ -26,10 +26,13 @@ type TailscaleStatus struct {
 
 // StatusNode represents a node in tailscale status.
 type StatusNode struct {
-	HostName     string   `json:"HostName"`
-	DNSName      string   `json:"DNSName"`
-	TailscaleIPs []string `json:"TailscaleIPs"`
-	Online       bool     `json:"Online"`
+	HostName     string    `json:"HostName"`
+	DNSName      string    `json:"DNSName"`
+	OS           string    `json:"OS"`
+	TailscaleIPs []string  `json:"TailscaleIPs"`
+	AllowedIPs   []string  `json:"AllowedIPs"`
+	Online       bool      `json:"Online"`
+	LastSeen     time.Time `json:"LastSeen"`
 }
 
 // Manager defines the interface for daemon lifecycle operations.

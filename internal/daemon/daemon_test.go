@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestStartDaemon(t *testing.T) {
@@ -18,7 +20,6 @@ func TestStopDaemon(t *testing.T) {
 func TestCheckHealth(t *testing.T) {
 	t.Skip("Skipping health check test - requires privileges and tailscaled")
 }
-
 
 func TestValidatePID(t *testing.T) {
 	// Our own process should be findable in /proc
@@ -84,6 +85,39 @@ func TestBuildTailscaleUpArgs(t *testing.T) {
 	}
 }
 
+func TestStatusNode_ParsesPeerFields(t *testing.T) {
+	// A trimmed sample of `tailscale status --json`. The GUI peers table needs
+	// OS, LastSeen and AllowedIPs parsed off each node, so guard the JSON tags.
+	raw := `{
+		"MagicDNSSuffix": "tail1234.ts.net",
+		"Self": {"HostName": "myhost", "DNSName": "myhost.tail1234.ts.net.", "OS": "linux", "TailscaleIPs": ["100.64.1.5"], "Online": true},
+		"Peer": {
+			"nodekey:abc": {"HostName": "orin", "DNSName": "orin.tail1234.ts.net.", "OS": "linux", "TailscaleIPs": ["100.64.1.9"], "AllowedIPs": ["100.64.1.9/32", "192.168.1.0/24"], "Online": true, "LastSeen": "2026-07-01T12:00:00Z"}
+		}
+	}`
+	var st TailscaleStatus
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if st.MagicDNSSuffix != "tail1234.ts.net" {
+		t.Errorf("MagicDNSSuffix: got %q", st.MagicDNSSuffix)
+	}
+	p, ok := st.Peer["nodekey:abc"]
+	if !ok {
+		t.Fatal("peer nodekey:abc missing")
+	}
+	if p.OS != "linux" {
+		t.Errorf("OS: got %q, want linux", p.OS)
+	}
+	if len(p.AllowedIPs) != 2 || p.AllowedIPs[1] != "192.168.1.0/24" {
+		t.Errorf("AllowedIPs: got %v", p.AllowedIPs)
+	}
+	want := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	if !p.LastSeen.Equal(want) {
+		t.Errorf("LastSeen: got %v, want %v", p.LastSeen, want)
+	}
+}
+
 func TestStopDaemon_StalePID(t *testing.T) {
 	// Create a temp state dir with a stale PID file
 	dir := t.TempDir()
@@ -104,4 +138,3 @@ func TestStopDaemon_StalePID(t *testing.T) {
 		t.Error("stale PID should not validate")
 	}
 }
-

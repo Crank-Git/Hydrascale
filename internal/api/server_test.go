@@ -417,14 +417,18 @@ func TestReconcileEndpointError(t *testing.T) {
 func TestDetailEndpoint_HappyPath(t *testing.T) {
 	cfgPath := writeTestConfig(t, "alpha")
 	md := newMockDaemon()
+	lastSeen := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	md.statusResult = &daemon.TailscaleStatus{
+		MagicDNSSuffix: "tail1234.ts.net",
 		Self: daemon.StatusNode{
 			TailscaleIPs: []string{"100.64.1.5"},
 			HostName:     "myhost",
+			DNSName:      "myhost.tail1234.ts.net.",
 		},
 		Peer: map[string]daemon.StatusNode{
-			"peer1": {HostName: "peer1", Online: true},
-			"peer2": {HostName: "peer2", Online: false},
+			// Keyed by node key; intentionally out of hostname order to exercise sorting.
+			"nodekeyZ": {HostName: "zeta", DNSName: "zeta.tail1234.ts.net.", OS: "linux", Online: true, TailscaleIPs: []string{"100.64.1.9"}, AllowedIPs: []string{"100.64.1.9/32", "192.168.1.0/24"}, LastSeen: lastSeen},
+			"nodekeyA": {HostName: "alpha-peer", OS: "android", Online: false, TailscaleIPs: []string{"100.64.1.2"}},
 		},
 	}
 	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
@@ -449,6 +453,70 @@ func TestDetailEndpoint_HappyPath(t *testing.T) {
 	}
 	if detail.FetchedAt.IsZero() {
 		t.Error("FetchedAt should not be zero")
+	}
+	// MagicDNS: self DNSName with trailing dot trimmed, plus suffix.
+	if detail.MagicDNSName != "myhost.tail1234.ts.net" {
+		t.Errorf("MagicDNSName: got %q, want myhost.tail1234.ts.net", detail.MagicDNSName)
+	}
+	if detail.MagicDNSSuffix != "tail1234.ts.net" {
+		t.Errorf("MagicDNSSuffix: got %q, want tail1234.ts.net", detail.MagicDNSSuffix)
+	}
+	// Peers: present, sorted by hostname, with fields carried through.
+	if len(detail.Peers) != 2 {
+		t.Fatalf("Peers: got %d, want 2", len(detail.Peers))
+	}
+	if detail.Peers[0].HostName != "alpha-peer" || detail.Peers[1].HostName != "zeta" {
+		t.Errorf("Peers not sorted by hostname: got %q, %q", detail.Peers[0].HostName, detail.Peers[1].HostName)
+	}
+	zeta := detail.Peers[1]
+	if zeta.OS != "linux" || !zeta.Online || zeta.DNSName != "zeta.tail1234.ts.net" {
+		t.Errorf("zeta peer fields wrong: %+v", zeta)
+	}
+	if len(zeta.AllowedIPs) != 2 || zeta.AllowedIPs[1] != "192.168.1.0/24" {
+		t.Errorf("zeta AllowedIPs: got %v", zeta.AllowedIPs)
+	}
+	if !zeta.LastSeen.Equal(lastSeen) {
+		t.Errorf("zeta LastSeen: got %v, want %v", zeta.LastSeen, lastSeen)
+	}
+}
+
+func TestConfigEndpoint_HostAccess(t *testing.T) {
+	// A config with an explicit host_access flag must surface it via GET /api/config.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig()
+	enabled := true
+	cfg.Tailnets = append(cfg.Tailnets,
+		config.Tailnet{ID: "alpha", HostAccess: &enabled, AuthKey: "tskey-secret"},
+		config.Tailnet{ID: "beta"}, // host_access unset → nil
+	)
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	r := reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	resp, err := client.GetConfig()
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	byID := map[string]RedactedTailnet{}
+	for _, tn := range resp.Config.Tailnets {
+		byID[tn.ID] = tn
+	}
+	alpha, ok := byID["alpha"]
+	if !ok {
+		t.Fatal("alpha missing from config response")
+	}
+	if alpha.HostAccess == nil || !*alpha.HostAccess {
+		t.Errorf("alpha HostAccess: got %v, want true", alpha.HostAccess)
+	}
+	if alpha.AuthKey != "***" {
+		t.Errorf("alpha AuthKey should be redacted, got %q", alpha.AuthKey)
+	}
+	if byID["beta"].HostAccess != nil {
+		t.Errorf("beta HostAccess should be nil (unset), got %v", *byID["beta"].HostAccess)
 	}
 }
 
