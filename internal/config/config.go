@@ -64,6 +64,11 @@ type Config struct {
 	EventLog    string           `yaml:"event_log,omitempty"`
 	HostDNS     HostDNSConfig    `yaml:"host_dns,omitempty"`
 	InfraSubnet string           `yaml:"infra_subnet,omitempty"` // Default: 10.200.0.0/16
+	// SocketGroup, when set, makes the API control socket group-accessible:
+	// the daemon chowns /var/lib/hydrascale + api.sock to root:<group> with
+	// group-traversable/rw modes. Add a trusted user to that group to let it
+	// reach the API (e.g. an SSH-forwarded remote GUI) without being root.
+	SocketGroup string `yaml:"socket_group,omitempty"`
 }
 
 // TailnetHostAccess returns whether host access is enabled for a specific tailnet,
