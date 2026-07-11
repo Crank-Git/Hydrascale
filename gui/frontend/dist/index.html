@@ -578,6 +578,7 @@ body { margin:0; }
       <div class="cfb" style="padding:6px 22px 16px;display:flex;flex-direction:column;gap:13px">
         <div class="ff"><label class="l">SSH host <span style="text-transform:none;letter-spacing:0;color:var(--dim)">— blank for local</span></label><input type="text" id="set-ssh" placeholder="user@host"></div>
         <div class="ff"><label class="l">Daemon socket path</label><input type="text" id="set-sock" placeholder="/var/lib/hydrascale/api.sock"></div>
+        <div class="ff"><label class="l">Auto-refresh <span style="text-transform:none;letter-spacing:0;color:var(--dim)">— seconds, 0 = off</span></label><input type="number" id="set-refresh" min="0" step="5" placeholder="30"></div>
         <div class="cfnote" style="margin:0">Remote over SSH needs the daemon's <code>socket_group</code> set and your SSH user added to that group — otherwise its root-only socket refuses the forward.</div>
         <div id="set-err" style="display:none;color:var(--crit);font-size:12px;font-family:var(--mono)"></div>
       </div>
@@ -846,6 +847,31 @@ body { margin:0; }
       });
     }
 
+    // ---- auto-refresh ----
+    // Re-fetch the active view on an interval so a client recovers from an
+    // offline daemon on its own. Ticks never stack: a socket fetch can take up
+    // to 12s, so a tick is skipped while the previous one is still in flight.
+    var refreshTimer = null;
+    var refreshing = false;
+    function tickRefresh() {
+      if (refreshing) return;
+      refreshing = true;
+      var done = function () { refreshing = false; };
+      var vd = document.getElementById('v-detail');
+      var p = (vd && !vd.hidden && currentDetailId)
+        ? App.GetTailnetDetail(currentDetailId).then(renderDetail)
+        : refresh();
+      Promise.resolve(p).then(done, done);
+    }
+    function setAutoRefresh(sec) {
+      if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+      sec = parseInt(sec, 10) || 0;
+      if (sec > 0) {
+        if (sec < 5) sec = 5; // floor: don't hammer the tunnel
+        refreshTimer = setInterval(tickRefresh, sec * 1000);
+      }
+    }
+
     // ---- detail view ----
     var currentDetailId = null;
 
@@ -945,6 +971,7 @@ body { margin:0; }
       App.GetSettings().then(function (s) {
         document.getElementById('set-ssh').value = s.sshHost || '';
         document.getElementById('set-sock').value = (s.sshHost ? s.remoteSocket : s.socketPath) || '/var/lib/hydrascale/api.sock';
+        document.getElementById('set-refresh').value = (s.refreshSec != null ? s.refreshSec : 30);
         document.getElementById('set-err').style.display = 'none';
         settingsM.hidden = false;
       });
@@ -954,10 +981,14 @@ body { margin:0; }
     document.getElementById('set-save').addEventListener('click', function () {
       var ssh = document.getElementById('set-ssh').value.trim();
       var sock = document.getElementById('set-sock').value.trim() || '/var/lib/hydrascale/api.sock';
+      var refreshSec = parseInt(document.getElementById('set-refresh').value, 10);
+      if (isNaN(refreshSec) || refreshSec < 0) refreshSec = 0;
+      if (refreshSec > 0 && refreshSec < 5) refreshSec = 5;
       var errEl = document.getElementById('set-err');
       errEl.style.display = 'none';
-      App.SaveSettings({ mode: 'socket', sshHost: ssh, socketPath: sock, remoteSocket: sock }).then(function () {
+      App.SaveSettings({ mode: 'socket', sshHost: ssh, socketPath: sock, remoteSocket: sock, refreshSec: refreshSec }).then(function () {
         settingsM.hidden = true;
+        setAutoRefresh(refreshSec);
         refresh();
       }).catch(function (e) {
         errEl.textContent = String(e).replace(/^Error:\s*/, '');
@@ -1028,6 +1059,7 @@ body { margin:0; }
 
     clearDashboardDOM(); // drop the baked-in mockup before the first fetch resolves
     refresh();
+    App.GetSettings().then(function (s) { setAutoRefresh(s.refreshSec); });
   })();
 </script>
 </body>

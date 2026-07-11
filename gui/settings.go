@@ -16,6 +16,7 @@ type Settings struct {
 	SocketPath   string `json:"socketPath"`   // used when Mode=="socket" and no SSH host
 	SSHHost      string `json:"sshHost"`      // when set, the app forwards RemoteSocket over ssh
 	RemoteSocket string `json:"remoteSocket"` // daemon socket path on the SSH host
+	RefreshSec   int    `json:"refreshSec"`   // auto-refresh interval in seconds; 0 = off
 }
 
 func defaultSettings() Settings {
@@ -23,6 +24,7 @@ func defaultSettings() Settings {
 		Mode:         "", // not connected by default — never demo data
 		SocketPath:   "/var/lib/hydrascale/api.sock",
 		RemoteSocket: "/var/lib/hydrascale/api.sock",
+		RefreshSec:   30,
 	}
 }
 

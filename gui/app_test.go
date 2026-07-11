@@ -41,6 +41,12 @@ func TestApplyConnection_SelectsSource(t *testing.T) {
 	}
 }
 
+func TestDefaultSettings_AutoRefresh(t *testing.T) {
+	if got := defaultSettings().RefreshSec; got != 30 {
+		t.Errorf("default RefreshSec = %d, want 30", got)
+	}
+}
+
 func TestMockSource_RendersConnected(t *testing.T) {
 	// The frontend keys off Connected; without it the developer demo would render
 	// as the not-connected empty state.
