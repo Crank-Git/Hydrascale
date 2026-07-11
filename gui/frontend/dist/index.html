@@ -689,6 +689,41 @@ body { margin:0; }
     };
     var SPARK = '<svg viewBox="0 0 64 20" preserveAspectRatio="none"><polyline points="0,13 9,12 18,11 27,12 36,10 45,11 54,9 64,10"/></svg>';
 
+    // ---- connection state: banner + clearing demo markup ----
+    // The static page ships with mockup rows baked into the DOM (the design
+    // preview). Inside Wails we must never let those read as real data, so we
+    // blank them on startup and render an explicit not-connected / stale state.
+    function banner() {
+      var b = document.getElementById('conn-banner');
+      if (!b) {
+        b = document.createElement('div');
+        b.id = 'conn-banner';
+        b.style.cssText = 'display:none;position:sticky;top:0;z-index:20;padding:7px 34px;' +
+          'font-size:12.5px;font-weight:600;letter-spacing:.2px;';
+        var mw = document.querySelector('.mainwrap');
+        if (mw) mw.insertBefore(b, mw.firstChild);
+      }
+      return b;
+    }
+    function setBanner(kind, text) {
+      var b = banner();
+      if (!kind) { b.style.display = 'none'; return; }
+      b.style.background = kind === 'stale' ? '#5a4300' : '#5a1b1b';
+      b.style.color = kind === 'stale' ? '#ffd257' : '#ff9d9d';
+      b.textContent = text;
+      b.style.display = 'block';
+    }
+    function clearDashboardDOM() {
+      var set = function (s, v) { var e = $(s); if (e) e.innerHTML = v; };
+      set('#v-list .metrics', '');
+      set('#v-list .tbl tbody', '');
+      set('#v-list .log .evs', '');
+      set('.hd .st', '');
+      set('.statusbar', '');
+      var c = $('#v-list .ph .c'); if (c) c.textContent = '0';
+      var crumb = $('#v-list .hd .crumb'); if (crumb) crumb.innerHTML = 'tailnets';
+    }
+
     function tailnetRow(t) {
       var dot = t.status === 'reconnecting' ? 'warn' : 'good';
       var addr = t.status === 'reconnecting'
@@ -719,42 +754,83 @@ body { margin:0; }
     }
 
     function renderDashboard(d) {
-      var m = d.metrics;
+      d = d || {};
+      var m = d.metrics || {};
+      var tailnets = d.tailnets || [];
+      var connected = !!d.connected;
+      var stale = !!d.stale;
+      var haveData = connected || stale;
+
+      if (connected) {
+        setBanner(null);
+      } else if (stale) {
+        setBanner('stale', 'Offline — showing last-known state' + (d.lastSeen ? ' · last seen ' + d.lastSeen : ''));
+      } else {
+        setBanner('error', d._error ? ('Not connected — ' + d._error) : 'Not connected — open Settings to connect to a daemon');
+      }
+
       var metrics = $('#v-list .metrics');
       if (metrics) {
-        metrics.innerHTML =
-          metric('Tailnets', m.tailnets + (m.reconnecting ? ' <small>· ' + m.reconnecting + ' reconnecting</small>' : '')) +
-          metric('Peers', m.peers) +
-          metric('Host access', '<span class="d good"></span>' + m.hostAccessOn + ' / ' + m.tailnets) +
-          metric('Reconcile', m.reconcileSec + '<small>s</small>') +
-          metric('Uptime', m.uptime);
+        metrics.innerHTML = haveData
+          ? metric('Tailnets', (m.tailnets || 0) + (m.reconnecting ? ' <small>· ' + m.reconnecting + ' reconnecting</small>' : '')) +
+            metric('Peers', m.peers || 0) +
+            metric('Host access', '<span class="d good"></span>' + (m.hostAccessOn || 0) + ' / ' + (m.tailnets || 0)) +
+            metric('Reconcile', (m.reconcileSec || 0) + '<small>s</small>') +
+            metric('Uptime', m.uptime || '—')
+          : '';
       }
       var tbody = $('#v-list .tbl tbody');
-      if (tbody) tbody.innerHTML = d.tailnets.map(tailnetRow).join('');
+      if (tbody) {
+        tbody.innerHTML = tailnets.length
+          ? tailnets.map(tailnetRow).join('')
+          : '<tr><td colspan="7" style="padding:22px 20px;color:var(--dim)">' +
+            (stale ? 'No tailnets in last-known state.' : 'Not connected. Open Settings to connect to a daemon.') +
+            '</td></tr>';
+      }
       var count = $('#v-list .ph .c');
-      if (count) count.textContent = d.tailnets.length;
+      if (count) count.textContent = tailnets.length;
       var evs = $('#v-list .log .evs');
-      if (evs) evs.innerHTML = d.events.map(eventRow).join('');
+      if (evs) evs.innerHTML = (d.events || []).map(eventRow).join('') ||
+        '<div class="e info" style="padding:12px 14px"><div class="m">No activity.</div></div>';
+
+      var crumb = $('#v-list .hd .crumb');
+      if (crumb) crumb.innerHTML = haveData
+        ? 'host <span class="mono">' + esc(d.host || '—') + '</span> / tailnets' + (stale ? ' <span style="color:#ffd257">(cached)</span>' : '')
+        : 'tailnets';
 
       var st = $('.hd .st');
       if (st) {
-        st.innerHTML =
-          '<span class="i"><span class="d good"></span><b>' + d.healthy + '</b> healthy</span>' +
-          '<span class="i"><b>' + m.peers + '</b> peers</span>' +
-          '<span class="i"><span class="d ' + (d.dnsOk ? 'good' : 'crit') + '"></span>DNS</span>';
+        st.innerHTML = haveData
+          ? '<span class="i"><span class="d ' + (connected ? 'good' : 'warn') + '"></span><b>' + (d.healthy || 0) + '</b> healthy</span>' +
+            '<span class="i"><b>' + (m.peers || 0) + '</b> peers</span>' +
+            '<span class="i"><span class="d ' + (d.dnsOk ? 'good' : 'crit') + '"></span>DNS</span>'
+          : '';
       }
       var sb = $('.statusbar');
       if (sb) {
-        sb.innerHTML =
-          '<span><span class="d good"></span>Daemon healthy</span>' +
-          '<span>reconcile ' + m.reconcileSec + 's</span>' +
-          '<span>host ' + esc(d.host) + '</span>' +
-          '<span style="margin-left:auto">' + d.tailnets.length + ' tailnets · ' + m.peers + ' peers</span>' +
-          '<span>hydrascale' + (d.version ? ' ' + esc(d.version) : '') + '</span>';
+        if (connected) {
+          sb.innerHTML =
+            '<span><span class="d good"></span>Daemon healthy</span>' +
+            '<span>reconcile ' + (m.reconcileSec || 0) + 's</span>' +
+            '<span>host ' + esc(d.host || '—') + '</span>' +
+            '<span style="margin-left:auto">' + tailnets.length + ' tailnets · ' + (m.peers || 0) + ' peers</span>' +
+            '<span>hydrascale' + (d.version ? ' ' + esc(d.version) : '') + '</span>';
+        } else if (stale) {
+          sb.innerHTML =
+            '<span><span class="d warn"></span>Offline</span>' +
+            (d.lastSeen ? '<span>last seen ' + esc(d.lastSeen) + '</span>' : '') +
+            '<span>host ' + esc(d.host || '—') + ' (cached)</span>' +
+            '<span style="margin-left:auto">' + tailnets.length + ' tailnets · ' + (m.peers || 0) + ' peers</span>';
+        } else {
+          sb.innerHTML =
+            '<span><span class="d crit"></span>Not connected</span>' +
+            '<span style="margin-left:auto">Open Settings to connect</span>';
+        }
       }
       // Rebound rows: fetch + render the detail view from Go on click.
       Array.prototype.forEach.call(document.querySelectorAll('#v-list .tbl tbody tr'), function (tr) {
-        tr.addEventListener('click', function () { openDetail(tr.getAttribute('data-id')); });
+        var id = tr.getAttribute('data-id');
+        if (id) tr.addEventListener('click', function () { openDetail(id); });
       });
     }
 
@@ -765,6 +841,8 @@ body { margin:0; }
     function refresh() {
       return App.GetDashboard().then(renderDashboard).catch(function (e) {
         console.error('GetDashboard failed', e);
+        renderDashboard({ connected: false, stale: false, tailnets: [], events: [], metrics: {},
+          _error: String(e).replace(/^Error:\s*/, '') });
       });
     }
 
@@ -792,10 +870,12 @@ body { margin:0; }
 
     function renderDetail(d) {
       var root = document.getElementById('v-detail');
-      if (d.error) { console.error('detail:', d.error); }
+      if (d.error) { setBanner('error', 'Not connected — ' + d.error); }
+      else if (d.stale) { setBanner('stale', 'Offline — last-known detail' + (d.lastSeen ? ' · last seen ' + d.lastSeen : '')); }
+      else { setBanner(null); }
       var crumb = $('.crumb', root);
-      if (crumb) crumb.innerHTML = 'host <span class="mono">' + esc(d.namespace ? 'mars' : 'mars') +
-        '</span> / <span class="mono" style="color:var(--muted)">' + esc(d.id) + '</span>';
+      if (crumb) crumb.innerHTML = 'tailnet <span class="mono">' + esc(d.id) + '</span>' +
+        (d.stale ? ' <span style="color:#ffd257">(cached)</span>' : '');
       var metrics = $('.metrics', root);
       if (metrics) metrics.innerHTML =
         '<div class="m"><span class="k">Status</span><span class="v"><span class="d ' +
@@ -946,6 +1026,7 @@ body { margin:0; }
     var railActivity = document.querySelector('.nb[title="Activity"]');
     if (railActivity) railActivity.addEventListener('click', showActivity);
 
+    clearDashboardDOM(); // drop the baked-in mockup before the first fetch resolves
     refresh();
   })();
 </script>

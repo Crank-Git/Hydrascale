@@ -45,14 +45,22 @@ type Event struct {
 }
 
 // Dashboard is the whole list view, assembled by the backend in one call.
+//
+// Connection state drives what the frontend shows so it never falls back to
+// stale markup: Connected means the data is live; Stale means the daemon is
+// unreachable and this is the last-known snapshot (LastSeen says when); both
+// false with empty Tailnets means "not connected, nothing cached".
 type Dashboard struct {
-	Host     string       `json:"host"`
-	Healthy  int          `json:"healthy"`
-	DNSOK    bool         `json:"dnsOk"`
-	Version  string       `json:"version"`
-	Metrics  Metrics      `json:"metrics"`
-	Tailnets []TailnetRow `json:"tailnets"`
-	Events   []Event      `json:"events"`
+	Host      string       `json:"host"`
+	Healthy   int          `json:"healthy"`
+	DNSOK     bool         `json:"dnsOk"`
+	Version   string       `json:"version"`
+	Metrics   Metrics      `json:"metrics"`
+	Tailnets  []TailnetRow `json:"tailnets"`
+	Events    []Event      `json:"events"`
+	Connected bool         `json:"connected"`
+	Stale     bool         `json:"stale"`
+	LastSeen  string       `json:"lastSeen"` // human time of the cached snapshot, when Stale
 }
 
 // Peer is one row in a tailnet's peers table.
@@ -87,4 +95,6 @@ type TailnetDetail struct {
 	Peers      []Peer  `json:"peers"`
 	Events     []Event `json:"events"`
 	Error      string  `json:"error,omitempty"`
+	Stale      bool    `json:"stale"`
+	LastSeen   string  `json:"lastSeen"` // human time of the cached snapshot, when Stale
 }

@@ -18,7 +18,9 @@ import (
 // forward of the daemon's /var/lib/hydrascale/api.sock; locally on Linux it is
 // that path directly. It maps the daemon's JSON onto the GUI's view-model DTOs.
 type socketSource struct {
-	http *http.Client
+	http  *http.Client
+	cache *diskCache // last-known-good snapshot; nil disables caching (used in mapping tests)
+	key   string     // connection identity the cache is tagged with
 }
 
 func newSocketSource(socketPath string) *socketSource {
@@ -129,7 +131,7 @@ type apiEvents struct {
 func (s *socketSource) Dashboard() (Dashboard, error) {
 	var cfg apiConfig
 	if err := s.get("/api/config", &cfg); err != nil {
-		return Dashboard{}, err
+		return s.staleDashboard(err)
 	}
 	var st apiStatus
 	_ = s.get("/api/status", &st) // health is best-effort; config drives the list
@@ -187,7 +189,7 @@ func (s *socketSource) Dashboard() (Dashboard, error) {
 		})
 	}
 
-	return Dashboard{
+	d := Dashboard{
 		Host:    hostName(st),
 		Healthy: healthy,
 		DNSOK:   true,
@@ -196,9 +198,30 @@ func (s *socketSource) Dashboard() (Dashboard, error) {
 			Tailnets: len(rows), Reconnecting: reconnecting, Peers: peersTotal,
 			HostAccessOn: haOn, ReconcileSec: 10, Uptime: "",
 		},
-		Tailnets: rows,
-		Events:   s.events(),
-	}, nil
+		Tailnets:  rows,
+		Events:    s.events(),
+		Connected: true,
+	}
+	if s.cache != nil {
+		s.cache.putDashboard(s.key, d, time.Now())
+	}
+	return d, nil
+}
+
+// staleDashboard is returned when the daemon is unreachable: the last-known
+// snapshot stamped stale, or — with nothing cached — an empty "not connected"
+// dashboard carrying the underlying error so the UI can show it.
+func (s *socketSource) staleDashboard(cause error) (Dashboard, error) {
+	if s.cache != nil {
+		if cf := s.cache.forKey(s.key); cf.Dashboard != nil {
+			d := *cf.Dashboard
+			d.Connected = false
+			d.Stale = true
+			d.LastSeen = lastSeenLabel(cf.DashAt)
+			return d, nil
+		}
+	}
+	return Dashboard{Connected: false}, cause
 }
 
 // hostName derives the host label from a namespace name like "mars-1" → "mars".
@@ -250,7 +273,7 @@ func eventKind(t string) string {
 func (s *socketSource) TailnetDetail(id string) (TailnetDetail, error) {
 	var d apiDetail
 	if err := s.get("/api/tailnet/"+id+"/detail", &d); err != nil {
-		return TailnetDetail{ID: id, Error: err.Error()}, nil
+		return s.staleDetail(id, err), nil
 	}
 	if d.Error != "" {
 		return TailnetDetail{ID: id, Error: d.Error}, nil
@@ -326,12 +349,32 @@ func (s *socketSource) TailnetDetail(id string) (TailnetDetail, error) {
 	if st.ErrorStates[id] || !st.Actual[id].DaemonHealthy {
 		status = "reconnecting"
 	}
-	return TailnetDetail{
+	detail := TailnetDetail{
 		ID: id, Namespace: emptyOr(nsName, "ns-"+id), Status: status,
 		Address: ipv4, PeerCount: d.PeerCount, Uptime: "",
 		Network: network, DNS: dns, HostAccess: ha, Routes: routes,
 		Peers: peers, Events: s.events(),
-	}, nil
+	}
+	if s.cache != nil {
+		s.cache.putDetail(s.key, id, detail, time.Now())
+	}
+	return detail, nil
+}
+
+// staleDetail is returned when the daemon is unreachable while opening a detail
+// view: the last-known detail stamped stale, or the error if nothing is cached.
+func (s *socketSource) staleDetail(id string, cause error) TailnetDetail {
+	if s.cache != nil {
+		if cf := s.cache.forKey(s.key); cf.Details != nil {
+			if cd, ok := cf.Details[id]; ok {
+				d := cd.Detail
+				d.Stale = true
+				d.LastSeen = lastSeenLabel(cd.At)
+				return d
+			}
+		}
+	}
+	return TailnetDetail{ID: id, Error: cause.Error()}
 }
 
 func (s *socketSource) AddTailnet(req AddTailnetRequest) error {

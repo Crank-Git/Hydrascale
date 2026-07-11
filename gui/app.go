@@ -19,7 +19,7 @@ type App struct {
 // once the Wails runtime (and the app's full process environment) is up —
 // spawning ssh during construction, before wails.Run, is unreliable.
 func NewApp(s Settings) *App {
-	return &App{settings: s, src: newMockSource()}
+	return &App{settings: s, src: emptySource{}}
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -44,8 +44,12 @@ func (a *App) applyConnection() error {
 		a.tun.close()
 		a.tun = nil
 	}
-	if a.settings.Mode != "socket" {
+	if a.settings.Mode == "mock" {
 		a.src = newMockSource()
+		return nil
+	}
+	if a.settings.Mode != "socket" {
+		a.src = emptySource{}
 		return nil
 	}
 	sock := a.settings.SocketPath
@@ -58,8 +62,21 @@ func (a *App) applyConnection() error {
 		a.tun = t
 		sock = t.localSock
 	}
-	a.src = newSocketSource(sock)
+	src := newSocketSource(sock)
+	src.cache = newDiskCache(cachePath())
+	src.key = connectionKey(a.settings)
+	a.src = src
 	return nil
+}
+
+// connectionKey identifies which daemon a cache entry came from, so switching
+// hosts never surfaces the previous host's data. It is stable across reconnects
+// (the ssh tunnel's local socket path is not — it changes every run).
+func connectionKey(s Settings) string {
+	if s.SSHHost != "" {
+		return "ssh:" + s.SSHHost + ":" + s.RemoteSocket
+	}
+	return "sock:" + s.SocketPath
 }
 
 func (a *App) source() DataSource {
