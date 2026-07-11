@@ -115,3 +115,73 @@ func TestSocketSource_DetailError(t *testing.T) {
 		t.Error("expected error surfaced for beta (daemon starting)")
 	}
 }
+
+// cachedPair builds a live source (against a fake daemon) and a "dead" source
+// (dialing a socket that doesn't exist) that share one on-disk cache and key —
+// modelling a reconnect after the daemon went away.
+func cachedPair(t *testing.T, key string) (live, dead *socketSource) {
+	t.Helper()
+	cache := newDiskCache(filepath.Join(t.TempDir(), "cache.json"))
+	live = newSocketSource(fakeDaemon(t))
+	live.cache, live.key = cache, key
+	dead = newSocketSource(filepath.Join(t.TempDir(), "gone.sock"))
+	dead.cache, dead.key = cache, key
+	return live, dead
+}
+
+func TestStaleDashboard(t *testing.T) {
+	live, dead := cachedPair(t, "k1")
+	if _, err := live.Dashboard(); err != nil {
+		t.Fatalf("live Dashboard: %v", err)
+	}
+	d, err := dead.Dashboard()
+	if err != nil {
+		t.Fatalf("stale dashboard should not error: %v", err)
+	}
+	if !d.Stale || d.Connected {
+		t.Errorf("want stale && !connected, got stale=%v connected=%v", d.Stale, d.Connected)
+	}
+	if len(d.Tailnets) != 2 {
+		t.Errorf("stale dashboard should carry cached rows, got %d", len(d.Tailnets))
+	}
+	if d.LastSeen == "" {
+		t.Error("stale dashboard needs a LastSeen label")
+	}
+}
+
+func TestStaleDetail(t *testing.T) {
+	live, dead := cachedPair(t, "k1")
+	if _, err := live.TailnetDetail("alpha"); err != nil {
+		t.Fatalf("live detail: %v", err)
+	}
+	d, _ := dead.TailnetDetail("alpha")
+	if !d.Stale || d.Error != "" {
+		t.Errorf("want stale detail with no error, got stale=%v err=%q", d.Stale, d.Error)
+	}
+	if len(d.Peers) != 2 || d.LastSeen == "" {
+		t.Errorf("stale detail should carry cached peers + LastSeen: %+v", d)
+	}
+}
+
+func TestNoCacheError(t *testing.T) {
+	dead := newSocketSource(filepath.Join(t.TempDir(), "gone.sock")) // cache == nil
+	d, err := dead.Dashboard()
+	if err == nil {
+		t.Fatal("unreachable daemon with no cache must return an error")
+	}
+	if d.Connected || d.Stale || len(d.Tailnets) != 0 {
+		t.Errorf("no-cache failure must be empty+disconnected, got %+v", d)
+	}
+}
+
+func TestCacheKeyMismatch(t *testing.T) {
+	live, dead := cachedPair(t, "k1")
+	if _, err := live.Dashboard(); err != nil {
+		t.Fatalf("live Dashboard: %v", err)
+	}
+	dead.key = "different-daemon" // e.g. user re-pointed the app at another host
+	_, err := dead.Dashboard()
+	if err == nil {
+		t.Error("cache from a different daemon key must not be served; expected error")
+	}
+}

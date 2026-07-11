@@ -17,6 +17,21 @@ type DataSource interface {
 	RemoveTailnet(id string) error
 }
 
+// errNotConnected is returned by emptySource for actions that need a daemon.
+var errNotConnected = fmt.Errorf("not connected — open Settings to connect to a daemon")
+
+// emptySource is the default when no connection is configured. It shows nothing
+// (not demo data): an empty, explicitly-not-connected dashboard so the UI can
+// prompt the user to connect. Mutations are refused.
+type emptySource struct{}
+
+func (emptySource) Dashboard() (Dashboard, error) { return Dashboard{Connected: false}, nil }
+func (emptySource) TailnetDetail(id string) (TailnetDetail, error) {
+	return TailnetDetail{ID: id, Error: errNotConnected.Error()}, nil
+}
+func (emptySource) AddTailnet(AddTailnetRequest) error { return errNotConnected }
+func (emptySource) RemoveTailnet(string) error         { return errNotConnected }
+
 // mockSource holds mutable in-memory state so add/remove actually change what
 // the dashboard shows — the app is a faithful, daemon-less demo of the flow.
 type mockSource struct {
@@ -72,8 +87,9 @@ func (m *mockSource) Dashboard() (Dashboard, error) {
 			Tailnets: len(m.tailnets), Reconnecting: reconnecting, Peers: peers,
 			HostAccessOn: haOn, ReconcileSec: 10, Uptime: "2:59",
 		},
-		Tailnets: append([]TailnetRow(nil), m.tailnets...),
-		Events:   append([]Event(nil), m.events...),
+		Tailnets:  append([]TailnetRow(nil), m.tailnets...),
+		Events:    append([]Event(nil), m.events...),
+		Connected: true,
 	}, nil
 }
 

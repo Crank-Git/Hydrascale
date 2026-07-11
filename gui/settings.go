@@ -12,18 +12,33 @@ import (
 
 // Settings is the user's persisted connection configuration.
 type Settings struct {
-	Mode         string `json:"mode"`         // "mock" | "socket"
+	Mode         string `json:"mode"`         // "" (not connected) | "socket" | "mock"
 	SocketPath   string `json:"socketPath"`   // used when Mode=="socket" and no SSH host
 	SSHHost      string `json:"sshHost"`      // when set, the app forwards RemoteSocket over ssh
 	RemoteSocket string `json:"remoteSocket"` // daemon socket path on the SSH host
+	RefreshSec   int    `json:"refreshSec"`   // auto-refresh interval in seconds; 0 = off
 }
 
 func defaultSettings() Settings {
 	return Settings{
-		Mode:         "mock",
+		Mode:         "", // not connected by default — never demo data
 		SocketPath:   "/var/lib/hydrascale/api.sock",
 		RemoteSocket: "/var/lib/hydrascale/api.sock",
+		RefreshSec:   30,
 	}
+}
+
+// coerceMock enforces "mock is developer-only, never a default": mock is used
+// solely when the flag is set; a persisted mode:"mock" without the flag (from an
+// older build) is migrated to "" so returning users are never stuck on demo data.
+func coerceMock(mode string, mockFlag bool) string {
+	if mockFlag {
+		return "mock"
+	}
+	if mode == "mock" {
+		return ""
+	}
+	return mode
 }
 
 func settingsPath() string {
@@ -39,6 +54,11 @@ func loadSettings() Settings {
 	if b, err := os.ReadFile(settingsPath()); err == nil {
 		json.Unmarshal(b, &s)
 	}
+	// Mock (demo) data is opt-in for the developer only, never a default: it is
+	// reachable solely via HYDRASCALE_MOCK=1. A persisted mode:"mock" from an
+	// older build is migrated away unless the flag is set, so returning users are
+	// never stuck on demo data.
+	s.Mode = coerceMock(s.Mode, os.Getenv("HYDRASCALE_MOCK") == "1")
 	// Dev/test override: HYDRASCALE_SOCKET forces socket mode at a path.
 	if sock := os.Getenv("HYDRASCALE_SOCKET"); sock != "" {
 		s.Mode = "socket"
