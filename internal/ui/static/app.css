@@ -252,7 +252,11 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 .ev{display:flex; gap:var(--sp-3); padding:var(--sp-3) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
 .ev:last-child{border-bottom:none}
 .ev time{color:var(--text-tertiary); flex:none; width:58px; font-size:var(--fs-micro)}
-.ev-kind{color:var(--text-secondary); flex:none; width:112px; font-size:var(--fs-micro)}
+/* The event type is a machine value that the operator scans, therefore the column holds
+   the whole type and truncates none. The width is a minimum: a type wider than it makes
+   the column grow, and the message takes the width that remains. A fixed width drew a
+   long type outside its box and over the message. See issue #226. */
+.ev-kind{color:var(--text-secondary); flex:none; min-width:112px; font-size:var(--fs-micro)}
 .ev p{margin:0; font-size:var(--fs-sm); color:var(--text-body); min-width:0}
 
 /* The affirmative action is the one thing that takes the accent, in every view. The
