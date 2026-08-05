@@ -1,8 +1,8 @@
-// The access view: the header, the staged state model, the mode control, and the flow
-// overview.
+// The access view: the header, the staged state model, the mode control, the reachability
+// matrix, and the flow overview.
 //
-// The view draws no matrix and no rule row. Issue #149 and issue #151 add those, and each
-// one writes into the staged state model that this file holds.
+// The view draws no rule row. Issue #151 adds it, and it writes into the staged state
+// model that this file holds.
 //
 // The flow overview reuses the renderer of the overview topology in topology.js. It reads
 // the staged rule set, therefore an edit reaches the picture before the daemon holds it.
@@ -257,6 +257,99 @@ export function emptyStatement(body) {
   return null;
 }
 
+/** The side of one square in pixels. FR-editor-15 states the corner radius; app.css holds
+ *  it as the radius token of the brand. */
+export const SQUARE_SIDE = 34;
+
+/** The side of one square in pixels on a dense host. */
+export const SQUARE_SIDE_DENSE = 28;
+
+/** The number of tailnets from which the matrix draws the smaller square. */
+const DENSE_TAILNET_COUNT = 12;
+
+/** square returns one square of the matrix. allowed holds the key of every allowed path. */
+function square(from, to, allowed) {
+  // The daemon rejects a rule where from equals to, therefore the diagonal takes no rule
+  // and it accepts no click. See FR-access-11 and FR-editor-10.
+  const inert = from === to;
+  const on = !inert && allowed.has(`${from} ${to}`);
+  let label = `${from} to ${to}, no rule`;
+  if (inert) {
+    label = `${from} to ${to}, not applicable`;
+  } else if (on) {
+    label = `${from} to ${to}, allowed`;
+  }
+  return { from, to, allowed: on, inert, kind: "button", disabled: inert, label };
+}
+
+/**
+ * matrixModel returns the grid of squares of the reachability matrix.
+ *
+ * base is the answer of the daemon, which carries the node list. staged is the staged rule
+ * set, therefore the matrix shows the edit of the operator before the daemon holds it.
+ * A source is a tailnet or the host, and a destination is a tailnet, the host, or the
+ * internet, which features/05-reachability-model.md states. FR-editor-7.
+ *
+ * matrixModel carries no port, because the ports live in the rule list. FR-editor-14.
+ */
+export function matrixModel(base, staged) {
+  const nodes = (base && base.nodes) || [];
+  const tailnets = nodes.filter((node) => node.kind === "tailnet").map((node) => node.id);
+  const holdsHost = nodes.some((node) => node.kind === "host");
+  const holdsInternet = nodes.some((node) => node.kind === "internet");
+
+  const sources = holdsHost ? [...tailnets, "host"] : [...tailnets];
+  const destinations = [...tailnets];
+  if (holdsHost) {
+    destinations.push("host");
+  }
+  if (holdsInternet) {
+    destinations.push("internet");
+  }
+
+  const allowed = new Set((staged || []).map(ruleKey));
+  return {
+    side: tailnets.length >= DENSE_TAILNET_COUNT ? SQUARE_SIDE_DENSE : SQUARE_SIDE,
+    sources,
+    destinations,
+    rows: sources.map((source) => ({
+      source,
+      squares: destinations.map((destination) => square(source, destination, allowed)),
+    })),
+  };
+}
+
+/**
+ * toggleSquare returns the staged rule set that one click on a square produces.
+ *
+ * rules is the staged rule set, and the pair from and to names the path. A click on an
+ * empty square adds one rule that allows every port, and a click on a filled square
+ * removes every rule of that path. See FR-editor-11 and FR-editor-12.
+ * toggleSquare returns the rule set unchanged for the diagonal. FR-editor-10.
+ */
+export function toggleSquare(rules, from, to) {
+  const staged = rules.map(normalizeRule);
+  if (from === to) {
+    return staged;
+  }
+  const key = `${from} ${to}`;
+  const kept = staged.filter((rule) => ruleKey(rule) !== key);
+  if (kept.length < staged.length) {
+    return kept;
+  }
+  return [...staged, { from, to, ports: [] }];
+}
+
+/**
+ * hoverMarks returns the two labels that the square under the pointer marks.
+ *
+ * The mark names the row label and the column label, and the view draws no third element.
+ * FR-editor-13.
+ */
+export function hoverMarks(from, to) {
+  return { row: from, column: to };
+}
+
 // ---------------------------------------------------------------------------
 // The flow overview
 // ---------------------------------------------------------------------------
@@ -494,6 +587,77 @@ function drawFlow(status, nodes) {
   return card;
 }
 
+/** stageSquare stages the edit of one square and it draws the view again. */
+function stageSquare(from, to) {
+  state.setRules(toggleSquare(state.rules(), from, to));
+  redraw();
+}
+
+/**
+ * drawMatrix draws the grid of squares.
+ *
+ * The square is a button, therefore it reaches focus with the tab key and the browser
+ * gives it the space key and the enter key. The pointer and the keyboard both mark the row
+ * label and the column label, and the mark changes the class of the two labels alone.
+ */
+function drawMatrix(model) {
+  const card = el("div", "card ac-matrix");
+  card.append(el("span", "label", "Reachability"));
+  card.append(el("p", "note", "A filled square means that a rule allows the path. The ports live in the rule list."));
+
+  const table = el("table", "ac-mtx");
+  table.style.setProperty("--ac-square", `${model.side}px`);
+
+  const headRow = el("tr");
+  headRow.append(el("th"));
+  const columnLabels = model.destinations.map((destination) => {
+    const cell = el("th", "col", destination);
+    cell.scope = "col";
+    headRow.append(cell);
+    return cell;
+  });
+  const head = el("thead");
+  head.append(headRow);
+  table.append(head);
+
+  const body = el("tbody");
+  for (const row of model.rows) {
+    const line = el("tr");
+    const rowLabel = el("th", undefined, row.source);
+    rowLabel.scope = "row";
+    line.append(rowLabel);
+
+    row.squares.forEach((one, column) => {
+      const holder = el("td");
+      const button = el("button", one.allowed ? "ac-square on" : "ac-square");
+      button.type = "button";
+      button.setAttribute("aria-label", one.label);
+      if (one.inert) {
+        button.className = "ac-square inert";
+        button.disabled = true;
+      } else {
+        const marks = hoverMarks(row.source, one.to);
+        const mark = (on) => {
+          rowLabel.classList.toggle("hot", on && marks.row === row.source);
+          columnLabels[column].classList.toggle("hot", on && marks.column === one.to);
+        };
+        button.addEventListener("mouseenter", () => mark(true));
+        button.addEventListener("mouseleave", () => mark(false));
+        button.addEventListener("focus", () => mark(true));
+        button.addEventListener("blur", () => mark(false));
+        button.addEventListener("click", () => stageSquare(one.from, one.to));
+      }
+      holder.append(button);
+      line.append(holder);
+    });
+    body.append(line);
+  }
+  table.append(body);
+
+  card.append(table);
+  return card;
+}
+
 /** openModeDialog opens the dialog that states what the mode change does. */
 function openModeDialog() {
   dialog = { sending: false, error: null };
@@ -593,6 +757,13 @@ function draw(section, snapshot) {
     section.append(drawEmpty(empty));
   } else {
     section.append(drawFlow(snapshot.status, base.nodes));
+  }
+
+  // A host that declares no tailnet and no host node produces no row, so the empty
+  // statement stands alone and the view draws no grid with no square.
+  const matrix = matrixModel(base, state.rules());
+  if (matrix.rows.length > 0) {
+    section.append(drawMatrix(matrix));
   }
 
   if (dialog) {
