@@ -1,9 +1,50 @@
 package access
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
+
+// wantExclusions holds the matches that keep an internet rule off the private ranges and
+// off the host local network. SA-9 is the finding that these matches close.
+const wantExclusions = "-m iprange ! --dst-range 10.0.0.0-10.255.255.255 " +
+	"-m iprange ! --dst-range 172.16.0.0-172.31.255.255 " +
+	"-m iprange ! --dst-range 192.168.0.0-192.168.255.255 " +
+	"-m iprange ! --dst-range 169.254.0.0-169.254.255.255 " +
+	"-m iprange ! --dst-range 127.0.0.0-127.255.255.255"
+
+// destinationMatches reports whether a packet to addr passes every destination match of
+// one compiled rule. The test reads the compiled argument list, because this issue runs
+// no host command.
+func destinationMatches(rule []string, addr string) bool {
+	target := net.ParseIP(addr).To4()
+	for i := 0; i+3 < len(rule); i++ {
+		if rule[i] != "-m" || rule[i+1] != "iprange" || rule[i+2] != "!" || rule[i+3] != "--dst-range" {
+			continue
+		}
+		bounds := strings.SplitN(rule[i+4], "-", 2)
+		low := net.ParseIP(bounds[0]).To4()
+		high := net.ParseIP(bounds[1]).To4()
+		if bytesCompare(target, low) >= 0 && bytesCompare(target, high) <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// bytesCompare returns -1, 0, or 1 for two IPv4 addresses in network order.
+func bytesCompare(a, b net.IP) int {
+	for i := range a {
+		switch {
+		case a[i] < b[i]:
+			return -1
+		case a[i] > b[i]:
+			return 1
+		}
+	}
+	return 0
+}
 
 // testTopology returns two tailnets and the default DNS forwarder bind address.
 func testTopology() Topology {
@@ -59,7 +100,7 @@ func TestCompile(t *testing.T) {
 		equalLines(t, compiled.Forward, []string{
 			"-A HYDRASCALE-FWD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
 			"-A HYDRASCALE-FWD -i vh0a0a0a0a0a0a -o vh0b0b0b0b0b0b -p tcp --dport 22 -j ACCEPT",
-			"-A HYDRASCALE-FWD -i vh0a0a0a0a0a0a ! -o vh+ -j ACCEPT",
+			"-A HYDRASCALE-FWD -i vh0a0a0a0a0a0a ! -o vh+ " + wantExclusions + " -j ACCEPT",
 			"-A HYDRASCALE-FWD -j DROP",
 		})
 		equalLines(t, compiled.Out, []string{
@@ -119,6 +160,37 @@ func TestCompile(t *testing.T) {
 		for _, arg := range compiled.Forward[1] {
 			if arg == "-p" {
 				t.Errorf("rule %q holds a -p match, want none", want)
+			}
+		}
+	})
+
+	t.Run("excludes every private range from an internet rule", func(t *testing.T) {
+		set := RuleSet{Rules: []Rule{{From: "alpha", To: Internet}}}
+		compiled, err := Compile(set, testTopology(), EnforceTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		want := "-A HYDRASCALE-FWD -i vh0a0a0a0a0a0a ! -o vh+ " + wantExclusions + " -j ACCEPT"
+		if got := strings.Join(compiled.Forward[1], " "); got != want {
+			t.Errorf("rule = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("matches a public address and not the host local network", func(t *testing.T) {
+		set := RuleSet{Rules: []Rule{{From: "alpha", To: Internet}}}
+		compiled, err := Compile(set, testTopology(), EnforceTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		rule := compiled.Forward[1]
+		for _, addr := range []string{"93.184.216.34", "1.1.1.1", "100.64.0.1"} {
+			if !destinationMatches(rule, addr) {
+				t.Errorf("the internet rule excludes %s, want a match", addr)
+			}
+		}
+		for _, addr := range []string{"192.168.1.215", "10.0.0.1", "172.16.0.1", "169.254.1.1", "127.0.0.1"} {
+			if destinationMatches(rule, addr) {
+				t.Errorf("the internet rule matches %s, want an exclusion", addr)
 			}
 		}
 	})
