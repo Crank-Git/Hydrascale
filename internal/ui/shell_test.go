@@ -24,10 +24,11 @@ func readStatic(t *testing.T, name string) string {
 	return string(data)
 }
 
-// consoleViews are the five entries of the left navigation. See FR-console-12.
-var consoleViews = []string{"overview", "namespaces", "access", "activity", "settings"}
+// consoleViews are the entries of the left navigation. FR-console-12 names five entries,
+// and FR-policy-22 adds the policy view as the sixth.
+var consoleViews = []string{"overview", "namespaces", "access", "policy", "activity", "settings"}
 
-func TestTheNavigationHoldsTheFiveEntriesOfTheShell(t *testing.T) {
+func TestTheNavigationHoldsEveryEntryOfTheShell(t *testing.T) {
 	index := readStatic(t, "index.html")
 	for _, view := range consoleViews {
 		marker := `data-view="` + view + `"`
@@ -324,6 +325,7 @@ func TestTheConsoleStatesAnEmptyStateForEveryView(t *testing.T) {
 var viewModules = map[string]string{
 	"overview": "overview.js",
 	"access":   "access.js",
+	"policy":   "policy.js",
 	"activity": "activity.js",
 	"settings": "settings.js",
 }
