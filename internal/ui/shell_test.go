@@ -505,14 +505,15 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 // is a gate that holds no node.
 //
 // A gate runs every test, so a gate that holds no node loses the 70 tests of
-// internal/ui/jstest and reports success all the same. The environment variable CI marks
-// a gate. GitHub Actions sets it. See issue 181.
+// internal/ui/jstest and reports success all the same. Two environment variables mark a
+// gate: GitHub Actions sets CI, and the gate script of the test host exports
+// HYDRASCALE_GATE. See issue 181 and issue 191.
 func nodeForConsoleTests() (string, error) {
 	node, err := exec.LookPath("node")
 	if err == nil {
 		return node, nil
 	}
-	if os.Getenv("CI") == "" {
+	if os.Getenv("CI") == "" && os.Getenv("HYDRASCALE_GATE") == "" {
 		return "", nil
 	}
 	return "", fmt.Errorf("node is not on the path of this gate, so the console JavaScript "+
@@ -535,10 +536,27 @@ func TestTheConsoleJavaScriptTestsFailOnAGateThatHoldsNoNode(t *testing.T) {
 	}
 }
 
+func TestTheConsoleJavaScriptTestsFailOnATestHostGateThatHoldsNoNode(t *testing.T) {
+	// The gate script of the test host sets no CI, so it exports HYDRASCALE_GATE instead.
+	// Without the marker the gate loses the 70 tests and reports success. See issue 191.
+	t.Setenv("CI", "")
+	t.Setenv("HYDRASCALE_GATE", "1")
+	t.Setenv("PATH", "")
+
+	node, err := nodeForConsoleTests()
+	if err == nil {
+		t.Fatalf("the gate holds no node and the run does not fail: the path is %q", node)
+	}
+	if !strings.Contains(err.Error(), "node") {
+		t.Errorf("the message does not name node: %v", err)
+	}
+}
+
 func TestTheConsoleJavaScriptTestsSkipOnADeveloperMachineThatHoldsNoNode(t *testing.T) {
 	// A developer machine keeps the skip, because node is not a tool that a developer
 	// must install to change the daemon.
 	t.Setenv("CI", "")
+	t.Setenv("HYDRASCALE_GATE", "")
 	t.Setenv("PATH", "")
 
 	node, err := nodeForConsoleTests()
