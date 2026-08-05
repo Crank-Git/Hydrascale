@@ -485,6 +485,9 @@ func serveCmd() *cobra.Command {
 			apiServer := api.NewServer(api.DefaultSocketPath, r)
 			apiServer.SetSocketGroup(cfg.SocketGroup)
 			apiServer.SetVersion(version)
+			if fwdErr == nil {
+				apiServer.SetForwarder(forwarder)
+			}
 			go func() {
 				if err := apiServer.Start(); err != nil {
 					fmt.Fprintf(os.Stderr, "API server start error: %v\n", err)

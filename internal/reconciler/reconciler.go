@@ -605,6 +605,19 @@ func (r *Reconciler) ErrorStates() map[string]bool {
 	return cp
 }
 
+// Unprotected returns a copy of the overlay mount error of each unprotected tailnet.
+// The map holds one entry for each tailnet that runs without the overlay mount on /etc.
+// A tailnet that keeps the overlay mount holds no entry.
+func (r *Reconciler) Unprotected() map[string]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make(map[string]string, len(r.unprotected))
+	for k, v := range r.unprotected {
+		cp[k] = v
+	}
+	return cp
+}
+
 // FailureCounts returns a copy of the current failure counts.
 func (r *Reconciler) FailureCounts() map[string]int {
 	r.mu.Lock()

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"hydrascale/internal/config"
+	"hydrascale/internal/dns"
 	"hydrascale/internal/reconciler"
 )
 
@@ -30,6 +31,7 @@ type Server struct {
 	socketPath  string
 	socketGroup string
 	version     string
+	forwarder   *dns.Forwarder
 }
 
 // SetSocketGroup configures a unix group that may reach the control socket.
@@ -38,6 +40,10 @@ func (s *Server) SetSocketGroup(group string) { s.socketGroup = group }
 
 // SetVersion records the daemon version, surfaced to clients via /api/status.
 func (s *Server) SetVersion(v string) { s.version = v }
+
+// SetForwarder records the DNS forwarder, which GET /api/dns reads for the upstreams.
+// A nil forwarder gives an empty list of upstreams.
+func (s *Server) SetForwarder(f *dns.Forwarder) { s.forwarder = f }
 
 // NewServer creates a new Server that will listen on socketPath.
 func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
@@ -56,6 +62,7 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	mux.HandleFunc("/api/tailnet/disconnect", s.handleTailnetDisconnect)
 	mux.HandleFunc("/api/config/dns", s.handleConfigDNS)
 	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/dns", s.handleDNS)
 	// Method-qualified pattern (Go 1.22+) — restricts to GET only and supports {id} wildcard.
 	// Registered after the exact-match tailnet routes above, which take priority.
 	mux.HandleFunc("GET /api/tailnet/{id}/detail", s.handleTailnetDetail)
@@ -438,6 +445,74 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := ConfigResponse{Config: redacted}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handleDNS serves GET /api/dns, which holds the resolver settings, the checksum of the
+// host resolv.conf file, and the DNS protection state of each running namespace.
+// The route is read-only, so it rejects a method other than GET with HTTP 405. It returns
+// HTTP 500 when it cannot read the configuration file or list the namespaces.
+func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg, err := config.LoadConfig(s.reconciler.ConfigPath())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	actual, err := s.reconciler.ActualState()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get actual state: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	bindAddress := cfg.Resolver.BindAddress
+	if bindAddress == "" {
+		bindAddress = dns.DefaultBindAddress
+	}
+
+	upstreams := []string{}
+	if s.forwarder != nil {
+		upstreams = s.forwarder.Upstreams()
+	}
+
+	hostFile, changedAt := s.reconciler.HostFileMonitor().State()
+	changedAtText := ""
+	if !changedAt.IsZero() {
+		changedAtText = changedAt.UTC().Format(time.RFC3339)
+	}
+
+	unprotected := s.reconciler.Unprotected()
+	ids := make([]string, 0, len(actual))
+	for id := range actual {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	namespaceStates := make([]DNSNamespaceState, 0, len(ids))
+	for _, id := range ids {
+		reason, found := unprotected[id]
+		namespaceStates = append(namespaceStates, DNSNamespaceState{
+			ID:        id,
+			Protected: !found,
+			Error:     reason,
+		})
+	}
+
+	resp := DNSResponse{
+		BindAddress:         bindAddress,
+		Mode:                cfg.Resolver.Mode,
+		Upstreams:           upstreams,
+		HostResolvSHA256:    hostFile.Checksum,
+		HostResolvChangedAt: changedAtText,
+		Namespaces:          namespaceStates,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
