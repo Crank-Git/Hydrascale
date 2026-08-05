@@ -14,8 +14,10 @@ import (
 
 	"hydrascale/internal/access"
 	"hydrascale/internal/config"
+	"hydrascale/internal/execx"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
+	"hydrascale/internal/session"
 )
 
 // The test file declares the response shape rather than reading it from the package, so
@@ -35,10 +37,16 @@ type wireNode struct {
 	Veth  string `json:"veth"`
 }
 
+type wirePath struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type wireAccess struct {
-	Mode  string     `json:"mode"`
-	Rules []wireRule `json:"rules"`
-	Nodes []wireNode `json:"nodes"`
+	Mode        string     `json:"mode"`
+	Rules       []wireRule `json:"rules"`
+	Nodes       []wireNode `json:"nodes"`
+	ActivePaths []wirePath `json:"active_paths"`
 }
 
 // writeAccessConfig writes a configuration file that declares the named tailnets and the
@@ -507,5 +515,50 @@ func TestAccessRejectsAMethodThatIsNotGetAndNotPut(t *testing.T) {
 	code, payload := callAccess(t, client, http.MethodPost, "/api/access", `{"mode":"enforce"}`)
 	if code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want %d; body %s", code, http.StatusMethodNotAllowed, payload)
+	}
+}
+
+// TestGetAccessReportsThePathThatCarriesAnActiveSession states the answer of the route
+// that FR-editor-28 reads. The session reader runs its commands through a Recorder,
+// therefore the test asserts the answer of the route and not the host.
+func TestGetAccessReportsThePathThatCarriesAnActiveSession(t *testing.T) {
+	cfgPath := writeAccessConfig(t, &access.RuleSet{}, "alpha")
+	srv, client, cleanup := startTestServer(t, newTestReconciler(cfgPath))
+	defer cleanup()
+
+	device, _ := namespaces.VethNames(namespaces.GetNamespaceName("alpha"))
+	sessions := "LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\nESTAB 0 0 192.168.1.221:22 100.98.107.70:51402\n"
+	route := `[{"dst":"100.98.107.70","gateway":"10.200.0.86","dev":"` + device + `","flags":[]}]`
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(sessions)}, "ss", "-H", "-tna")
+	rec.Script(execx.Result{Output: []byte(route)}, "ip", "-json", "route", "get", "100.98.107.70")
+	srv.SetSessionReader(session.NewReaderWith(rec))
+
+	code, payload := callAccess(t, client, http.MethodGet, "/api/access", "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+
+	var got wireAccess
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("decode the body %s: %v", payload, err)
+	}
+	want := []wirePath{{From: "alpha", To: access.Host}}
+	if len(got.ActivePaths) != 1 || got.ActivePaths[0] != want[0] {
+		t.Fatalf("active_paths = %v, want %v", got.ActivePaths, want)
+	}
+}
+
+// TestGetAccessReportsAnEmptyListWhenNoSessionArrivesOnATailnet keeps the field a list,
+// because the console reads it as a list.
+func TestGetAccessReportsAnEmptyListWhenNoSessionArrivesOnATailnet(t *testing.T) {
+	cfgPath := writeAccessConfig(t, &access.RuleSet{}, "alpha")
+	_, client, cleanup := startTestServer(t, newTestReconciler(cfgPath))
+	defer cleanup()
+
+	_, payload := callAccess(t, client, http.MethodGet, "/api/access", "")
+	if !bytes.Contains(payload, []byte(`"active_paths":[]`)) {
+		t.Errorf("the body %s holds no empty active_paths list", payload)
 	}
 }

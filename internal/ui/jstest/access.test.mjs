@@ -17,6 +17,7 @@ import {
   OBSERVE_LOG_COMMAND,
   SQUARE_SIDE,
   SQUARE_SIDE_DENSE,
+  activePathWarning,
   applyFailureStatement,
   applyStagedRules,
   createAccessState,
@@ -1220,4 +1221,83 @@ test("no state of the access view holds the word denied", async () => {
   // nowhere, therefore no later change can put it on the screen as a state.
   const source = await readFile(new URL("../static/access.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /denied/i);
+});
+
+// The warning of a path that carries an active session. FR-editor-28.
+// ---------------------------------------------------------------------------
+
+test("the warning names the path that a staged edit removes and that carries an active session", () => {
+  const state = createAccessState();
+  state.setBase(accessBody());
+  // The rule jbones to host carries the shell session of the operator.
+  state.setRules(state.rules().filter((rule) => rule.to !== "host"));
+
+  const warning = activePathWarning(state.difference(), [{ from: "jbones", to: "host" }]);
+
+  assert.notEqual(warning, null);
+  assert.deepEqual(warning.paths, ["jbones to host"]);
+  assert.match(warning.sentences[0], /^Warning:/);
+  assert.match(warning.sentences.join(" "), /active session/);
+});
+
+test("the console shows no warning when no staged edit removes a path that carries an active session", () => {
+  const state = createAccessState();
+  state.setBase(accessBody());
+
+  // The console holds no staged edit.
+  assert.equal(activePathWarning(state.difference(), [{ from: "jbones", to: "host" }]), null);
+
+  // The operator adds a path, and the addition removes none.
+  state.setRules([...state.rules(), { from: "homelab", to: "internet", ports: [] }]);
+  assert.equal(activePathWarning(state.difference(), [{ from: "jbones", to: "host" }]), null);
+
+  // The operator removes a path that carries no active session.
+  state.setRules(state.rules().filter((rule) => rule.to !== "internet"));
+  assert.equal(activePathWarning(state.difference(), [{ from: "jbones", to: "host" }]), null);
+});
+
+test("the console shows no warning when the daemon reports no active path", () => {
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules(state.rules().filter((rule) => rule.to !== "host"));
+
+  assert.equal(activePathWarning(state.difference(), []), null);
+  assert.equal(activePathWarning(state.difference(), undefined), null);
+});
+
+test("the warning names every path that a staged edit removes", () => {
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules([]);
+
+  const warning = activePathWarning(state.difference(), [
+    { from: "jbones", to: "host" },
+    { from: "homelab", to: "host" },
+  ]);
+
+  // The rule set holds no rule from homelab, therefore the difference removes one path.
+  assert.deepEqual(warning.paths, ["jbones to host"]);
+});
+
+test("the operator can still apply after the warning", () => {
+  // FR-editor-29. The warning takes no control, and the header holds the apply action,
+  // which one staged edit enables.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules(state.rules().filter((rule) => rule.to !== "host"));
+
+  const warning = activePathWarning(state.difference(), [{ from: "jbones", to: "host" }]);
+  assert.equal(warning.controls, undefined);
+
+  const apply = headerModel(state.base().mode, state.count()).controls.find((one) => one.id === "apply");
+  assert.equal(apply.disabled, false);
+});
+
+test("the access view draws the warning above the apply action", async () => {
+  // A warning comes before the step it applies to, which .claude/rules/ste.md states.
+  const source = await readFile(new URL("../static/access.js", import.meta.url), "utf8");
+  const warning = source.indexOf("drawActivePathWarning(warning)");
+  const staged = source.indexOf("drawStagedList(stagedList)");
+  assert.ok(warning > 0, "the view draws no warning");
+  assert.ok(warning < staged, "the warning comes after the staged list");
 });

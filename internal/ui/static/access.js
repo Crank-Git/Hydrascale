@@ -364,6 +364,38 @@ export function droppedStatement(rules) {
 }
 
 /**
+ * activePathWarning returns the warning of a staged edit that removes a path that carries
+ * an active session, and null when no staged edit removes such a path. FR-editor-28.
+ *
+ * difference is the difference that the model returns, and activePaths is the field
+ * active_paths of GET /api/access. The daemon reads the sessions of the host and it
+ * reports the path of each one, therefore the warning reads no property of the console
+ * request. A console request always arrives on the loopback address, and no local rule
+ * governs that path.
+ *
+ * The warning carries no control. The operator applies the staged edits after it, which
+ * FR-editor-29 states.
+ */
+export function activePathWarning(difference, activePaths) {
+  const active = new Set((activePaths || []).map((path) => `${path.from} ${path.to}`));
+  const cut = difference.removed.filter((rule) => active.has(ruleKey(rule)));
+  if (cut.length === 0) {
+    return null;
+  }
+  const lead = cut.length === 1
+    ? "Warning: a staged edit removes a path that carries an active session."
+    : `Warning: the staged edits remove ${cut.length} paths that carry an active session.`;
+  return {
+    sentences: [
+      lead,
+      "The daemon stops that session after the apply.",
+      "The apply action stays available.",
+    ],
+    paths: cut.map((rule) => `${rule.from} to ${rule.to}`),
+  };
+}
+
+/**
  * observeStatement returns the statement of observe mode, and null in enforce mode.
  *
  * FR-editor-32 states that the view names the log command that shows what the daemon
@@ -913,6 +945,32 @@ function drawRebaseOffer(offer) {
   return card;
 }
 
+/**
+ * drawActivePathWarning states every path that a staged edit removes and that carries an
+ * active session.
+ *
+ * The card holds no control, therefore the operator reads it and then selects Apply or
+ * Discard in the header.
+ */
+function drawActivePathWarning(warning) {
+  const card = el("div", "card ac-notice");
+  const alert = el("div", "alert");
+  alert.append(el("span", "dot crit"));
+  const text = el("div");
+  for (const sentence of warning.sentences) {
+    text.append(el("p", undefined, sentence));
+  }
+  alert.append(text);
+  card.append(alert);
+
+  const list = el("div", "ns-cmds mono");
+  for (const path of warning.paths) {
+    list.append(el("span", undefined, path));
+  }
+  card.append(list);
+  return card;
+}
+
 /** drawDropped states every staged rule that the console dropped. */
 function drawDropped(statement) {
   const card = el("div", "card ac-notice");
@@ -1350,8 +1408,14 @@ function draw(section, snapshot) {
 
   section.append(drawHeader(base));
 
-  // The offer, the dropped statement, and the failure all come before the staged list, and
-  // the operator reads each one before the next apply.
+  // The warning, the offer, the dropped statement, and the failure all come before the
+  // staged list, and the operator reads each one before the next apply. The warning comes
+  // first, because it names the one edit that stops a session of the operator.
+  const warning = activePathWarning(state.difference(), body && body.active_paths);
+  if (warning) {
+    section.append(drawActivePathWarning(warning));
+  }
+
   const offer = rebaseOffer(state.baseChanged(), state.count());
   if (offer) {
     section.append(drawRebaseOffer(offer));
