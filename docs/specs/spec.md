@@ -570,6 +570,7 @@ security and DNS work must not wait behind the console.
 | 2026-08-05 | 1 | Epic 1 built. The compiled daemon leaves the index. The rule `/hydrascale` was already in `.gitignore`; a tracked file overrides an ignore rule, which is why the binary stayed. The 15 MB blob stays in the history, which the non-goals require. |
 | 2026-08-05 | 1 | Epic 1 built. Issue #93 records that `.goreleaser.yaml` uses `archives.format`, which GoReleaser version 2 deprecates. The release workflow fails when a later version removes it. |
 | 2026-08-05 | 1 | Epic 1 built. The hygiene script omits three rules that `features/01-desktop-client-removal.md` names: `CLAUDE.md`, `.claude/`, and the `Claude Code` text pattern. Risk R8 tracks the first two on purpose, and the third matches the tracked `.claude/` files, so a script holding all three exits 1 on every run. Issue #96 holds the decision. |
+| 2026-08-05 | 1 | Issue #96 resolved. The operator keeps `CLAUDE.md` and `.claude/` tracked, and `features/01-desktop-client-removal.md` now states the rules that `scripts/check-hygiene.sh` enforces. The script keeps its behaviour. The `Claude Code` content rule goes, because the tracked files contain the string and the rule would fail on every run. The hygiene rules cover tracked files only, so no rule reaches the `Co-Authored-By` line in a commit message. |
 
 ## Issue map
 
