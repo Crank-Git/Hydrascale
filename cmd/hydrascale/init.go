@@ -28,7 +28,7 @@ prints how to use it. Run as root.`,
 			return runInit(force)
 		},
 	}
-	cmd.Flags().Bool("force", false, "Overwrite an existing config (backs up the old one to .bak)")
+	cmd.Flags().Bool("force", false, "Overwrite an existing config (backs up the old one to .bak), and turn the accept-dns preflight failure into a warning")
 	return cmd
 }
 
@@ -63,7 +63,9 @@ func runInit(force bool) error {
 		}
 	}
 
-	runPreflight(p)
+	if err := runPreflight(p, nativeTailscaleAcceptDNS(), force); err != nil {
+		return err
+	}
 
 	// Prompt one or more tailnets. Keys are collected separately and never
 	// written to the config; they are exported as HYDRASCALE_AUTHKEY_<ID>.
@@ -267,7 +269,10 @@ func promptGUIAccess(p *prompter, cfg *config.Config) {
 }
 
 // runPreflight reports environment readiness and offers to fix common problems.
-func runPreflight(p *prompter) {
+// acceptDNS states whether the host tailscaled has accept-dns enabled. force turns the
+// accept-dns failure into a warning. runPreflight returns an error when a check fails,
+// and the caller stops the setup.
+func runPreflight(p *prompter, acceptDNS, force bool) error {
 	fmt.Println("\nPreflight:")
 	for _, bin := range []string{"tailscale", "tailscaled", "iptables", "ip"} {
 		if _, err := exec.LookPath(bin); err != nil {
@@ -294,13 +299,35 @@ func runPreflight(p *prompter) {
 		fmt.Println("  ! CONFIG_IP_MULTIPLE_TABLES not detected — host route propagation for accepted subnet routes will not work on this kernel")
 	}
 
-	if nativeTailscaleAcceptDNS() {
-		fmt.Println("  ! the host's own tailscaled has accept-dns enabled — it hijacks /etc/resolv.conf and fights hydrascale's DNS")
-		if p.yesNo("    Disable it now (tailscale set --accept-dns=false)?", true) {
-			_ = exec.Command("tailscale", "set", "--accept-dns=false").Run()
-			fmt.Println("    disabled")
-		}
+	warning, err := checkHostAcceptDNS(acceptDNS, force)
+	if warning != "" {
+		fmt.Printf("  ! %s\n", warning)
 	}
+	if err != nil {
+		fmt.Printf("  ✗ %v\n", err)
+		return err
+	}
+	fmt.Println("  ✓ the host tailscaled does not take over the host DNS")
+	return nil
+}
+
+// acceptDNSFix is the command that turns the host accept-dns preference off.
+const acceptDNSFix = "sudo tailscale set --accept-dns=false"
+
+// checkHostAcceptDNS returns the preflight result for the host accept-dns preference.
+// acceptDNS states whether the host tailscaled has accept-dns enabled. force turns the
+// failure into a warning. checkHostAcceptDNS returns an error when acceptDNS is true and
+// force is false, and it returns a warning string when acceptDNS is true and force is
+// true.
+func checkHostAcceptDNS(acceptDNS, force bool) (string, error) {
+	if !acceptDNS {
+		return "", nil
+	}
+	const cause = "the host tailscaled has accept-dns enabled. It takes over /etc/resolv.conf and it defeats the hydrascale DNS forwarder."
+	if force {
+		return fmt.Sprintf("%s --force continues. To fix it, run: %s", cause, acceptDNSFix), nil
+	}
+	return "", fmt.Errorf("%s To fix it, run: %s, then run hydrascale init again", cause, acceptDNSFix)
 }
 
 // hasPolicyRouting reports whether the kernel was built with multiple routing

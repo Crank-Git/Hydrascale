@@ -68,6 +68,26 @@ type ConfigResponse struct {
 	Config RedactedConfig `json:"config"`
 }
 
+// DNSNamespaceState is the DNS protection state of one namespace.
+type DNSNamespaceState struct {
+	ID        string `json:"id"`
+	Protected bool   `json:"protected"`
+	Error     string `json:"error"`
+}
+
+// DNSResponse is the JSON response for GET /api/dns.
+// Every field is explicit, because an embedded configuration struct returns the auth key
+// of a tailnet to the client. HostResolvChangedAt holds an RFC 3339 time, and it holds an
+// empty string when the daemon observes no change to the host resolv.conf file.
+type DNSResponse struct {
+	BindAddress         string              `json:"bind_address"`
+	Mode                string              `json:"mode"`
+	Upstreams           []string            `json:"upstreams"`
+	HostResolvSHA256    string              `json:"host_resolv_sha256"`
+	HostResolvChangedAt string              `json:"host_resolv_changed_at"`
+	Namespaces          []DNSNamespaceState `json:"namespaces"`
+}
+
 // PeerInfo is a single peer within a tailnet, derived from tailscale status --json.
 type PeerInfo struct {
 	HostName     string    `json:"host_name"`

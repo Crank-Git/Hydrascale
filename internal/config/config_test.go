@@ -419,6 +419,38 @@ tailnets:
 	}
 }
 
+func TestLoadConfig_dns_allow_unprotected_defaults_to_false(t *testing.T) {
+	tmp := writeTemp(t, `
+version: 2
+tailnets:
+  - id: test
+`)
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.DNS.AllowUnprotected {
+		t.Error("dns.allow_unprotected = true, want false")
+	}
+}
+
+func TestLoadConfig_reads_dns_allow_unprotected(t *testing.T) {
+	tmp := writeTemp(t, `
+version: 2
+dns:
+  allow_unprotected: true
+tailnets:
+  - id: test
+`)
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.DNS.AllowUnprotected {
+		t.Error("dns.allow_unprotected = false, want true")
+	}
+}
+
 // writeTemp creates a temp file with the given content and returns its path.
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()

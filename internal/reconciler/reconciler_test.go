@@ -101,23 +101,35 @@ type mockDaemon struct {
 	healthErr    error
 	statusResult *daemon.TailscaleStatus // returned by GetStatus; nil = daemon starting
 	statusErr    error                   // returned by GetStatus; non-nil = error
+	unprotected  map[string]daemon.UnprotectedRecord
+	allowedStart map[string]bool // tailnetID -> the allowUnprotected value of the last Start
 }
 
 func newMockDaemon() *mockDaemon {
 	return &mockDaemon{
-		healthy:  make(map[string]bool),
-		startErr: make(map[string]error),
+		healthy:      make(map[string]bool),
+		startErr:     make(map[string]error),
+		unprotected:  make(map[string]daemon.UnprotectedRecord),
+		allowedStart: make(map[string]bool),
 	}
 }
 
-func (m *mockDaemon) Start(tailnetID, nsName string) error {
+func (m *mockDaemon) Start(tailnetID, nsName string, allowUnprotected bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.allowedStart[tailnetID] = allowUnprotected
 	if err, ok := m.startErr[tailnetID]; ok && err != nil {
 		return err
 	}
 	m.healthy[tailnetID] = true
 	return nil
+}
+
+func (m *mockDaemon) UnprotectedDNS(tailnetID string) (daemon.UnprotectedRecord, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec, ok := m.unprotected[tailnetID]
+	return rec, ok
 }
 
 func (m *mockDaemon) Stop(nsName, tailnetID string) error {
