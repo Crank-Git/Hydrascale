@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale v1.0 — Specification</title>
+<style>
+:root{
+  color-scheme:dark;
+  --ink:#0d0c0b; --s1:#141312; --s2:#1c1a18; --s3:#24211e;
+  --line:#262320; --line-soft:#1a1816;
+  --tx:#eceae6; --mu:#8d867d; --dim:#5b544c;
+  --lime:#c8ff2e; --lime-ink:#101208; --lime-soft:rgba(200,255,46,.14);
+  --ok:#7ddc8f; --warn:#f0a63c; --crit:#ff5f52;
+  --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Space Mono',ui-monospace,Menlo,monospace;
+  --r-sm:9px; --r:12px; --r-lg:16px; --r-pill:999px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--tx);font-family:var(--sans);font-size:15px;
+  letter-spacing:-.01em;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{display:grid;grid-template-columns:236px 1fr;max-width:1440px;margin:0 auto;min-height:100vh}
+nav{border-right:1px solid var(--line);padding:28px 18px;position:sticky;top:0;height:100vh;overflow:auto}
+nav .brand{display:flex;align-items:center;gap:9px;margin-bottom:22px}
+nav .wm{font-size:15px;font-weight:600;letter-spacing:-.03em}
+nav .wm i{font-style:normal;color:var(--lime)}
+nav a{display:block;padding:6px 9px;border-radius:var(--r-sm);color:var(--mu);text-decoration:none;font-size:13.5px}
+nav a:hover{background:var(--s2);color:var(--tx)}
+nav .grp{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);margin:20px 0 6px;padding:0 9px}
+main{padding:44px 48px 100px;min-width:0}
+@media (max-width:980px){.wrap{grid-template-columns:1fr}nav{position:static;height:auto;border-right:none;
+  border-bottom:1px solid var(--line)}main{padding:28px 22px 60px}}
+h1{font-size:44px;letter-spacing:-.04em;line-height:1.02;margin:0 0 10px}
+h2{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin:56px 0 14px;padding-top:18px;border-top:1px solid var(--line)}
+h3{font-size:21px;letter-spacing:-.025em;margin:32px 0 10px}
+h4{font-size:17px;margin:22px 0 8px}
+p,li{max-width:70ch}
+p{margin:0 0 14px;color:var(--tx)}
+.lead{font-size:17px;color:var(--mu);max-width:66ch}
+code,.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:0;background:var(--s3);
+  padding:2px 6px;border-radius:5px;color:var(--tx)}
+pre{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;
+  overflow:auto;margin:0 0 18px}
+pre code{background:none;padding:0;font-size:12.5px;line-height:1.6;display:block}
+table{border-collapse:collapse;width:100%;margin:0 0 20px;font-size:13.5px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
+  border-bottom:1px solid var(--line);font-weight:400}
+td code{font-size:12px}
+.meta{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 26px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:var(--r-pill);
+  border:1px solid var(--line);background:var(--s2);font-family:var(--mono);font-size:11.5px;color:var(--mu)}
+.chip.draft{border-color:var(--warn);color:var(--warn)}
+.chip.lime{border-color:var(--lime);color:var(--lime);background:var(--lime-soft)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.crit{background:var(--crit)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px;margin:0 0 14px}
+.callout{border-radius:var(--r-lg);padding:18px 22px;margin:0 0 20px;display:flex;gap:14px;align-items:flex-start}
+.callout.crit{background:rgba(255,95,82,.07);border:1px solid rgba(255,95,82,.3)}
+.callout.warn{background:rgba(240,166,60,.07);border:1px solid rgba(240,166,60,.3)}
+.callout.lime{background:var(--lime-soft);border:1px solid rgba(200,255,46,.35)}
+.callout p:last-child{margin-bottom:0}
+.callout h4{margin:0 0 6px;font-size:15px}
+.epics{display:grid;gap:10px}
+.epic{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px}
+.epic .t{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.epic .n{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--lime)}
+.epic .name{font-size:17px;font-weight:500;letter-spacing:-.02em}
+.epic p{margin:0 0 8px;color:var(--mu);font-size:13.5px}
+.epic .d{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+.mock{margin:0 0 34px}
+.mockbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px;flex-wrap:wrap}
+.mockbar h4{margin:0}
+.mockbar a{color:var(--lime);text-decoration:none;font-family:var(--mono);font-size:12px;
+  border:1px solid var(--lime);border-radius:var(--r-sm);padding:6px 12px}
+.mockbar a:hover{background:var(--lime-soft)}
+iframe{width:100%;height:620px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--ink);display:block}
+ul,ol{margin:0 0 16px;padding-left:22px}
+li{margin-bottom:5px}
+a.inline{color:var(--lime)}
+.fr{font-family:var(--mono);font-size:12px;color:var(--lime)}
+hr{border:none;border-top:1px solid var(--line);margin:40px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 21V11"/><path d="M12 11 6 6"/><path d="M12 11l6-5"/><path d="M12 11 3.5 9.5"/><path d="M12 11l8.5-1.5"/>
+      <circle cx="6" cy="5" r="1.6"/><circle cx="18" cy="5" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="21" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/>
+    </svg>
+    <span class="wm">hydra<i>scale</i> v1.0</span>
+  </div>
+  <div class="grp">Summary</div>
+  <a href="#summary">Executive summary</a>
+  <a href="#why">Why this release</a>
+  <a href="#goals">Goals and non-goals</a>
+  <a href="#terms">Terms</a>
+  <div class="grp">Design</div>
+  <a href="#arch">Architecture</a>
+  <a href="#data">Data model</a>
+  <a href="#cross">Cross-cutting</a>
+  <a href="#testing">Testing</a>
+  <div class="grp">Plan</div>
+  <a href="#epics">Epics</a>
+  <a href="#milestones">Milestones</a>
+  <a href="#features">Feature sets</a>
+  <div class="grp">Mockups</div>
+  <a href="#m1">Overview</a>
+  <a href="#m2">Namespaces</a>
+  <a href="#m3">Access editor</a>
+  <a href="#m4">Policy</a>
+  <a href="#m5">DNS and settings</a>
+  <div class="grp">Decide</div>
+  <a href="#risks">Risks and questions</a>
+  <a href="#assumptions">Assumptions</a>
+</nav>
+
+<main>
+  <h1>Hydrascale v1.0</h1>
+  <p class="lead">One Linux host, several Tailscale tailnets, and an operator console that shows
+    exactly what can reach what.</p>
+  <div class="meta">
+    <span class="chip draft">status: draft</span>
+    <span class="chip">created 2026-08-04</span>
+    <span class="chip">branch model: dev-and-live</span>
+    <span class="chip">repo: Crank-Git/Hydrascale</span>
+    <span class="chip lime">10 epics</span>
+  </div>
+
+  <h2 id="summary">Executive summary</h2>
+  <p>Hydrascale lets one Linux host join several Tailscale tailnets at the same time. The daemon
+    creates a network namespace per tailnet, runs a separate <code>tailscaled</code> in each, and
+    reconciles the live host toward a declared YAML state.</p>
+  <p>Version 1.0 makes three changes:</p>
+  <ol>
+    <li>It <strong>removes the desktop client</strong> and replaces it with a console that the daemon
+      serves on the loopback address.</li>
+    <li>It gives the operator <strong>direct control over reachability</strong> — both the local rules
+      the host enforces and the upstream policy each control server holds.</li>
+    <li>It <strong>closes the gap</strong> between the isolation the documentation promises and the
+      isolation the host enforces.</li>
+  </ol>
+
+  <h2 id="why">Why this release</h2>
+  <div class="callout crit">
+    <span class="dot crit" style="margin-top:8px"></span>
+    <div>
+      <h4>The stated isolation is not enforced at the forwarding layer</h4>
+      <p>For every namespace, <code>internal/namespaces/ns.go:263</code> inserts this rule into the
+        host <code>FORWARD</code> chain:</p>
+      <pre><code>iptables -I FORWARD 1 -i vh&lt;hash&gt; -j ACCEPT</code></pre>
+      <p>It matches on the input interface only — no destination, no output interface. Combined with a
+        default route out of every namespace (<code>ns.go:250</code>), per-veth forwarding
+        (<code>ns.go:256</code>) and a per-namespace <code>MASQUERADE</code> (<code>ns.go:277</code>),
+        a process inside namespace A has a forwarding path to namespace B, to every peer route host
+        access installs for B, and to the host local network. Because the rule is inserted at position
+        1, it also sits above any rule the operator's own firewall placed in <code>FORWARD</code>.</p>
+      <p>The README says "traffic from one tailnet never leaks into another." That holds for routing
+        tables and separate network stacks. It does not hold for forwarding.</p>
+      <p><strong>Confidence:</strong> this is a code read, not a demonstrated exploit. Reproducing it on
+        the test host is the first task of Epic 2. If it does not reproduce, the spec says so.</p>
+    </div>
+  </div>
+  <p>That finding is why the visual access-control system is a security fix with an interface, rather
+    than a feature with a graph.</p>
+
+  <h2 id="goals">Goals and non-goals</h2>
+  <h3>Goals</h3>
+  <ol>
+    <li>A process in one namespace cannot reach another namespace unless a local rule allows it, and
+      the operator can verify this on the test host.</li>
+    <li>The operator can read and change reachability in the console, for local rules and for the
+      upstream policy of each tailnet.</li>
+    <li>The daemon reports when it cannot protect the host <code>/etc/resolv.conf</code>. It never
+      fails to protect that file without a report.</li>
+    <li>The repository contains no compiled binary, no desktop client, and no private development
+      note.</li>
+    <li>A configuration file that works on version 0.9 works on version 1.0 without an edit.</li>
+    <li>The console, the command line interface, and the terminal interface all use the brand.</li>
+  </ol>
+  <h3>Non-goals</h3>
+  <ul>
+    <li>No account system and no transport security for the console. It serves loopback only.</li>
+    <li>No stability promise for the existing <code>/api/*</code> JSON shapes.</li>
+    <li>No Git history rewrite. Every commit, tag and fork keeps working.</li>
+    <li>No device, tag, user or key management through the upstream policy feature.</li>
+    <li>No non-Linux daemon.</li>
+  </ul>
+
+  <h2 id="terms">Terms</h2>
+  <p>The controlled vocabulary. Every issue, comment and manual page written after this spec uses
+    these words with these meanings. The full table with rejected synonyms is in
+    <a class="inline" href="spec.md">spec.md</a>.</p>
+  <table>
+    <thead><tr><th>Term</th><th>Meaning</th><th>Never</th></tr></thead>
+    <tbody>
+      <tr><td>tailnet</td><td>One Tailscale or Headscale network the host joins.</td><td>network, VPN, mesh</td></tr>
+      <tr><td>namespace</td><td>The Linux network namespace for one tailnet.</td><td>netns, container, sandbox</td></tr>
+      <tr><td>daemon</td><td>The <code>hydrascale</code> process.</td><td>server, service, agent</td></tr>
+      <tr><td>console</td><td>The web interface the daemon serves on loopback.</td><td>GUI, web app, dashboard</td></tr>
+      <tr><td>desktop client</td><td>The Wails application that v1.0 removes.</td><td>GUI, desktop app</td></tr>
+      <tr><td>local rule</td><td>One reachability rule the daemon enforces with iptables.</td><td>ACL, firewall rule</td></tr>
+      <tr><td>policy</td><td>The huJSON document a control server holds.</td><td>ACL file, ruleset</td></tr>
+      <tr><td>stage</td><td>To record an edit in the console without sending it.</td><td>draft, queue</td></tr>
+      <tr><td>apply</td><td>To send staged edits to the daemon.</td><td>save, commit, push</td></tr>
+      <tr><td>operator</td><td>The person who administers the host.</td><td>user, admin</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="arch">Architecture</h2>
+  <h3>Components after v1.0</h3>
+  <table>
+    <thead><tr><th>Component</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Command line interface</td><td><code>cmd/hydrascale</code></td><td><code>init</code>, <code>apply</code>, <code>serve</code>, <code>install</code>, <code>tui</code>.</td></tr>
+      <tr><td>Reconciler</td><td><code>internal/reconciler</code></td><td>The control loop.</td></tr>
+      <tr><td>Namespace manager</td><td><code>internal/namespaces</code></td><td>Namespaces, veth pairs, iptables.</td></tr>
+      <tr><td>Rule engine <span class="chip lime">new</span></td><td><code>internal/access</code></td><td>The local rule model and the chain that enforces it.</td></tr>
+      <tr><td>DNS forwarder</td><td><code>internal/dns</code></td><td>The unified resolver.</td></tr>
+      <tr><td>Host access</td><td><code>internal/hostaccess</code></td><td>Route and hosts propagation.</td></tr>
+      <tr><td>Control API</td><td><code>internal/api</code></td><td>HTTP on the control socket and on loopback.</td></tr>
+      <tr><td>Console <span class="chip lime">new</span></td><td><code>internal/ui</code></td><td>The embedded static console.</td></tr>
+      <tr><td>Policy client <span class="chip lime">new</span></td><td><code>internal/policy</code></td><td>Tailscale and Headscale policy clients.</td></tr>
+      <tr><td>Terminal interface</td><td><code>internal/tui</code></td><td>The Bubble Tea interface.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Console stack, and why</h3>
+  <p>The console is a static single-page application at <code>internal/ui/static/</code>, placed in
+    the binary by <code>go:embed</code>. No build step, no package manager, no framework.</p>
+  <p>This beats a bundled framework on four counts: the offline vendored build survives, the release
+    stays one artifact, continuous integration stays one toolchain, and the console loads no code from
+    a network. The cost is a hand-written SVG renderer, and the brand's React components become a
+    reference rather than a dependency. The same pattern already works in Nydus.</p>
+  <div class="callout warn">
+    <span class="dot warn" style="margin-top:8px"></span>
+    <div>
+      <h4>Fonts must not come from Google</h4>
+      <p>The brand's <code>tokens/fonts.css</code> imports Space Grotesk and Space Mono from Google
+        Fonts. An operator console for a network tool must not contact a third party, and the daemon
+        must work with no internet route. Epic 6 either embeds both families as WOFF2 or falls back
+        to <code>system-ui</code> and <code>ui-monospace</code>. Risk R4 tracks the licence check.</p>
+    </div>
+  </div>
+
+  <h2 id="data">Data model</h2>
+  <h3>Configuration — additive only</h3>
+  <p>Version 1.0 adds keys. It removes none and renames none. A v0.9 file loads unchanged.</p>
+  <pre><code># new in v1.0
+console:
+  enabled: true
+  bind_address: 127.0.0.1:9443
+
+access:
+  # "enforce" applies the rule set. "observe" logs what it would deny and denies nothing.
+  mode: enforce
+  rules:
+    - from: jbones
+      to: homelab
+      ports: ["tcp/22", "tcp/443"]
+    - from: jbones
+      to: host
+      ports: []
+
+secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
+
+  <h3>Local rule</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Constraint</th></tr></thead>
+    <tbody>
+      <tr><td><code>from</code></td><td>string</td><td>A tailnet id, or the literal <code>host</code>.</td></tr>
+      <tr><td><code>to</code></td><td>string</td><td>A tailnet id, <code>host</code>, or <code>internet</code>.</td></tr>
+      <tr><td><code>ports</code></td><td>list of string</td><td><code>tcp/&lt;n&gt;</code>, <code>udp/&lt;n&gt;</code>, or a range. Empty means every port.</td></tr>
+    </tbody>
+  </table>
+  <p>A local rule allows. There is no deny rule — the daemon denies everything no rule allows.</p>
+
+  <h2 id="cross">Cross-cutting concerns</h2>
+  <div class="callout crit">
+    <span class="dot crit" style="margin-top:8px"></span>
+    <div>
+      <h4>Accepted risk: the console has no authentication</h4>
+      <p>Any local account, and any process it runs, can reach <code>127.0.0.1:9443</code> and drive a
+        root daemon. This is the operator's decision and the spec states it plainly rather than
+        implying it is safe.</p>
+      <p>Four controls reduce it, all in Epic 6:</p>
+      <ol>
+        <li>The listener binds <code>127.0.0.1</code> only; the daemon refuses any other address.</li>
+        <li>Every mutating route requires <code>X-Hydrascale-Console: 1</code>, which a cross-origin
+          form post cannot set.</li>
+        <li>A request with a foreign <code>Origin</code> header is rejected.</li>
+        <li>Every mutating request writes an event the console shows.</li>
+      </ol>
+      <p>Controls 2 and 3 stop a hostile web page. Neither stops a local account. The spec does not
+        claim otherwise, and the release note repeats it.</p>
+    </div>
+  </div>
+  <p>Other cross-cutting rules: the daemon stays root; <code>socket_group</code> membership is
+    documented as equivalent to root; every <code>os/exec</code> argument from configuration or a
+    request is validated; a best-effort operation that fails silently is treated as a defect; no log
+    line carries an auth key or an OAuth secret; the topology has a text equivalent, because a dotted
+    curve means nothing to a screen reader.</p>
+
+  <h2 id="testing">Testing strategy</h2>
+  <table>
+    <thead><tr><th>Layer</th><th>Covers</th><th>Command</th></tr></thead>
+    <tbody>
+      <tr><td>Unit</td><td>Config parsing, rule compilation, policy edits, route parsing.</td><td><code>go test ./...</code></td></tr>
+      <tr><td>Console</td><td>The console JavaScript, via a Node harness a Go test starts.</td><td><code>go test ./internal/ui/...</code></td></tr>
+      <tr><td>Integration</td><td>The reconciler against a recording command runner.</td><td><code>go test -race ./...</code></td></tr>
+      <tr><td>Host</td><td>The real daemon: namespaces, iptables, DNS, reachability.</td><td><code>verify-on-phobos</code> skill</td></tr>
+    </tbody>
+  </table>
+  <p><code>internal/namespaces</code> calls <code>exec.Command</code> directly today, so the rule
+    engine would be untestable. Epic 0 extracts a <code>Runner</code> interface first.</p>
+
+  <h2 id="epics">Epics</h2>
+  <div class="epics">
+    <div class="epic"><div class="t"><span class="n">Epic 0</span><span class="name">Foundation</span></div>
+      <p>The <code>dev</code> branch, a format check in continuous integration, a command runner
+        interface so host behaviour becomes testable, and a repeatable test-host procedure with
+        rollback.</p>
+      <div class="d">depends on: nothing · features/00-foundation.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 1</span><span class="name">Desktop client removal and repository hygiene</span></div>
+      <p>Delete <code>gui/</code> and its release matrix, stop tracking the 15 MB binary, import the
+        brand assets, and add a hygiene check that fails on a private note or a secret.</p>
+      <div class="d">depends on: Epic 0 · features/01-desktop-client-removal.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 2</span><span class="name">Security audit</span></div>
+      <p>A written findings list covering every route, every <code>os/exec</code> call, every file
+        mode, every teardown path. Each finding has a severity, a <code>file:line</code>, and a
+        reproduction note. The operator chooses what Epic 3 fixes.</p>
+      <div class="d">depends on: Epic 0 · features/02-security-audit.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 3</span><span class="name">Security fixes</span></div>
+      <p>Reliable teardown, rule reaping at start, root-equivalence documented for
+        <code>socket_group</code>, validation on every mutating route, a 0600 secrets file, and
+        <code>govulncheck</code> in continuous integration.</p>
+      <div class="d">depends on: Epic 2 · features/03-security-fixes.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 4</span><span class="name">DNS integrity</span></div>
+      <p>Verify the overlay mount instead of continuing silently, fail the namespace when it cannot
+        mount, checksum the host <code>resolv.conf</code> each tick and report a change, and make the
+        host <code>accept-dns</code> preflight a failure rather than a warning.</p>
+      <div class="d">depends on: Epic 0 · features/04-dns-integrity.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 5</span><span class="name">Local reachability model</span></div>
+      <p>A dedicated <code>HYDRASCALE-FWD</code> chain, default deny, a pure rule compiler, an atomic
+        write, an <code>observe</code> mode that logs what it would deny, and a first-start migration
+        that preserves v0.9 behaviour and records what it wrote.</p>
+      <div class="d">depends on: Epic 0, Epic 3 · features/05-reachability-model.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 6</span><span class="name">Console foundation</span></div>
+      <p>The embedded static console on loopback, the four request controls, and the overview,
+        namespace, DNS, activity and settings views with real empty states.</p>
+      <div class="d">depends on: Epic 1, Epic 5 · features/06-console-foundation.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 7</span><span class="name">Console access editor</span></div>
+      <p>The flow overview, the reachability matrix and the rule list. Edits stage; apply sends the
+        whole rule set. Denial is the absence of a line.</p>
+      <div class="d">depends on: Epic 5, Epic 6 · features/07-console-access-editor.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 8</span><span class="name">Upstream policy control</span></div>
+      <p>Read, validate and write the policy of each tailnet. Tailscale with an <code>If-Match</code>
+        precondition; Headscale where the control server allows it, with the reason stated where it
+        does not.</p>
+      <div class="d">depends on: Epic 6 · features/08-upstream-policy.md</div></div>
+
+    <div class="epic"><div class="t"><span class="n">Epic 9</span><span class="name">Documentation, terminal restyle, and the release</span></div>
+      <p>README on brand and accurate, <code>docs/DESIGN.md</code> for contributors,
+        <code>docs/UPGRADING.md</code> for v0.9 operators, the terminal interface repalletted, and the
+        <code>v1.0.0</code> tag verified on the test host.</p>
+      <div class="d">depends on: every other epic · features/09-docs-and-release.md</div></div>
+  </div>
+
+  <h2 id="milestones">Milestones</h2>
+  <table>
+    <thead><tr><th>Milestone</th><th>Epics</th><th>What is shippable</th></tr></thead>
+    <tbody>
+      <tr><td>M1 — Clean base</td><td>0, 1</td><td>Builds, tests, no dead artifact. A patch release is safe.</td></tr>
+      <tr><td>M2 — Correct daemon</td><td>2, 3, 4</td><td>No silent DNS failure, known findings fixed. A releasable <code>v0.10.0</code> if v1.0 slips.</td></tr>
+      <tr><td>M3 — Enforced isolation</td><td>5</td><td>Reachability enforced, driven from config and CLI.</td></tr>
+      <tr><td>M4 — Console</td><td>6, 7</td><td>See and edit local rules in a browser. The headline of v1.0.</td></tr>
+      <tr><td>M5 — Upstream and release</td><td>8, 9</td><td>Upstream policy works and v1.0 ships.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout lime">
+    <div><p><strong>M2 is the point where a release is worth cutting even if nothing else lands.</strong>
+      The security and DNS work must not wait behind the console.</p></div>
+  </div>
+
+  <h2 id="features">Feature sets</h2>
+  <table>
+    <thead><tr><th>Feature set</th><th>Spec file</th><th>Mockups</th></tr></thead>
+    <tbody>
+      <tr><td>Foundation</td><td><a class="inline" href="features/00-foundation.md">00-foundation.md</a></td><td>—</td></tr>
+      <tr><td>Desktop client removal</td><td><a class="inline" href="features/01-desktop-client-removal.md">01-desktop-client-removal.md</a></td><td>—</td></tr>
+      <tr><td>Security audit</td><td><a class="inline" href="features/02-security-audit.md">02-security-audit.md</a></td><td>—</td></tr>
+      <tr><td>Security fixes</td><td><a class="inline" href="features/03-security-fixes.md">03-security-fixes.md</a></td><td>—</td></tr>
+      <tr><td>DNS integrity</td><td><a class="inline" href="features/04-dns-integrity.md">04-dns-integrity.md</a></td><td>—</td></tr>
+      <tr><td>Reachability model</td><td><a class="inline" href="features/05-reachability-model.md">05-reachability-model.md</a></td><td>—</td></tr>
+      <tr><td>Console foundation</td><td><a class="inline" href="features/06-console-foundation.md">06-console-foundation.md</a></td><td>01, 02, 05</td></tr>
+      <tr><td>Console access editor</td><td><a class="inline" href="features/07-console-access-editor.md">07-console-access-editor.md</a></td><td>03</td></tr>
+      <tr><td>Upstream policy control</td><td><a class="inline" href="features/08-upstream-policy.md">08-upstream-policy.md</a></td><td>04</td></tr>
+      <tr><td>Documentation and release</td><td><a class="inline" href="features/09-docs-and-release.md">09-docs-and-release.md</a></td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Mockups</h2>
+  <div class="callout warn">
+    <span class="dot warn" style="margin-top:8px"></span>
+    <div><p><strong>Mockups are guidance, not a contract.</strong> They convey the intent of a feature
+      and roughly what the operator sees. An implementer may diverge — accessibility, a platform
+      convention or a better idea all outrank a mockup — as long as the feature's requirements and
+      acceptance criteria are met. "Does not match the mockup" is not by itself a defect.</p>
+      <p>They are dark-only because the brand is dark-only (<code>tokens/colors.css</code> sets
+        <code>color-scheme: dark</code>), and they use system font stacks because a self-contained file
+        makes no external request.</p></div>
+  </div>
+
+  <div class="mock" id="m1">
+    <div class="mockbar"><h4>01 — Overview</h4><a href="mockups/01-overview.html" target="_blank" rel="noopener">Open in new tab</a></div>
+    <iframe src="mockups/01-overview.html" title="Overview mockup" loading="lazy"></iframe>
+  </div>
+
+  <div class="mock" id="m2">
+    <div class="mockbar"><h4>02 — Namespaces, with the remove dialog</h4><a href="mockups/02-namespace-detail.html" target="_blank" rel="noopener">Open in new tab</a></div>
+    <iframe src="mockups/02-namespace-detail.html" title="Namespace detail mockup" loading="lazy"></iframe>
+  </div>
+
+  <div class="mock" id="m3">
+    <div class="mockbar"><h4>03 — Access editor <span class="chip lime">flagship</span></h4><a href="mockups/03-acl-editor.html" target="_blank" rel="noopener">Open in new tab</a></div>
+    <iframe src="mockups/03-acl-editor.html" title="Access editor mockup" loading="lazy"></iframe>
+  </div>
+
+  <div class="mock" id="m4">
+    <div class="mockbar"><h4>04 — Upstream policy</h4><a href="mockups/04-upstream-policy.html" target="_blank" rel="noopener">Open in new tab</a></div>
+    <iframe src="mockups/04-upstream-policy.html" title="Upstream policy mockup" loading="lazy"></iframe>
+  </div>
+
+  <div class="mock" id="m5">
+    <div class="mockbar"><h4>05 — DNS and settings</h4><a href="mockups/05-dns-and-settings.html" target="_blank" rel="noopener">Open in new tab</a></div>
+    <iframe src="mockups/05-dns-and-settings.html" title="DNS and settings mockup" loading="lazy"></iframe>
+  </div>
+
+  <h2 id="risks">Risks and open questions</h2>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>How it resolves</th></tr></thead>
+    <tbody>
+      <tr><td>R1</td><td>The Tailscale OAuth scope for a policy <em>write</em> is unconfirmed. The OpenAPI schema names <code>policy_file:read</code> for the GET and names no scope for the POST.</td><td>Epic 8 confirms it from the Tailscale OAuth docs before writing the setup guide. Until then the spec states no write scope name.</td></tr>
+      <tr><td>R2</td><td>Headscale <code>PUT /api/v1/policy</code> succeeds only when the control server runs <code>policy.mode: "db"</code>.</td><td>Epic 8 detects the mode from the error and shows the reason. The local-file fallback is out of scope.</td></tr>
+      <tr><td>R3</td><td>The DNS defect may not reproduce on the test host — the operator last saw it on a Jetson Orin with a Tegra kernel, and phobos is x86-64. <strong>Worse: the phobos <code>/etc/resolv.conf</code> is immutable</strong> (a leftover workaround from the issue #28 investigation), so no process can rewrite it and a naive attempt returns a false negative.</td><td>Epic 4 clears the immutable attribute first, then attempts the reproduction, and records that it needed to. If the attempt still fails, Epic 4 delivers detection and reporting rather than a targeted fix, and says so in writing.</td></tr>
+      <tr><td>R4</td><td>The Space Grotesk and Space Mono licences must permit embedding in a binary.</td><td>Epic 6 checks the SIL Open Font License terms; the fallback is <code>system-ui</code> and <code>ui-monospace</code>.</td></tr>
+      <tr><td>R5</td><td>A local account can drive the root daemon through the console listener.</td><td>Accepted by the operator. Epic 2 records it as a finding so it is written down; the release note states it.</td></tr>
+      <tr><td>R6</td><td>The default-deny migration may cut off a path the operator does not know about.</td><td>Epic 5 writes the preserving rule set on first start and records it. <code>access.mode: observe</code> lets the operator check before enforcement.</td></tr>
+      <tr><td>R7</td><td>The rule engine must not fight <code>ufw</code> or <code>firewalld</code>.</td><td>A dedicated chain with a single jump makes a reload detectable and repairable. Epic 5 verifies on the test host.</td></tr>
+      <tr><td>R8</td><td><strong>Should <code>docs/specs/</code> be tracked in a public repository?</strong> The build loop needs tracked files; the operator wants planning artifacts private.</td><td><strong>Open — the operator decides in this review round.</strong></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="assumptions">Assumptions</h2>
+  <ol>
+    <li>The operator accepts that <code>hydrascale</code> stays a root daemon on a trusted
+      single-user host. The console threat model follows from that.</li>
+    <li>The test host reproduces the reachability defect, because it follows from iptables rules
+      rather than from a kernel feature.</li>
+    <li>No external user depends on the JSON shape of the <code>/api/*</code> routes.</li>
+    <li><code>dist/</code> and the root <code>hydrascale</code> binary are build output, not
+      deliberate artifacts.</li>
+    <li><code>vendor/</code> stays untracked on purpose. The maintainer rsyncs the vendored
+      tree to the test host and builds with <code>-mod=vendor</code> there; a clone needs
+      the network, which is normal for Go. Version 1.0 changes nothing here.</li>
+    <li>Version 1.0 writes IPv4 local rules only. Epic 2 confirms whether an IPv6 gap exists; Epic 5
+      logs the gap at start rather than hiding it.</li>
+    <li><code>9443</code> is free on a typical host, and the configuration can change it.</li>
+  </ol>
+
+  <hr>
+  <p class="lead">Full detail lives in <a class="inline" href="spec.md">spec.md</a> and the ten files
+    under <code>features/</code>.</p>
+</main>
+</div>
+</body>
+</html>

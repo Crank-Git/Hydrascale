@@ -14,7 +14,6 @@ htmlcov/
 .openagent
 .openagent/
 .sisyphus/
-CLAUDE.md
 HYPERPLAN.md
 TODOS.md
 test-config.yaml
@@ -30,3 +29,18 @@ config.yaml
 !gui/frontend/dist/
 !gui/build/
 gui/build/bin/
+
+# Claude Code
+.claude/settings.local.json
+.claude/worktrees/
+.claude/agent-memory-local/
+CLAUDE.local.md
+.claude.local.md
+.issue-flow.local.json
+
+# Build output. The daemon binary must never be committed.
+/hydrascale
+
+# Private design source. Only the assets the console uses are committed, under
+# internal/ui/static/brand/ (see docs/specs/features/01-desktop-client-removal.md).
+branding/

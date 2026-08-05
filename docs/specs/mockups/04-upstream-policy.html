@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale — Policy</title>
+<style>
+:root{
+  color-scheme:dark;
+  --ink:#0d0c0b; --s1:#141312; --s2:#1c1a18; --s3:#24211e;
+  --line:#262320; --line-soft:#1a1816;
+  --tx:#eceae6; --mu:#8d867d; --dim:#5b544c;
+  --lime:#c8ff2e; --lime-ink:#101208; --lime-soft:rgba(200,255,46,.14);
+  --ok:#7ddc8f; --warn:#f0a63c; --crit:#ff5f52;
+  --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Space Mono',ui-monospace,Menlo,monospace;
+  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px; --r-pill:999px;
+  --dur-1:90ms; --dur-2:160ms; --ease:cubic-bezier(.2,.7,.3,1);
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--tx);font-family:var(--sans);font-size:14px;
+  letter-spacing:-.01em;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:0}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh;max-width:1440px;margin:0 auto}
+.nav{border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 22px}
+.wordmark{font-size:15px;font-weight:600;letter-spacing:-.03em}
+.wordmark i{font-style:normal;color:var(--lime)}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-sm);color:var(--mu);
+  text-decoration:none;transition:background var(--dur-1) var(--ease),color var(--dur-1) var(--ease)}
+.nav a:hover{background:var(--s2);color:var(--tx)}
+.nav a[aria-current]{background:var(--s2);color:var(--tx)}
+.nav a[aria-current] svg{color:var(--lime)}
+.nav svg{width:16px;height:16px;flex:none;color:var(--dim)}
+.nav .foot{margin-top:auto;padding:10px;color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.main{padding:28px 32px;min-width:0}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:24px;flex-wrap:wrap}
+h1{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin:0 0 6px}
+.sub{color:var(--mu);max-width:600px;margin:0}
+.btn{font:inherit;font-weight:500;padding:10px 16px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--tx);cursor:pointer;transition:background var(--dur-1) var(--ease)}
+.btn:hover{background:var(--s3)}
+.btn.primary{background:var(--lime);color:var(--lime-ink);border-color:var(--lime);font-weight:600}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn:focus-visible,.trow:focus-visible,.nav a:focus-visible{outline:none;box-shadow:0 0 0 2px rgba(200,255,46,.45)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:var(--r-pill);
+  border:1px solid var(--line);background:var(--s2);font-family:var(--mono);font-size:11.5px;color:var(--mu)}
+.chip.edited{border-color:var(--lime);color:var(--lime);background:var(--lime-soft)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px}
+.grid{display:grid;grid-template-columns:300px 1fr;gap:12px;align-items:start}
+@media (max-width:1040px){.grid{grid-template-columns:1fr}.app{grid-template-columns:1fr}.nav{display:none}}
+.trow{display:flex;flex-direction:column;gap:5px;padding:13px 16px;border-radius:var(--r);cursor:pointer;
+  background:var(--s1);border:1px solid var(--line);transition:background var(--dur-1) var(--ease)}
+.trow+.trow{margin-top:8px}
+.trow:hover{background:var(--s2)}
+.trow[aria-selected=true]{border-color:var(--lime);background:var(--s2)}
+.trow .t{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.trow .id{font-family:var(--mono);font-size:12.5px}
+.trow .m{color:var(--dim);font-family:var(--mono);font-size:11px}
+.ed{background:var(--s3);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.ed .bar{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;
+  border-bottom:1px solid var(--line);background:var(--s2)}
+.code{display:flex;font-family:var(--mono);font-size:12.5px;line-height:1.6;max-height:400px;overflow:auto}
+.gut{padding:14px 0 14px 14px;color:var(--dim);text-align:right;user-select:none;flex:none}
+.gut div{padding-right:12px}
+pre{margin:0;padding:14px 16px 14px 0;white-space:pre;color:var(--tx);flex:1}
+.k{color:var(--lime)} .s{color:#9fd6a8} .c{color:var(--dim)}
+.result{margin-top:12px;padding:14px 16px;border-radius:var(--r);display:flex;gap:11px;align-items:flex-start}
+.result.ok{background:rgba(125,220,143,.08);border:1px solid rgba(125,220,143,.3)}
+.result.bad{background:rgba(255,95,82,.08);border:1px solid rgba(255,95,82,.3)}
+.result p{margin:0;font-size:13px}
+.result .mono{display:block;margin-top:6px;color:var(--mu)}
+.acts{display:flex;gap:10px;margin-top:16px;align-items:center;flex-wrap:wrap}
+.note{color:var(--mu);font-size:13px;margin:10px 0 0}
+.ro{display:flex;gap:11px;align-items:flex-start;padding:14px 16px;border-radius:var(--r);
+  background:rgba(240,166,60,.08);border:1px solid rgba(240,166,60,.3);margin-bottom:12px}
+.ro p{margin:0;font-size:13px}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 21V11"/><path d="M12 11 6 6"/><path d="M12 11l6-5"/><path d="M12 11 3.5 9.5"/><path d="M12 11l8.5-1.5"/>
+        <circle cx="6" cy="5" r="1.6"/><circle cx="18" cy="5" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="21" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/>
+      </svg>
+      <span class="wordmark">hydra<i>scale</i></span>
+    </div>
+    <a href="01-overview.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Overview</a>
+    <a href="02-namespace-detail.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Namespaces</a>
+    <a href="03-acl-editor.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="17" r="2.4"/><path d="M8.4 7h4.2a3 3 0 0 1 3 3v4" stroke-dasharray="2 3"/></svg>Access</a>
+    <a href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>Policy</a>
+    <a href="05-dns-and-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.5 2.5 13 0 16M12 4c-2.5 2.5-2.5 13 0 16"/></svg>DNS</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h4l2.5-6 3 12L16 12h4"/></svg>Activity</a>
+    <div class="foot">v1.0.0<br>converged 4s ago</div>
+  </nav>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h1>Policy</h1>
+        <p class="sub">The access policy each control server holds. A change here affects every device
+          in the tailnet, not only this host.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div role="listbox" aria-label="Tailnets">
+        <div class="trow" role="option" aria-selected="true" tabindex="0">
+          <div class="t"><span class="id">jbones</span><span class="dot ok"></span></div>
+          <span class="m">tailscale · oauth client · read and write</span>
+        </div>
+        <div class="trow" role="option" aria-selected="false" tabindex="0">
+          <div class="t"><span class="id">homelab</span><span class="dot warn"></span></div>
+          <span class="m">headscale · api key · read only</span>
+        </div>
+        <div class="trow" role="option" aria-selected="false" tabindex="0">
+          <div class="t"><span class="id">corp-prod</span><span class="dot ok"></span></div>
+          <span class="m">tailscale · oauth client · read and write</span>
+        </div>
+        <div class="trow" role="option" aria-selected="false" tabindex="0">
+          <div class="t"><span class="id">lab-hs</span><span class="dot crit"></span></div>
+          <span class="m">headscale · no credential</span>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <span class="label">lab-hs</span>
+          <p class="note" style="margin-top:8px">This tailnet needs a Headscale API key. Set
+            <span class="mono">HYDRASCALE_HS_API_KEY_LAB_HS</span>, or add it to
+            <span class="mono">/etc/hydrascale/secrets.yaml</span>.</p>
+          <button class="btn" style="margin-top:12px;width:100%">Add credential</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="ro">
+          <span class="dot warn" style="margin-top:6px"></span>
+          <p><b>homelab is read only.</b> Its Headscale control server runs the file policy mode.
+            A write needs <span class="mono">policy.mode: "db"</span> on the control server.</p>
+        </div>
+
+        <div class="ed">
+          <div class="bar">
+            <span class="label">jbones · policy.hujson</span>
+            <span class="chip edited">edited</span>
+          </div>
+          <div class="code">
+            <div class="gut" aria-hidden="true">
+              <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div>
+              <div>8</div><div>9</div><div>10</div><div>11</div><div>12</div><div>13</div><div>14</div>
+              <div>15</div><div>16</div><div>17</div><div>18</div>
+            </div>
+<pre>{
+  <span class="c">// Everything is denied until a grant says otherwise.</span>
+  <span class="k">"tagOwners"</span>: {
+    <span class="s">"tag:server"</span>: [<span class="s">"autogroup:admin"</span>],
+  },
+  <span class="k">"grants"</span>: [
+    {
+      <span class="k">"src"</span>: [<span class="s">"autogroup:member"</span>],
+      <span class="k">"dst"</span>: [<span class="s">"tag:server"</span>],
+      <span class="k">"ip"</span>:  [<span class="s">"tcp:22"</span>, <span class="s">"tcp:443"</span>],
+    },
+    {
+      <span class="k">"src"</span>: [<span class="s">"tag:server"</span>],
+      <span class="k">"dst"</span>: [<span class="s">"tag:server"</span>],
+      <span class="k">"ip"</span>:  [<span class="s">"tcp:5432"</span>],
+    },
+  ],
+}</pre>
+          </div>
+        </div>
+
+        <div class="result ok">
+          <span class="dot ok" style="margin-top:6px"></span>
+          <p>The control server accepted the document.
+            <span class="mono">POST /api/v2/tailnet/jbones.ts.net/acl/validate → 200</span></p>
+        </div>
+
+        <div class="acts">
+          <button class="btn">Validate</button>
+          <button class="btn primary">Push to tailscale</button>
+          <button class="btn">Re-read</button>
+          <button class="btn">Discard</button>
+          <span class="chip" style="margin-left:auto">etag e0b2816b418</span>
+        </div>
+
+        <p class="note">Push sends <span class="mono">If-Match</span> with the etag from the read.
+          If someone else changed the policy first, the push is refused and nothing is overwritten.</p>
+
+        <div class="result bad" style="margin-top:20px">
+          <span class="dot crit" style="margin-top:6px"></span>
+          <p><b>Validate failed</b> — shown here as the error state.
+            <span class="mono">line 9: unknown target "tag:sever"</span>
+            <span class="mono">line 14: port "tcp:0" is out of range</span></p>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

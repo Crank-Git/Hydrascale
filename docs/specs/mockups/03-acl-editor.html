@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale — Access</title>
+<style>
+/* Hydrascale brand tokens. Source: branding/design_handoff_hydrascale_brand/tokens/.
+   Fonts are system stacks here: a mockup makes no external request. */
+:root{
+  color-scheme:dark;
+  --ink:#0d0c0b; --s1:#141312; --s2:#1c1a18; --s3:#24211e;
+  --line:#262320; --line-soft:#1a1816;
+  --tx:#eceae6; --mu:#8d867d; --dim:#5b544c;
+  --lime:#c8ff2e; --lime-ink:#101208; --lime-soft:rgba(200,255,46,.14);
+  --ok:#7ddc8f; --warn:#f0a63c; --crit:#ff5f52;
+  --edge:#3a352f; --edge-active:var(--lime);
+  --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Space Mono',ui-monospace,Menlo,monospace;
+  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px; --r-xl:20px; --r-pill:999px;
+  --dur-1:90ms; --dur-2:160ms; --dur-3:280ms; --ease:cubic-bezier(.2,.7,.3,1);
+  --shadow-pop:0 24px 60px -20px rgba(0,0,0,.7);
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms;--dur-3:0ms}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--tx);font-family:var(--sans);
+  font-size:14px;letter-spacing:-.01em;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:0}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+a{color:inherit}
+
+/* shell */
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh;max-width:1440px;margin:0 auto}
+.nav{border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 22px}
+.wordmark{font-size:15px;font-weight:600;letter-spacing:-.03em}
+.wordmark i{font-style:normal;color:var(--lime)}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-sm);
+  color:var(--mu);text-decoration:none;transition:background var(--dur-1) var(--ease),color var(--dur-1) var(--ease)}
+.nav a:hover{background:var(--s2);color:var(--tx)}
+.nav a[aria-current]{background:var(--s2);color:var(--tx)}
+.nav a[aria-current] svg{color:var(--lime)}
+.nav svg{width:16px;height:16px;flex:none;color:var(--dim)}
+.nav .foot{margin-top:auto;padding:10px;color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.main{padding:28px 32px;min-width:0}
+
+/* header */
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px;flex-wrap:wrap}
+h1{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin:0 0 6px}
+.sub{color:var(--mu);max-width:560px;margin:0}
+.headact{display:flex;align-items:center;gap:10px}
+
+/* controls */
+.btn{font:inherit;font-weight:500;padding:10px 16px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--tx);cursor:pointer;transition:background var(--dur-1) var(--ease)}
+.btn:hover{background:var(--s3)}
+.btn.primary{background:var(--lime);color:var(--lime-ink);border-color:var(--lime);font-weight:600}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn:focus-visible,.cell:focus-visible,.nav a:focus-visible{outline:none;box-shadow:0 0 0 2px rgba(200,255,46,.45)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:var(--r-pill);
+  border:1px solid var(--line);background:var(--s2);font-family:var(--mono);font-size:11.5px;color:var(--mu)}
+.chip.staged{border-color:var(--lime);color:var(--lime);background:var(--lime-soft)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)}
+
+/* cards */
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px}
+.grid{display:grid;grid-template-columns:1fr 340px;gap:12px;align-items:start}
+@media (max-width:1040px){.grid{grid-template-columns:1fr}.app{grid-template-columns:1fr}.nav{display:none}}
+
+/* flow spine */
+.spine{position:relative}
+.spinehead{display:flex;justify-content:space-between;margin-bottom:14px}
+svg.flow{width:100%;height:300px;display:block;overflow:visible}
+.node rect{fill:var(--s2);stroke:var(--line);rx:12}
+.node.sel rect{stroke:var(--lime)}
+.node text.n{fill:var(--tx);font-family:var(--mono);font-size:12.5px}
+.node text.s{fill:var(--dim);font-family:var(--mono);font-size:11px}
+.node{cursor:pointer}
+.edge{fill:none;stroke:var(--edge);stroke-width:1.4;stroke-dasharray:2 6;stroke-linecap:round;
+  transition:stroke var(--dur-3) var(--ease),opacity var(--dur-3) var(--ease)}
+.edge.on{stroke:var(--edge-active)}
+.edge.off{opacity:.35}
+.edge.pending{stroke:var(--lime);stroke-dasharray:2 6;opacity:.7}
+
+/* matrix */
+.mtx{border-collapse:separate;border-spacing:4px;margin-top:4px}
+.mtx th{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--dim);text-align:left;padding:0 4px}
+.mtx th.col{writing-mode:vertical-rl;transform:rotate(180deg);height:78px;vertical-align:bottom;text-align:right}
+.mtx th.hot{color:var(--lime)}
+.cell{width:34px;height:34px;border-radius:var(--r-xs);background:var(--s3);border:1px solid var(--line);
+  cursor:pointer;padding:0;transition:background var(--dur-1) var(--ease)}
+.cell:hover{background:#2c2823}
+.cell.on{background:var(--lime);border-color:var(--lime)}
+.cell.staged-on{background:var(--lime-soft);border-color:var(--lime);border-style:dashed}
+.cell.staged-off{background:var(--s3);border-color:var(--lime);border-style:dashed}
+.cell.inert{background:transparent;border-color:var(--line-soft);cursor:default}
+.cell.inert:hover{background:transparent}
+
+/* rule rows */
+.rule{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--r);
+  border:1px solid transparent;transition:background var(--dur-1) var(--ease)}
+.rule+.rule{border-top:1px solid var(--line-soft)}
+.rule:hover{background:var(--s2)}
+.rule.pending{border-color:var(--lime);background:var(--lime-soft)}
+.rule .end{font-family:var(--mono);font-size:12.5px;color:var(--tx);white-space:nowrap}
+.conn{flex:none;width:52px;height:1px;border-top:1.4px dotted var(--edge)}
+.rule.pending .conn{border-color:var(--lime)}
+.ports{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.noports{color:var(--dim);font-family:var(--mono);font-size:11.5px;margin-left:auto}
+.trash{background:none;border:none;color:var(--dim);cursor:pointer;padding:4px;border-radius:var(--r-xs)}
+.trash:hover{color:var(--crit);background:var(--s3)}
+
+/* staged tray */
+.tray{margin-top:12px;border:1px solid var(--lime);border-radius:var(--r-lg);background:var(--s1);padding:18px 20px}
+.tray h2{font-size:17px;margin:0 0 4px;letter-spacing:-.025em}
+.tray ul{margin:12px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.tray li{font-family:var(--mono);font-size:12.5px;color:var(--mu);display:flex;gap:10px;align-items:center}
+.tray li b{color:var(--tx);font-weight:400}
+.warn-row{display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:12px 14px;
+  border-radius:var(--r);background:rgba(240,166,60,.08);border:1px solid rgba(240,166,60,.3)}
+.warn-row p{margin:0;color:var(--tx);font-size:13px}
+.trayact{display:flex;gap:10px;margin-top:16px}
+
+/* side */
+.side h2{font-size:17px;letter-spacing:-.025em;margin:0 0 2px}
+.side .card+.card{margin-top:12px}
+.kv{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.kv:last-child{border-bottom:none}
+.kv dt{color:var(--mu);font-size:13px}
+.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;color:var(--tx)}
+.note{color:var(--mu);font-size:13px;margin:10px 0 0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 21V11"/><path d="M12 11 6 6"/><path d="M12 11l6-5"/><path d="M12 11 3.5 9.5"/><path d="M12 11l8.5-1.5"/>
+        <circle cx="6" cy="5" r="1.6"/><circle cx="18" cy="5" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="21" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/>
+      </svg>
+      <span class="wordmark">hydra<i>scale</i></span>
+    </div>
+    <a href="01-overview.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Overview</a>
+    <a href="02-namespace-detail.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Namespaces</a>
+    <a href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="17" r="2.4"/><path d="M8.4 7h4.2a3 3 0 0 1 3 3v4" stroke-dasharray="2 3"/></svg>Access</a>
+    <a href="04-upstream-policy.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>Policy</a>
+    <a href="05-dns-and-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.5 2.5 13 0 16M12 4c-2.5 2.5-2.5 13 0 16"/></svg>DNS</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h4l2.5-6 3 12L16 12h4"/></svg>Activity</a>
+    <div class="foot">v1.0.0<br>converged 4s ago</div>
+  </nav>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h1>Access</h1>
+        <p class="sub">Nothing, until you say so. A dotted line is an allow rule. Denied is simply no line.</p>
+      </div>
+      <div class="headact">
+        <span class="chip"><span class="dot ok"></span>enforce</span>
+        <span class="chip staged">3 staged</span>
+        <button class="btn">Discard</button>
+        <button class="btn primary">Apply</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <!-- FLOW SPINE -->
+        <section class="card spine" aria-labelledby="flowh">
+          <div class="spinehead">
+            <span class="label" id="flowh">Allowed paths</span>
+            <span class="label">source: jbones</span>
+          </div>
+
+          <svg class="flow" viewBox="0 0 660 300" role="img" aria-describedby="flowtext">
+            <!-- edges: jbones selected -->
+            <path class="edge on"  d="M212,58 C330,58 340,52 448,52"/>
+            <path class="edge on"  d="M212,58 C330,58 340,190 448,190"/>
+            <path class="edge pending" d="M212,58 C330,58 340,120 448,120" stroke-dasharray="2 6"/>
+            <path class="edge off" d="M212,128 C330,128 340,190 448,190"/>
+            <path class="edge off" d="M212,198 C330,198 340,190 448,190"/>
+
+            <!-- sources -->
+            <g class="node sel" tabindex="0"><rect x="12" y="34" width="200" height="48" rx="12"/>
+              <text class="n" x="30" y="56">jbones</text><text class="s" x="30" y="72">6 peers</text></g>
+            <g class="node" tabindex="0"><rect x="12" y="104" width="200" height="48" rx="12"/>
+              <text class="n" x="30" y="126">homelab</text><text class="s" x="30" y="142">3 peers</text></g>
+            <g class="node" tabindex="0"><rect x="12" y="174" width="200" height="48" rx="12"/>
+              <text class="n" x="30" y="196">corp-prod</text><text class="s" x="30" y="212">5 peers</text></g>
+
+            <!-- destinations -->
+            <g class="node" tabindex="0"><rect x="448" y="28" width="200" height="48" rx="12"/>
+              <text class="n" x="466" y="50">internet</text><text class="s" x="466" y="66">masquerade</text></g>
+            <g class="node" tabindex="0"><rect x="448" y="96" width="200" height="48" rx="12"/>
+              <text class="n" x="466" y="118">homelab</text><text class="s" x="466" y="134">3 peers</text></g>
+            <g class="node" tabindex="0"><rect x="448" y="166" width="200" height="48" rx="12"/>
+              <text class="n" x="466" y="188">host phobos</text><text class="s" x="466" y="204">veth</text></g>
+          </svg>
+
+          <p id="flowtext" class="sr">Allowed paths. jbones reaches internet on all ports. jbones reaches
+            host phobos on all ports. corp-prod reaches host phobos on all ports. homelab reaches host
+            phobos on all ports. One staged path: jbones reaches homelab on tcp 22 and tcp 443.</p>
+        </section>
+
+        <!-- MATRIX -->
+        <section class="card" style="margin-top:12px" aria-labelledby="mtxh">
+          <span class="label" id="mtxh">Reachability</span>
+          <p class="note">A filled square means a rule exists. Ports live in the rule list below.</p>
+          <table class="mtx">
+            <thead>
+              <tr><th></th>
+                <th class="col">jbones</th><th class="col hot">homelab</th><th class="col">corp-prod</th>
+                <th class="col">host</th><th class="col">internet</th></tr>
+            </thead>
+            <tbody>
+              <tr><th class="hot">jbones</th>
+                <td><button class="cell inert" disabled aria-label="jbones to jbones, not applicable"></button></td>
+                <td><button class="cell staged-on" aria-label="jbones to homelab, staged allow"></button></td>
+                <td><button class="cell" aria-label="jbones to corp-prod, denied"></button></td>
+                <td><button class="cell on" aria-label="jbones to host, allowed"></button></td>
+                <td><button class="cell on" aria-label="jbones to internet, allowed"></button></td></tr>
+              <tr><th>homelab</th>
+                <td><button class="cell" aria-label="homelab to jbones, denied"></button></td>
+                <td><button class="cell inert" disabled></button></td>
+                <td><button class="cell" aria-label="homelab to corp-prod, denied"></button></td>
+                <td><button class="cell on" aria-label="homelab to host, allowed"></button></td>
+                <td><button class="cell on" aria-label="homelab to internet, allowed"></button></td></tr>
+              <tr><th>corp-prod</th>
+                <td><button class="cell" aria-label="corp-prod to jbones, denied"></button></td>
+                <td><button class="cell" aria-label="corp-prod to homelab, denied"></button></td>
+                <td><button class="cell inert" disabled></button></td>
+                <td><button class="cell staged-off" aria-label="corp-prod to host, staged removal"></button></td>
+                <td><button class="cell on" aria-label="corp-prod to internet, allowed"></button></td></tr>
+              <tr><th>host</th>
+                <td><button class="cell on" aria-label="host to jbones, allowed"></button></td>
+                <td><button class="cell on" aria-label="host to homelab, allowed"></button></td>
+                <td><button class="cell on" aria-label="host to corp-prod, allowed"></button></td>
+                <td><button class="cell inert" disabled></button></td>
+                <td><button class="cell inert" disabled></button></td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- RULE LIST -->
+        <section class="card" style="margin-top:12px" aria-labelledby="rlh">
+          <span class="label" id="rlh">Rules</span>
+          <div style="margin-top:10px">
+            <div class="rule pending">
+              <span class="end">jbones</span><span class="conn"></span><span class="end">homelab</span>
+              <div class="ports"><span class="chip staged">tcp/22</span><span class="chip staged">tcp/443</span></div>
+              <button class="trash" aria-label="Delete rule"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg></button>
+            </div>
+            <div class="rule">
+              <span class="end">jbones</span><span class="conn"></span><span class="end">internet</span>
+              <span class="noports">all ports</span>
+              <button class="trash" aria-label="Delete rule"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg></button>
+            </div>
+            <div class="rule">
+              <span class="end">jbones</span><span class="conn"></span><span class="end">host</span>
+              <div class="ports"><span class="chip">tcp/22</span></div>
+              <button class="trash" aria-label="Delete rule"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg></button>
+            </div>
+            <div class="rule">
+              <span class="end">homelab</span><span class="conn"></span><span class="end">internet</span>
+              <span class="noports">all ports</span>
+              <button class="trash" aria-label="Delete rule"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg></button>
+            </div>
+            <div class="rule">
+              <span class="end">corp-prod</span><span class="conn"></span><span class="end">internet</span>
+              <span class="noports">all ports</span>
+              <button class="trash" aria-label="Delete rule"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg></button>
+            </div>
+          </div>
+        </section>
+
+        <!-- STAGED TRAY -->
+        <section class="tray" aria-labelledby="trayh">
+          <h2 id="trayh">3 staged edits</h2>
+          <p class="note" style="margin-top:2px">Nothing has reached the daemon. Apply sends the whole rule set.</p>
+          <ul>
+            <li><span class="chip staged">add</span><b>jbones → homelab</b> on tcp/22, tcp/443</li>
+            <li><span class="chip staged">remove</span><b>corp-prod → host</b></li>
+            <li><span class="chip staged">edit</span><b>jbones → host</b> narrowed to tcp/22</li>
+          </ul>
+          <div class="warn-row">
+            <span class="dot warn" style="margin-top:6px"></span>
+            <p>Removing <span class="mono">corp-prod → host</span> closes the path this browser session
+              is using. Apply will end the connection.</p>
+          </div>
+          <div class="trayact">
+            <button class="btn primary">Apply 3 edits</button>
+            <button class="btn">Discard</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- SIDE -->
+      <aside class="side">
+        <div class="card">
+          <h2>jbones</h2>
+          <p class="note" style="margin-top:0">Selected source. Every other path is muted.</p>
+          <dl style="margin:14px 0 0">
+            <div class="kv"><dt>state</dt><dd><span class="dot ok"></span> converged</dd></div>
+            <div class="kv"><dt>peers</dt><dd>6</dd></div>
+            <div class="kv"><dt>namespace</dt><dd>ns-jbones</dd></div>
+            <div class="kv"><dt>veth</dt><dd>10.99.0.2</dd></div>
+            <div class="kv"><dt>rules out</dt><dd>3</dd></div>
+            <div class="kv"><dt>rules in</dt><dd>1</dd></div>
+          </dl>
+        </div>
+        <div class="card">
+          <span class="label">Enforcement</span>
+          <dl style="margin:12px 0 0">
+            <div class="kv"><dt>mode</dt><dd>enforce</dd></div>
+            <div class="kv"><dt>chain</dt><dd>HYDRASCALE-FWD</dd></div>
+            <div class="kv"><dt>rules live</dt><dd>11</dd></div>
+            <div class="kv"><dt>last applied</dt><dd>14:02:19</dd></div>
+          </dl>
+          <p class="note">Switch to <span class="mono">observe</span> to log what would be denied
+            without denying it.</p>
+          <button class="btn" style="margin-top:12px;width:100%">Change mode</button>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+</body>
+</html>
