@@ -174,7 +174,7 @@ type ChainWriter interface {
 // reach.Prober carries the ability. A test double does not have to.
 type NamespaceProber interface {
 	// Probe sends one packet from nsName to target and reports what came back. An empty
-	// target makes the prober use the default gateway of the host.
+	// target selects reach.DefaultTarget.
 	Probe(ctx context.Context, nsName, target string) reach.Result
 }
 
@@ -211,7 +211,7 @@ func (r *Reconciler) probeReachability(desired map[string]config.Tailnet, actual
 	}
 
 	// A configuration file that the daemon cannot read leaves the target empty, which
-	// makes the prober measure against the default gateway of the host.
+	// makes the prober measure against reach.DefaultTarget.
 	var target string
 	if cfg, err := config.LoadConfig(r.configPath); err == nil {
 		target = cfg.ProbeTarget
@@ -262,18 +262,6 @@ func (r *Reconciler) probeReachability(desired map[string]config.Tailnet, actual
 		}(id, state.NsName)
 	}
 	wg.Wait()
-
-	// A failed measurement against the default gateway drops the gateway that the last
-	// lookup returned, so a host that changed its gateway measures the new one on the
-	// next tick.
-	if forgetter, ok := prober.(interface{ ForgetGateway() }); ok && target == "" {
-		for _, res := range results {
-			if res.State == reach.StateUnreachable {
-				forgetter.ForgetGateway()
-				break
-			}
-		}
-	}
 
 	r.mu.Lock()
 	for id, res := range results {

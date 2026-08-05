@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"hydrascale/internal/execx"
@@ -38,6 +37,19 @@ const (
 // one timeout and not one for each namespace.
 const Timeout = 250 * time.Millisecond
 
+// DefaultTarget is the address that a namespace sends the packet to when the configuration
+// file declares no probe_target.
+//
+// The address is public, therefore each namespace sends one packet to a third party on
+// each tick. The measurement needs a target that the compiled rule set permits, and the
+// default rule set permits a public destination alone: `HYDRASCALE-FWD` denies every
+// destination in 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, and
+// 127.0.0.0/8. A target on the local network therefore reports `unreachable` on a host
+// whose forward path works. Issue #172 measured the outage with this same address. An
+// operator who accepts no packet to a third party declares `probe_target` with an address
+// inside a tailnet.
+const DefaultTarget = "1.1.1.1"
+
 // Result is one measurement of the reachability of one namespace.
 // Target holds the address that the daemon sent the packet to, and it is empty for
 // StateNotProbed. CheckedAt holds the time of the measurement. Detail holds the reason of
@@ -54,12 +66,6 @@ type Prober struct {
 	// Runner runs every command that the Prober sends to the host. A test replaces
 	// Runner with an execx.Recorder and asserts the exact argument list.
 	Runner execx.Runner
-
-	mu sync.Mutex
-	// gateway holds the default gateway of the host that the last lookup returned. The
-	// Prober drops the value after a failed probe, so a host that changes its gateway
-	// gets a new lookup on the next tick.
-	gateway string
 }
 
 // New returns a Prober that runs each command on the host.
@@ -74,10 +80,9 @@ func (p *Prober) runner() execx.Runner {
 }
 
 // Probe sends one packet from nsName to target and reports what came back.
-// An empty target makes the Prober use the default gateway of the host, which keeps the
-// packet on the local network and sends nothing to a third party. The gateway sits beyond
-// the host, therefore the packet crosses the FORWARD chain and the masquerade rule of the
-// forward path.
+// An empty target selects DefaultTarget. The target sits beyond the host, therefore the
+// packet crosses the FORWARD chain, the chain HYDRASCALE-FWD, and the masquerade rule of
+// the forward path.
 // ctx bounds the whole call. The caller gives ctx a deadline; Probe adds Timeout when ctx
 // carries none.
 // Probe returns no error. Every outcome is a Result, because a failed command is the
@@ -88,79 +93,31 @@ func (p *Prober) Probe(ctx context.Context, nsName, target string) Result {
 		ctx, cancel = context.WithTimeout(ctx, Timeout)
 		defer cancel()
 	}
-
-	address, err := p.resolve(ctx, target)
-	if err != nil {
-		return Result{State: StateNotProbed, CheckedAt: time.Now(), Detail: err.Error()}
+	if target == "" {
+		target = DefaultTarget
 	}
 
-	out, err := p.runner().Run(ctx, "ip", "netns", "exec", nsName, "ping", "-n", "-c", "1", "-W", "1", address)
+	out, err := p.runner().Run(ctx, "ip", "netns", "exec", nsName, "ping", "-n", "-c", "1", "-W", "1", target)
 	if err != nil {
 		return Result{
 			State:     StateUnreachable,
-			Target:    address,
+			Target:    target,
 			CheckedAt: time.Now(),
-			Detail:    detail(out, err),
+			Detail:    detail(ctx, out, err),
 		}
 	}
-	return Result{State: StateReachable, Target: address, CheckedAt: time.Now()}
-}
-
-// resolve returns the address that Probe sends the packet to.
-// resolve returns target when the operator declared one. For an empty target it returns
-// the default gateway of the host, and it keeps that value for the next call.
-func (p *Prober) resolve(ctx context.Context, target string) (string, error) {
-	if target != "" {
-		return target, nil
-	}
-
-	p.mu.Lock()
-	cached := p.gateway
-	p.mu.Unlock()
-	if cached != "" {
-		return cached, nil
-	}
-
-	out, err := p.runner().Run(ctx, "ip", "-4", "route", "show", "default")
-	if err != nil {
-		return "", fmt.Errorf("read the default route of the host: %v (%s)", err, strings.TrimSpace(string(out)))
-	}
-	gateway := parseGateway(string(out))
-	if gateway == "" {
-		return "", fmt.Errorf("the host holds no default route, and the configuration file declares no probe_target")
-	}
-
-	p.mu.Lock()
-	p.gateway = gateway
-	p.mu.Unlock()
-	return gateway, nil
-}
-
-// ForgetGateway drops the default gateway that the last lookup returned. The reconciler
-// calls it after a failed probe, so a host that changes its gateway measures the new one.
-func (p *Prober) ForgetGateway() {
-	p.mu.Lock()
-	p.gateway = ""
-	p.mu.Unlock()
-}
-
-// parseGateway returns the address that follows `via` in the first default route.
-// `ip -4 route show default` prints `default via 192.168.1.1 dev eth0 proto dhcp`. A host
-// with no default route prints nothing, and a host with a link route prints no `via`.
-func parseGateway(out string) string {
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		for i, f := range fields {
-			if f == "via" && i+1 < len(fields) {
-				return fields[i+1]
-			}
-		}
-	}
-	return ""
+	return Result{State: StateReachable, Target: target, CheckedAt: time.Now()}
 }
 
 // detail returns the reason of a failed probe as one line, for the status response.
-func detail(out []byte, err error) string {
+// A packet that gets no answer makes `ping` wait for its own deadline of 1 second, which
+// is longer than Timeout, therefore the daemon stops the command and the operating system
+// reports `signal: killed`. detail states the timeout instead, because the name of the
+// signal says nothing to the operator.
+func detail(ctx context.Context, out []byte, err error) string {
+	if ctx.Err() != nil {
+		return fmt.Sprintf("no answer inside %v", Timeout)
+	}
 	text := strings.TrimSpace(string(out))
 	if text == "" {
 		return err.Error()

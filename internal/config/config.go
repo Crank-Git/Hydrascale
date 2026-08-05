@@ -92,10 +92,10 @@ type Config struct {
 	// DefaultSecretsPath when the key is absent.
 	SecretsFile string `yaml:"secrets_file,omitempty"`
 	// ProbeTarget is the address that each namespace sends one packet to, so that the
-	// status response reports measured reachability. An empty value makes the daemon use
-	// the default gateway of the host, which keeps the packet on the local network. An
-	// operator who wants proof of a path to the internet declares a public address here,
-	// and accepts that every namespace sends one packet to that address on every tick.
+	// status response reports measured reachability. An empty value selects
+	// reach.DefaultTarget, which is public. An operator who accepts no packet to a third
+	// party declares an address inside a tailnet here. An address on the local network
+	// reports unreachable, because the default rule set denies every private destination.
 	ProbeTarget string `yaml:"probe_target,omitempty"`
 	// Access holds the local rule set. The field is a pointer, because a nil value means
 	// that the file holds no access key, which is what the version 0.9 migration detects.

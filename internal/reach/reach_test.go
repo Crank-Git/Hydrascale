@@ -54,12 +54,10 @@ func TestAFailedPingReportsUnreachableAndKeepsTheReasonOfTheFailure(t *testing.T
 	}
 }
 
-func TestAnEmptyTargetMakesTheProbeUseTheDefaultGatewayOfTheHost(t *testing.T) {
+func TestAnEmptyTargetSelectsTheDefaultTarget(t *testing.T) {
 	rec := execx.NewRecorder(t)
-	rec.Script(execx.Result{Output: []byte("default via 192.168.1.1 dev eth0 proto dhcp metric 100\n")},
-		"ip", "-4", "route", "show", "default")
 	rec.Script(execx.Result{Output: []byte("1 packets transmitted, 1 received")},
-		"ip", "netns", "exec", "ns-jbones", "ping", "-n", "-c", "1", "-W", "1", "192.168.1.1")
+		"ip", "netns", "exec", "ns-jbones", "ping", "-n", "-c", "1", "-W", "1", DefaultTarget)
 
 	p := &Prober{Runner: rec}
 	res := p.Probe(context.Background(), "ns-jbones", "")
@@ -67,35 +65,44 @@ func TestAnEmptyTargetMakesTheProbeUseTheDefaultGatewayOfTheHost(t *testing.T) {
 	if res.State != StateReachable {
 		t.Errorf("the state is %q, want %q (detail: %s)", res.State, StateReachable, res.Detail)
 	}
-	if res.Target != "192.168.1.1" {
-		t.Errorf("the target is %q, want the default gateway 192.168.1.1", res.Target)
+	if res.Target != DefaultTarget {
+		t.Errorf("the target is %q, want the default target %q", res.Target, DefaultTarget)
+	}
+	if calls := rec.Calls(); len(calls) != 1 {
+		t.Fatalf("the probe ran %d commands, want 1: %v", len(calls), calls)
 	}
 }
 
-func TestAHostWithNoDefaultRouteAndNoDeclaredTargetReportsNotProbed(t *testing.T) {
-	rec := execx.NewRecorder(t)
-	rec.Script(execx.Result{Output: nil}, "ip", "-4", "route", "show", "default")
+// killedRunner reports the failure of a command that the daemon stopped at its deadline.
+type killedRunner struct{}
 
-	p := &Prober{Runner: rec}
-	res := p.Probe(context.Background(), "ns-jbones", "")
+func (killedRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return nil, errors.New("signal: killed")
+}
 
-	if res.State != StateNotProbed {
-		t.Errorf("the state is %q, want %q", res.State, StateNotProbed)
+func TestAProbeThatRunsOutOfTimeStatesTheTimeoutAndNotTheSignal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	p := &Prober{Runner: killedRunner{}}
+	res := p.Probe(ctx, "ns-havoc", "1.1.1.1")
+
+	if res.State != StateUnreachable {
+		t.Errorf("the state is %q, want %q", res.State, StateUnreachable)
 	}
-	if res.Detail == "" {
-		t.Error("the result states no reason for the absent measurement")
+	want := "no answer inside 250ms"
+	if res.Detail != want {
+		t.Errorf("the detail is %q, want %q", res.Detail, want)
 	}
 }
 
 func TestTheProbeGivesEveryCommandADeadline(t *testing.T) {
 	rec := execx.NewRecorder(t)
-	rec.Script(execx.Result{Output: []byte("default via 10.0.0.1 dev eth0\n")},
-		"ip", "-4", "route", "show", "default")
 	rec.Script(execx.Result{Output: []byte("ok")},
 		"ip", "netns", "exec", "ns-havoc", "ping", "-n", "-c", "1", "-W", "1", "10.0.0.1")
 
 	p := &Prober{Runner: rec}
-	p.Probe(context.Background(), "ns-havoc", "")
+	p.Probe(context.Background(), "ns-havoc", "10.0.0.1")
 
 	for i, hasDeadline := range rec.Deadlines() {
 		if !hasDeadline {
