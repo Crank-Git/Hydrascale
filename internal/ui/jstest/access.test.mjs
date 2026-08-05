@@ -17,6 +17,11 @@ import {
   SQUARE_SIDE_DENSE,
   createAccessState,
   emptyStatement,
+  flowCaption,
+  flowMarkup,
+  flowModel,
+  flowSelection,
+  flowTextMarkup,
   headerModel,
   hoverMarks,
   matrixModel,
@@ -445,6 +450,229 @@ test("every square reaches focus by keyboard and the keyboard stages the same ed
 
   const source = await readFile(new URL("../static/access.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /tabindex/i);
+});
+
+// ---------------------------------------------------------------------------
+// The flow overview
+// ---------------------------------------------------------------------------
+
+// statusBody is one answer of GET /api/status, reduced to the field that the picture
+// reads. The flow overview takes the reachability of a tailnet from it.
+function statusBody() {
+  return {
+    actual: {
+      jbones: { NsExists: true, DaemonHealthy: true, measured_reachability: { state: "reachable" } },
+      homelab: { NsExists: true, DaemonHealthy: true, measured_reachability: { state: "reachable" } },
+    },
+  };
+}
+
+// flowBody holds three tailnets, so that the picture holds a path between two tailnets as
+// well as a path to the host and a path to the internet.
+function flowBody() {
+  return accessBody({
+    rules: [
+      { from: "jbones", to: "internet", ports: [] },
+      { from: "jbones", to: "host", ports: ["tcp/22"] },
+      { from: "homelab", to: "jbones", ports: [] },
+      { from: "corp-prod", to: "internet", ports: [] },
+    ],
+    nodes: [
+      { id: "jbones", kind: "tailnet", peers: 6, veth: "10.99.0.2" },
+      { id: "homelab", kind: "tailnet", peers: 3, veth: "10.99.0.6" },
+      { id: "corp-prod", kind: "tailnet", peers: 5, veth: "10.99.0.10" },
+      { id: "host", kind: "host" },
+      { id: "internet", kind: "internet" },
+    ],
+  });
+}
+
+/** classesOf returns the class of each curve of the markup, in the drawn order. */
+function classesOf(markup) {
+  return (markup.match(/<path class="([^"]*)"/g) || []).map((element) =>
+    element.replace(/^<path class="/, "").replace(/"$/, ""),
+  );
+}
+
+test("the flow overview places the tailnets on the left and the destinations on the right", () => {
+  // FR-editor-1 and FR-editor-2.
+  const body = flowBody();
+  const model = flowModel(statusBody(), body.nodes, body.rules);
+
+  const left = model.nodes.filter((node) => node.column === "left");
+  const right = model.nodes.filter((node) => node.column === "right");
+
+  assert.deepEqual(left.map((node) => node.id), ["jbones", "homelab", "corp-prod"]);
+  assert.deepEqual(right.map((node) => node.id).sort(), ["host", "internet"]);
+  for (const source of left) {
+    for (const destination of right) {
+      assert.ok(source.x + source.w <= destination.x, `${source.id} is not left of ${destination.id}`);
+    }
+  }
+});
+
+test("the flow overview draws one dotted curve for each allowed path and no other line", () => {
+  // FR-editor-3 and FR-editor-4. The rule set holds allow rules alone, therefore a pair
+  // of nodes with no rule between them gets no curve.
+  const body = flowBody();
+  const model = flowModel(statusBody(), body.nodes, body.rules);
+  const markup = flowMarkup(model, null);
+
+  assert.equal(model.paths.length, 4);
+  assert.equal(classesOf(markup).length, 4, "one curve per allowed path");
+  assert.ok(!markup.includes("corp-prod-&gt;host"), "the picture holds a path that no rule allows");
+  for (const element of markup.match(/<path [^>]*>/g)) {
+    assert.match(element, /class="edge/);
+    assert.match(element, / d="M[^"]*C[^"]*"/, "an allowed path is a curve");
+    assert.ok(!element.includes("stroke="), "a curve states its stroke in app.css");
+  }
+});
+
+test("app.css draws the curve with a 2 pixel dash, a 6 pixel gap, and a 1.4 pixel stroke", async () => {
+  // FR-editor-3. The picture carries the class and app.css carries the measurements, so
+  // this test reads the one rule that states them.
+  const source = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  const rule = source.match(/^\.edge\{[^}]*\}/m);
+  assert.ok(rule, "app.css states no rule for the class edge");
+  assert.match(rule[0], /stroke-dasharray:2 6/);
+  assert.match(rule[0], /stroke-width:1\.4/);
+});
+
+test("the selected source takes the accent colour and every other path goes quiet", () => {
+  // FR-editor-5. The class sel takes the accent and the class muted takes the resting
+  // edge colour, which app.css states.
+  const body = flowBody();
+  const model = flowModel(statusBody(), body.nodes, body.rules);
+
+  const resting = flowMarkup(model, null);
+  assert.ok(!resting.includes("edge sel"), "no source is selected, so no curve takes the accent");
+  assert.ok(!resting.includes("edge muted"), "no source is selected, so no curve goes quiet");
+
+  // The path homelab to jbones ends at jbones and it starts at another source, therefore
+  // it goes quiet. One source at a time means the paths that start at the source.
+  assert.deepEqual(classesOf(flowMarkup(model, "jbones")), [
+    "edge sel", //   jbones->internet
+    "edge sel", //   jbones->host
+    "edge muted", // homelab->jbones
+    "edge muted", // corp-prod->internet
+  ]);
+});
+
+test("the flow overview marks the selected source and no other node", () => {
+  const body = flowBody();
+  const model = flowModel(statusBody(), body.nodes, body.rules);
+  const markup = flowMarkup(model, "homelab");
+
+  assert.equal((markup.match(/aria-pressed="true"/g) || []).length, 1);
+  assert.match(markup, /data-node="homelab" tabindex="0" role="button" aria-pressed="true"/);
+});
+
+test("the flow overview selects one source at a time", () => {
+  const body = flowBody();
+  const model = flowModel(statusBody(), body.nodes, body.rules);
+
+  assert.equal(flowSelection(model, null, "jbones"), "jbones");
+  assert.equal(flowSelection(model, "jbones", "homelab"), "homelab");
+  // A second click on the selected source returns the picture to the resting state.
+  assert.equal(flowSelection(model, "jbones", "jbones"), null);
+  // A tailnet that the daemon removed cannot stay selected.
+  assert.equal(flowSelection(model, "jbones", "corp-dev"), null);
+});
+
+test("the flow overview states which source is selected", () => {
+  const body = flowBody();
+  const model = flowModel(statusBody(), body.nodes, body.rules);
+
+  const resting = flowCaption(model, null);
+  assert.equal(resting.id, "");
+  assert.match(resting.sentence, /Select a node/);
+
+  const chosen = flowCaption(model, "jbones");
+  assert.equal(chosen.label, "source");
+  assert.equal(chosen.id, "jbones");
+  assert.match(chosen.sentence, /muted/);
+
+  // The internet starts no path, therefore the picture states the absence rather than
+  // showing an accent that marks nothing.
+  const none = flowCaption(model, "internet");
+  assert.match(none.sentence, /No path starts/);
+});
+
+test("a staged rule draws its curve before the operator applies it", () => {
+  // The picture reads the staged rule set, therefore a staged edit reaches the screen at
+  // once and the daemon receives nothing.
+  const body = flowBody();
+  const state = createAccessState();
+  state.setBase(body);
+  state.setRules([...state.rules(), { from: "corp-prod", to: "host", ports: [] }]);
+
+  const model = flowModel(statusBody(), state.base().nodes, state.rules());
+  assert.equal(state.count(), 1);
+  assert.ok(model.paths.some((path) => path.id === "corp-prod->host"));
+  assert.equal(model.paths.length, 5);
+
+  // The rule set of the daemon holds four rules, so the picture drew the staged rule.
+  const applied = flowModel(statusBody(), state.base().nodes, state.base().rules);
+  assert.equal(applied.paths.length, 4);
+});
+
+test("the flow overview draws no arrowhead, no node icon, and no edge label", () => {
+  // FR-editor-6.
+  const body = flowBody();
+  const markup = flowMarkup(flowModel(statusBody(), body.nodes, body.rules), "jbones");
+
+  for (const forbidden of [
+    "<marker",
+    "marker-end",
+    "marker-start",
+    "marker-mid",
+    "<image",
+    "<use",
+    "<polygon",
+    "<textPath",
+    "xlink:href",
+  ]) {
+    assert.ok(!markup.includes(forbidden), `the picture holds ${forbidden}`);
+  }
+
+  // Every text element belongs to a node group. A text element outside a group is an edge
+  // label.
+  const groups = markup.match(/<g class="node"[\s\S]*?<\/g>/g) || [];
+  assert.equal(groups.length, 5, "the picture holds five node groups");
+  const inGroups = groups.join("").match(/<text /g) || [];
+  const total = markup.match(/<text /g) || [];
+  assert.equal(total.length, inGroups.length, "a text element sits outside a node group");
+});
+
+test("the flow overview escapes every value that the daemon reported", () => {
+  // A hostile tailnet identifier must reach the page as text and never as markup.
+  const hostile = '<script>alert("x")</script>';
+  const model = flowModel(
+    {},
+    [
+      { id: hostile, kind: "tailnet", peers: 1, veth: "" },
+      { id: "host", kind: "host" },
+      { id: "internet", kind: "internet" },
+    ],
+    [{ from: hostile, to: "internet", ports: [] }],
+  );
+
+  const markup = flowMarkup(model, hostile);
+  assert.ok(!markup.includes("<script"), "the picture holds a script element");
+  assert.ok(markup.includes("&lt;script&gt;"), "the picture holds no escaped identifier");
+  assert.ok(!flowTextMarkup(model).includes("<script"), "the text equivalent holds a script element");
+});
+
+test("the text equivalent of the flow overview states every allowed path", () => {
+  // A dotted curve carries no meaning to a screen reader, so the text states each path as
+  // one sentence.
+  const body = flowBody();
+  const markup = flowTextMarkup(flowModel(statusBody(), body.nodes, body.rules));
+
+  assert.match(markup, /Four allowed paths\./);
+  assert.match(markup, /<li>jbones reaches internet\.<\/li>/);
+  assert.match(markup, /<li>jbones reaches host on tcp\/22\.<\/li>/);
+  assert.match(markup, /<li>corp-prod reaches internet\.<\/li>/);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,11 @@
-// The access view: the header, the staged state model, the mode control, and the
-// reachability matrix.
+// The access view: the header, the staged state model, the mode control, the reachability
+// matrix, and the flow overview.
 //
-// The view draws no flow overview and no rule row. Issue #150 and issue #151 add those,
-// and each one writes into the staged state model that this file holds.
+// The view draws no rule row. Issue #151 adds it, and it writes into the staged state
+// model that this file holds.
+//
+// The flow overview reuses the renderer of the overview topology in topology.js. It reads
+// the staged rule set, therefore an edit reaches the picture before the daemon holds it.
 //
 // The model holds three things: the rule set that the daemon reported, the staged rule
 // set, and the difference between them. The staged count is the size of the difference.
@@ -17,6 +20,12 @@
 // argument, so internal/ui/jstest asserts it under Node with no browser and no network.
 
 import { ACCESS_ROUTE, registerView, requestJSON } from "./app.js";
+import { buildTopology, textEquivalentMarkup, topologySVGMarkup } from "./topology.js";
+
+/** The identifier of the element that holds the text equivalent of the flow overview.
+ *  It differs from the identifier of the overview topology, because the console keeps the
+ *  markup of a view that it does not show. */
+export const FLOW_TEXT_ID = "access-flow-text";
 
 /** The mode in which the daemon drops the packet that no rule allows. */
 export const MODE_ENFORCE = "enforce";
@@ -342,6 +351,80 @@ export function hoverMarks(from, to) {
 }
 
 // ---------------------------------------------------------------------------
+// The flow overview
+// ---------------------------------------------------------------------------
+
+/**
+ * flowModel returns the drawn model of the flow overview.
+ *
+ * status is the body of GET /api/status, which carries the reachability of each tailnet.
+ * nodes is the node list of GET /api/access and rules is the staged rule set. The rule set
+ * holds allow rules alone, therefore a pair of nodes with no rule between them gets no
+ * curve at all: the absence of a line is the whole statement. See FR-editor-4.
+ *
+ * flowModel places the tailnets on the left and the destinations on the right, which
+ * FR-editor-1 states. It is pure.
+ */
+export function flowModel(status, nodes, rules) {
+  return buildTopology(status, { nodes: nodes || [], rules: rules || [] });
+}
+
+/**
+ * flowMarkup returns the picture as SVG source.
+ *
+ * selected holds the identifier of the source that the operator chose, or null. The paths
+ * that start at that source take the accent and every other path goes quiet, which
+ * FR-editor-5 states. One source draws at a time.
+ *
+ * The serializer escapes every value that the daemon reported, so a hostile identifier
+ * reaches the page as text.
+ */
+export function flowMarkup(model, selected) {
+  return topologySVGMarkup(model, selected, { bySource: true });
+}
+
+/** flowTextMarkup returns the text that a screen reader reads in place of the curves. */
+export function flowTextMarkup(model) {
+  return textEquivalentMarkup(model);
+}
+
+/**
+ * flowSelection returns the source that one click leaves selected.
+ *
+ * current is the source that the picture holds now and id is the node that the operator
+ * chose. A second click on the same source returns the picture to the resting state, and a
+ * node that the model does not hold selects nothing.
+ */
+export function flowSelection(model, current, id) {
+  if (!model.nodes.some((node) => node.id === id)) {
+    return null;
+  }
+  return current === id ? null : id;
+}
+
+/**
+ * flowCaption states which source the picture draws.
+ *
+ * label carries the sans typeface and id carries the mono typeface, because the identifier
+ * belongs to the machine. sentence states what the operator reads under the picture.
+ */
+export function flowCaption(model, selected) {
+  if (selected === null || selected === undefined) {
+    return {
+      label: "every source",
+      id: "",
+      sentence: "Select a node to draw the paths that start at it. A path that no rule allows has no line.",
+    };
+  }
+  const owned = model.paths.filter((path) => path.from === selected).length;
+  return {
+    label: "source",
+    id: selected,
+    sentence: owned === 0 ? "No path starts at this node." : "Every other path is muted.",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The drawing. Everything below this line needs a document.
 // ---------------------------------------------------------------------------
 
@@ -349,6 +432,13 @@ const state = createAccessState();
 
 let dialog = null; // null, or {sending, error}
 let redraw = () => {};
+
+/** source holds the source that the picture draws, and null when the operator chose none. */
+let source = null;
+
+/** takeFocus is true after a click or a key selected a source. The poll redraws the view
+ *  every few seconds, and a redraw that always moves the focus takes it from the operator. */
+let takeFocus = false;
 
 /** el builds one element with a class and a text. */
 function el(tag, className, text) {
@@ -421,6 +511,79 @@ function drawEmpty(statement) {
   const card = el("div", "card empty");
   card.append(el("span", "label", statement.label));
   card.append(el("p", undefined, statement.sentence));
+  return card;
+}
+
+/**
+ * drawFlow draws the flow overview and its text equivalent.
+ *
+ * The serializer returns SVG source, so the function writes it once and then binds the
+ * handlers on the groups that it wrote. The picture reads the staged rule set, therefore a
+ * staged edit draws its curve before the operator applies it.
+ */
+function drawFlow(status, nodes) {
+  const model = flowModel(status, nodes, state.rules());
+  if (source !== null && !model.nodes.some((node) => node.id === source)) {
+    // The daemon removed the tailnet that the operator had selected.
+    source = null;
+  }
+  const caption = flowCaption(model, source);
+
+  const card = el("section", "card ac-flow");
+  card.setAttribute("aria-labelledby", "ac-flow-heading");
+
+  const head = el("div", "card-head");
+  const heading = el("span", "label", "Allowed paths");
+  heading.id = "ac-flow-heading";
+  head.append(heading);
+  const mark = el("div", "ac-flow-cap");
+  mark.append(el("span", "label", caption.label));
+  if (caption.id) {
+    mark.append(el("span", "mono", caption.id));
+  }
+  head.append(mark);
+  card.append(head);
+
+  // The serializer escapes every value that the daemon reported, and a test asserts that.
+  const figure = el("div", "flow-wrap");
+  figure.innerHTML = flowMarkup(model, source);
+  const picture = figure.querySelector("svg.flow");
+  if (picture) {
+    picture.setAttribute("aria-label", "The paths that the staged rule set allows.");
+    picture.setAttribute("aria-describedby", FLOW_TEXT_ID);
+  }
+  card.append(figure);
+
+  const text = el("div", "sr");
+  text.id = FLOW_TEXT_ID;
+  text.innerHTML = flowTextMarkup(model);
+  card.append(text);
+
+  card.append(el("p", "note", caption.sentence));
+
+  for (const group of figure.querySelectorAll("g.node")) {
+    const id = group.dataset.node;
+    const choose = () => {
+      source = flowSelection(model, source, id);
+      takeFocus = true;
+      redraw();
+    };
+    group.addEventListener("click", choose);
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        choose();
+      }
+    });
+  }
+
+  if (takeFocus && source !== null) {
+    const chosen = figure.querySelector(`g.node[data-node="${CSS.escape(source)}"]`);
+    if (chosen) {
+      chosen.focus();
+    }
+  }
+  takeFocus = false;
   return card;
 }
 
@@ -586,9 +749,14 @@ function draw(section, snapshot) {
     section.append(drawObserve(observe));
   }
 
-  const empty = emptyStatement(base);
+  // The empty state reads the staged rule set, because the view draws that rule set. A
+  // view that reads the rule set of the daemon states that no rule exists while the
+  // picture already holds a staged curve.
+  const empty = emptyStatement({ nodes: base.nodes, rules: state.rules() });
   if (empty) {
     section.append(drawEmpty(empty));
+  } else {
+    section.append(drawFlow(snapshot.status, base.nodes));
   }
 
   // A host that declares no tailnet and no host node produces no row, so the empty
