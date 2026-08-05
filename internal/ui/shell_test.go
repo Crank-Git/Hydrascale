@@ -430,8 +430,11 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 	// The console has no build step and no package manager. The Node test runner reads
 	// the same app.js that the browser loads. internal/ui/package.json declares the
 	// module type for Node and it names no dependency.
-	node, err := exec.LookPath("node")
+	node, err := nodeForConsoleTests()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if node == "" {
 		t.Skip("node is not on this host, so the console JavaScript tests do not run here")
 	}
 
@@ -446,6 +449,47 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 	t.Logf("node --test %s\n%s", strings.Join(files, " "), out)
 	if err != nil {
 		t.Fatalf("the console JavaScript tests fail: %v", err)
+	}
+}
+
+// nodeForConsoleTests looks for node on the path. It returns the path of node when node
+// is present. It returns an empty path and no error when the caller skips. It returns an
+// error when the caller fails.
+func nodeForConsoleTests() (string, error) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		return "", nil
+	}
+	return node, nil
+}
+
+func TestTheConsoleJavaScriptTestsFailOnAGateThatHoldsNoNode(t *testing.T) {
+	// A gate that loses node runs 0 of the 70 tests of internal/ui/jstest and still
+	// reports success, so the coverage disappears and nothing states it. See issue 181.
+	t.Setenv("CI", "true")
+	t.Setenv("PATH", "")
+
+	node, err := nodeForConsoleTests()
+	if err == nil {
+		t.Fatalf("the gate holds no node and the run does not fail: the path is %q", node)
+	}
+	if !strings.Contains(err.Error(), "node") {
+		t.Errorf("the message does not name node: %v", err)
+	}
+}
+
+func TestTheConsoleJavaScriptTestsSkipOnADeveloperMachineThatHoldsNoNode(t *testing.T) {
+	// A developer machine keeps the skip, because node is not a tool that a developer
+	// must install to change the daemon.
+	t.Setenv("CI", "")
+	t.Setenv("PATH", "")
+
+	node, err := nodeForConsoleTests()
+	if err != nil {
+		t.Fatalf("the developer machine holds no node and the run fails: %v", err)
+	}
+	if node != "" {
+		t.Errorf("the path holds no node and the function reports the path %q", node)
 	}
 }
 
