@@ -513,6 +513,14 @@ func serveCmd() *cobra.Command {
 				}
 			}()
 
+			// The console listener is part of the start. A refused bind address and a
+			// port that is in use both stop the daemon, because the operator asked for a
+			// console and a daemon that runs without one hides the failure.
+			if err := apiServer.StartConsole(cfg.ConsoleEnabled(), cfg.ConsoleBindAddress()); err != nil {
+				cancel()
+				return fmt.Errorf("start the console listener: %w", err)
+			}
+
 			// Handle SIGHUP in a goroutine
 			go func() {
 				for range reloadChan {

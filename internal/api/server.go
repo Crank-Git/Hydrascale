@@ -33,6 +33,16 @@ type Server struct {
 	socketGroup string
 	version     string
 	forwarder   *dns.Forwarder
+
+	// mux holds the JSON routes. The control socket serves it, and the console listener
+	// serves it under /api/, so one route set answers on both. See FR-console-4.
+	mux *http.ServeMux
+
+	// consoleListener and consoleServer hold the console listener. Both are nil when
+	// console.enabled is false, and consoleAddress is then the empty string.
+	consoleListener net.Listener
+	consoleServer   *http.Server
+	consoleAddress  string
 }
 
 // SetSocketGroup configures a unix group that may reach the control socket.
@@ -69,6 +79,7 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	// Registered after the exact-match tailnet routes above, which take priority.
 	mux.HandleFunc("GET /api/tailnet/{id}/detail", s.handleTailnetDetail)
 
+	s.mux = mux
 	s.httpServer = &http.Server{Handler: mux}
 	return s
 }
@@ -127,18 +138,28 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Shutdown gracefully stops the HTTP server.
+// Shutdown gracefully stops the control socket server and the console server.
+// Shutdown stops both servers even when the first stop fails, and it returns every error
+// together.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.httpServer == nil {
-		return nil
+	var errs []error
+	if s.consoleServer != nil {
+		if err := s.consoleServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("console shutdown error: %w", err))
+		}
+		s.consoleServer = nil
+		s.consoleListener = nil
+		s.consoleAddress = ""
 	}
-	if err := s.httpServer.Shutdown(ctx); err != nil {
-		return fmt.Errorf("api shutdown error: %w", err)
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("api shutdown error: %w", err))
+		}
+		if s.socketPath != "" {
+			os.Remove(s.socketPath)
+		}
 	}
-	if s.socketPath != "" {
-		os.Remove(s.socketPath)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

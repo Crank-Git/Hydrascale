@@ -94,6 +94,9 @@ type Config struct {
 	// Access holds the local rule set. The field is a pointer, because a nil value means
 	// that the file holds no access key, which is what the version 0.9 migration detects.
 	Access *access.RuleSet `yaml:"access,omitempty"`
+	// Console holds the console listener settings. Every key has a default, so a version
+	// 0.9 file that holds no console key serves the console on the loopback address.
+	Console ConsoleConfig `yaml:"console,omitempty"`
 }
 
 // AccessMode returns the mode that the daemon applies the local rule set in.
@@ -184,6 +187,12 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Validate DNS bind address
 	if err := ValidateBindAddress(cfg.Resolver.BindAddress); err != nil {
+		return nil, err
+	}
+
+	// Validate the console bind address. The loader reads the effective value, so a file
+	// that holds no console key gets the loopback default rather than an error.
+	if err := ValidateConsoleBindAddress(cfg.ConsoleBindAddress()); err != nil {
 		return nil, err
 	}
 
