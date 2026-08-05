@@ -67,7 +67,7 @@ access view.
 ### The shell
 
 - **FR-console-12** — The console has a left navigation with the entries overview,
-  namespaces, access, activity, and settings.
+  namespaces, access, policy, activity, and settings.
 - **FR-console-13** — The navigation shows the logo and the daemon version.
 - **FR-console-14** — The console shows one heading per view and no more than one
   heading of the largest size.
