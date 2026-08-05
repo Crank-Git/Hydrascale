@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale — Overview</title>
+<style>
+:root{
+  color-scheme:dark;
+  --ink:#0d0c0b; --s1:#141312; --s2:#1c1a18; --s3:#24211e;
+  --line:#262320; --line-soft:#1a1816;
+  --tx:#eceae6; --mu:#8d867d; --dim:#5b544c;
+  --lime:#c8ff2e; --lime-ink:#101208; --lime-soft:rgba(200,255,46,.14);
+  --ok:#7ddc8f; --warn:#f0a63c; --crit:#ff5f52;
+  --edge:#3a352f;
+  --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Space Mono',ui-monospace,Menlo,monospace;
+  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px;
+  --dur-1:90ms; --dur-2:160ms; --dur-3:280ms; --ease:cubic-bezier(.2,.7,.3,1);
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms;--dur-3:0ms}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--tx);font-family:var(--sans);font-size:14px;
+  letter-spacing:-.01em;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:0}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh;max-width:1440px;margin:0 auto}
+.nav{border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 22px}
+.wordmark{font-size:15px;font-weight:600;letter-spacing:-.03em}
+.wordmark i{font-style:normal;color:var(--lime)}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-sm);color:var(--mu);
+  text-decoration:none;transition:background var(--dur-1) var(--ease),color var(--dur-1) var(--ease)}
+.nav a:hover{background:var(--s2);color:var(--tx)}
+.nav a[aria-current]{background:var(--s2);color:var(--tx)}
+.nav a[aria-current] svg{color:var(--lime)}
+.nav svg{width:16px;height:16px;flex:none;color:var(--dim)}
+.nav .foot{margin-top:auto;padding:10px;color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.main{padding:28px 32px;min-width:0}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px;flex-wrap:wrap}
+h1{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin:0 0 6px}
+.sub{color:var(--mu);max-width:560px;margin:0}
+.btn{font:inherit;font-weight:500;padding:10px 16px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--tx);cursor:pointer;transition:background var(--dur-1) var(--ease)}
+.btn:hover{background:var(--s3)}
+.btn.primary{background:var(--lime);color:var(--lime-ink);border-color:var(--lime);font-weight:600}
+.btn:focus-visible,.nav a:focus-visible{outline:none;box-shadow:0 0 0 2px rgba(200,255,46,.45)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
+.stat{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px}
+.stat .v{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin-top:8px;font-family:var(--mono)}
+.stat .v small{font-size:14px;color:var(--mu);letter-spacing:0}
+.stat .v.state{font-family:var(--sans);font-size:21px;letter-spacing:-.025em;display:flex;align-items:center;gap:9px}
+.grid{display:grid;grid-template-columns:1fr 340px;gap:12px;align-items:start}
+@media (max-width:1040px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}
+  .app{grid-template-columns:1fr}.nav{display:none}}
+svg.flow{width:100%;height:330px;display:block;overflow:visible}
+.node rect{fill:var(--s2);stroke:var(--line)}
+.node text.n{fill:var(--tx);font-family:var(--mono);font-size:12.5px}
+.node text.s{fill:var(--dim);font-family:var(--mono);font-size:11px}
+.node{cursor:pointer}
+.edge{fill:none;stroke:var(--edge);stroke-width:1.4;stroke-dasharray:2 6;stroke-linecap:round}
+.ev{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-soft);align-items:baseline}
+.ev:last-child{border-bottom:none}
+.ev time{font-family:var(--mono);font-size:11.5px;color:var(--dim);flex:none;width:58px}
+.ev .k{font-family:var(--mono);font-size:11.5px;color:var(--mu);flex:none;width:112px}
+.ev p{margin:0;font-size:13px;color:var(--tx)}
+.note{color:var(--mu);font-size:13px;margin:10px 0 0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.spinehead{display:flex;justify-content:space-between;margin-bottom:14px}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 21V11"/><path d="M12 11 6 6"/><path d="M12 11l6-5"/><path d="M12 11 3.5 9.5"/><path d="M12 11l8.5-1.5"/>
+        <circle cx="6" cy="5" r="1.6"/><circle cx="18" cy="5" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="21" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/>
+      </svg>
+      <span class="wordmark">hydra<i>scale</i></span>
+    </div>
+    <a href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Overview</a>
+    <a href="02-namespace-detail.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Namespaces</a>
+    <a href="03-acl-editor.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="17" r="2.4"/><path d="M8.4 7h4.2a3 3 0 0 1 3 3v4" stroke-dasharray="2 3"/></svg>Access</a>
+    <a href="04-upstream-policy.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>Policy</a>
+    <a href="05-dns-and-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.5 2.5 13 0 16M12 4c-2.5 2.5-2.5 13 0 16"/></svg>DNS</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h4l2.5-6 3 12L16 12h4"/></svg>Activity</a>
+    <div class="foot">v1.0.0<br>converged 4s ago</div>
+  </nav>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h1>Overview</h1>
+        <p class="sub">One host, three tailnets, each in its own namespace.</p>
+      </div>
+      <button class="btn primary">Add tailnet</button>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><span class="label">Tailnets</span><div class="v">3</div></div>
+      <div class="stat"><span class="label">Peers</span><div class="v">14</div></div>
+      <div class="stat"><span class="label">Reconciler</span><div class="v state"><span class="dot ok"></span>converged</div></div>
+      <div class="stat"><span class="label">Last tick</span><div class="v">4<small>s ago</small></div></div>
+    </div>
+
+    <div class="grid">
+      <section class="card" aria-labelledby="topoh">
+        <div class="spinehead">
+          <span class="label" id="topoh">Topology</span>
+          <span class="label">5 allowed paths</span>
+        </div>
+        <svg class="flow" viewBox="0 0 660 330" role="img" aria-describedby="topotext">
+          <path class="edge" d="M212,58 C330,58 340,52 448,52"/>
+          <path class="edge" d="M212,58 C330,58 340,190 448,190"/>
+          <path class="edge" d="M212,128 C330,128 340,52 448,52"/>
+          <path class="edge" d="M212,128 C330,128 340,190 448,190"/>
+          <path class="edge" d="M212,198 C330,198 340,52 448,52"/>
+
+          <g class="node" tabindex="0"><rect x="12" y="34" width="200" height="48" rx="12"/>
+            <text class="n" x="30" y="56">jbones</text><text class="s" x="30" y="72">6 peers · converged</text></g>
+          <g class="node" tabindex="0"><rect x="12" y="104" width="200" height="48" rx="12"/>
+            <text class="n" x="30" y="126">homelab</text><text class="s" x="30" y="142">3 peers · converged</text></g>
+          <g class="node" tabindex="0"><rect x="12" y="174" width="200" height="48" rx="12"/>
+            <text class="n" x="30" y="196">corp-prod</text><text class="s" x="30" y="212">5 peers · reconciling</text></g>
+
+          <g class="node" tabindex="0"><rect x="448" y="28" width="200" height="48" rx="12"/>
+            <text class="n" x="466" y="50">internet</text><text class="s" x="466" y="66">masquerade</text></g>
+          <g class="node" tabindex="0"><rect x="448" y="166" width="200" height="48" rx="12"/>
+            <text class="n" x="466" y="188">host phobos</text><text class="s" x="466" y="204">veth · 10.99.0.1</text></g>
+        </svg>
+        <p id="topotext" class="sr">Five allowed paths. jbones reaches internet. jbones reaches host
+          phobos. homelab reaches internet. homelab reaches host phobos. corp-prod reaches internet.
+          No tailnet reaches another tailnet.</p>
+        <p class="note">Select a node to draw only its paths. A denied path has no line.</p>
+      </section>
+
+      <aside>
+        <div class="card">
+          <span class="label">Recent activity</span>
+          <div style="margin-top:12px">
+            <div class="ev"><time>14:02:19</time><span class="k">access.applied</span><p>11 rules written to HYDRASCALE-FWD</p></div>
+            <div class="ev"><time>14:02:04</time><span class="k">tailnet.up</span><p>corp-prod authenticated</p></div>
+            <div class="ev"><time>13:58:41</time><span class="k">dns.protected</span><p>ns-corp-prod /etc overlay mounted</p></div>
+            <div class="ev"><time>13:58:38</time><span class="k">ns.created</span><p>ns-corp-prod, veth 10.99.0.10</p></div>
+            <div class="ev"><time>13:41:02</time><span class="k">reconcile</span><p>no change</p></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <span class="label">Console</span>
+          <p class="note" style="margin-top:8px">Serving on <span class="mono">127.0.0.1:9443</span>.
+            The console has no sign-in. Any local account on this host can reach it.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+</body>
+</html>

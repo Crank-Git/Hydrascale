@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale — Namespaces</title>
+<style>
+:root{
+  color-scheme:dark;
+  --ink:#0d0c0b; --s1:#141312; --s2:#1c1a18; --s3:#24211e;
+  --line:#262320; --line-soft:#1a1816;
+  --tx:#eceae6; --mu:#8d867d; --dim:#5b544c;
+  --lime:#c8ff2e; --lime-ink:#101208; --lime-soft:rgba(200,255,46,.14);
+  --ok:#7ddc8f; --warn:#f0a63c; --crit:#ff5f52;
+  --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Space Mono',ui-monospace,Menlo,monospace;
+  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px; --r-xl:20px; --r-pill:999px;
+  --dur-1:90ms; --dur-2:160ms; --dur-3:280ms; --ease:cubic-bezier(.2,.7,.3,1);
+  --shadow-pop:0 24px 60px -20px rgba(0,0,0,.7);
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms;--dur-3:0ms}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--tx);font-family:var(--sans);font-size:14px;
+  letter-spacing:-.01em;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:0}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh;max-width:1440px;margin:0 auto}
+.nav{border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 22px}
+.wordmark{font-size:15px;font-weight:600;letter-spacing:-.03em}
+.wordmark i{font-style:normal;color:var(--lime)}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-sm);color:var(--mu);
+  text-decoration:none;transition:background var(--dur-1) var(--ease),color var(--dur-1) var(--ease)}
+.nav a:hover{background:var(--s2);color:var(--tx)}
+.nav a[aria-current]{background:var(--s2);color:var(--tx)}
+.nav a[aria-current] svg{color:var(--lime)}
+.nav svg{width:16px;height:16px;flex:none;color:var(--dim)}
+.nav .foot{margin-top:auto;padding:10px;color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.main{padding:28px 32px;min-width:0}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px;flex-wrap:wrap}
+h1{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin:0 0 6px}
+.sub{color:var(--mu);max-width:560px;margin:0}
+.btn{font:inherit;font-weight:500;padding:10px 16px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--tx);cursor:pointer;transition:background var(--dur-1) var(--ease)}
+.btn:hover{background:var(--s3)}
+.btn.primary{background:var(--lime);color:var(--lime-ink);border-color:var(--lime);font-weight:600}
+.btn.sm{padding:7px 12px;font-size:13px}
+.btn.danger{color:var(--crit);border-color:rgba(255,95,82,.35)}
+.btn.danger:hover{background:rgba(255,95,82,.1)}
+.btn:focus-visible,.row:focus-visible,.nav a:focus-visible{outline:none;box-shadow:0 0 0 2px rgba(200,255,46,.45)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:var(--r-pill);
+  border:1px solid var(--line);background:var(--s2);font-family:var(--mono);font-size:11.5px;color:var(--mu)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px}
+.grid{display:grid;grid-template-columns:1fr 320px;gap:12px;align-items:start}
+@media (max-width:1040px){.grid{grid-template-columns:1fr}.app{grid-template-columns:1fr}.nav{display:none}}
+.row{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:var(--r);cursor:pointer;
+  background:var(--s1);border:1px solid var(--line);transition:background var(--dur-1) var(--ease)}
+.row+.row{margin-top:8px}
+.row:hover{background:var(--s2)}
+.row[aria-selected=true]{border-color:var(--lime);background:var(--s2)}
+.row .id{font-family:var(--mono);font-size:12.5px;min-width:104px}
+.row .st{color:var(--mu);font-size:13px;display:flex;align-items:center;gap:8px;min-width:110px}
+.row .peers{color:var(--mu);font-family:var(--mono);font-size:11.5px;min-width:70px}
+.row .addr{color:var(--dim);font-family:var(--mono);font-size:11.5px;margin-left:auto}
+.panel h2{font-size:21px;letter-spacing:-.025em;margin:0 0 2px;font-family:var(--mono)}
+.kv{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.kv:last-child{border-bottom:none}
+.kv dt{color:var(--mu);font-size:13px}
+.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;color:var(--tx);text-align:right}
+.peerlist{margin-top:12px;max-height:190px;overflow:auto}
+.peer{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line-soft);
+  font-family:var(--mono);font-size:12.5px}
+.peer:last-child{border-bottom:none}
+.peer span:last-child{color:var(--dim);font-size:11.5px}
+.acts{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.note{color:var(--mu);font-size:13px;margin:10px 0 0}
+/* dialog */
+.scrim{position:fixed;inset:0;background:rgba(6,6,5,.72);display:flex;align-items:center;justify-content:center;padding:24px;z-index:9}
+.dialog{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-xl);padding:26px 28px;
+  max-width:520px;width:100%;box-shadow:var(--shadow-pop)}
+.dialog h3{font-size:21px;letter-spacing:-.025em;margin:0 0 10px}
+.dialog p{color:var(--mu);margin:0 0 14px}
+.cmds{background:var(--s3);border-radius:var(--r);padding:14px 16px;font-family:var(--mono);font-size:12.5px;
+  color:var(--tx);display:flex;flex-direction:column;gap:7px}
+.cmds i{font-style:normal;color:var(--dim)}
+.dialog .acts{justify-content:flex-end;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 21V11"/><path d="M12 11 6 6"/><path d="M12 11l6-5"/><path d="M12 11 3.5 9.5"/><path d="M12 11l8.5-1.5"/>
+        <circle cx="6" cy="5" r="1.6"/><circle cx="18" cy="5" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="21" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/>
+      </svg>
+      <span class="wordmark">hydra<i>scale</i></span>
+    </div>
+    <a href="01-overview.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Overview</a>
+    <a href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Namespaces</a>
+    <a href="03-acl-editor.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="17" r="2.4"/><path d="M8.4 7h4.2a3 3 0 0 1 3 3v4" stroke-dasharray="2 3"/></svg>Access</a>
+    <a href="04-upstream-policy.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>Policy</a>
+    <a href="05-dns-and-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.5 2.5 13 0 16M12 4c-2.5 2.5-2.5 13 0 16"/></svg>DNS</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h4l2.5-6 3 12L16 12h4"/></svg>Activity</a>
+    <div class="foot">v1.0.0<br>converged 4s ago</div>
+  </nav>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h1>Namespaces</h1>
+        <p class="sub">Each tailnet runs its own tailscaled in its own network namespace.</p>
+      </div>
+      <button class="btn primary">Add tailnet</button>
+    </div>
+
+    <div class="grid">
+      <div role="listbox" aria-label="Tailnets">
+        <div class="row" role="option" aria-selected="true" tabindex="0">
+          <span class="id">jbones</span>
+          <span class="st"><span class="dot ok"></span>converged</span>
+          <span class="peers">6 peers</span>
+          <span class="addr">100.83.14.7 · ns-jbones</span>
+        </div>
+        <div class="row" role="option" aria-selected="false" tabindex="0">
+          <span class="id">homelab</span>
+          <span class="st"><span class="dot ok"></span>converged</span>
+          <span class="peers">3 peers</span>
+          <span class="addr">100.112.9.31 · ns-homelab</span>
+        </div>
+        <div class="row" role="option" aria-selected="false" tabindex="0">
+          <span class="id">corp-prod</span>
+          <span class="st"><span class="dot warn"></span>reconciling</span>
+          <span class="peers">5 peers</span>
+          <span class="addr">100.64.3.2 · ns-corp-prod</span>
+        </div>
+        <div class="row" role="option" aria-selected="false" tabindex="0">
+          <span class="id">lab-hs</span>
+          <span class="st"><span class="dot crit"></span>not authenticated</span>
+          <span class="peers">0 peers</span>
+          <span class="addr">— · ns-lab-hs</span>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <span class="label">lab-hs needs authentication</span>
+          <p class="note" style="margin-top:8px">The node is not logged in. Open the login URL, or set
+            an auth key with <span class="mono">HYDRASCALE_AUTHKEY_LAB_HS</span> and reconcile.</p>
+          <div class="cmds" style="margin-top:12px">https://hs.example.net/register/nodekey:a1b2c3d4</div>
+        </div>
+      </div>
+
+      <aside class="card panel">
+        <h2>jbones</h2>
+        <p class="note" style="margin:0">Personal tailnet on login.tailscale.com</p>
+        <dl style="margin:16px 0 0">
+          <div class="kv"><dt>state</dt><dd><span class="dot ok"></span> converged</dd></div>
+          <div class="kv"><dt>namespace</dt><dd>ns-jbones</dd></div>
+          <div class="kv"><dt>address</dt><dd>100.83.14.7</dd></div>
+          <div class="kv"><dt>magicdns</dt><dd>phobos.jbones.ts.net</dd></div>
+          <div class="kv"><dt>veth</dt><dd>10.99.0.2</dd></div>
+          <div class="kv"><dt>host access</dt><dd>on</dd></div>
+          <div class="kv"><dt>dns</dt><dd><span class="dot ok"></span> protected</dd></div>
+          <div class="kv"><dt>rules out</dt><dd>3</dd></div>
+        </dl>
+
+        <span class="label" style="display:block;margin-top:20px">Peers</span>
+        <div class="peerlist">
+          <div class="peer"><span>mars</span><span>100.83.2.11</span></div>
+          <div class="peer"><span>brain</span><span>100.83.7.4</span></div>
+          <div class="peer"><span>rag</span><span>100.83.7.9</span></div>
+          <div class="peer"><span>pixel-9</span><span>100.83.19.2</span></div>
+          <div class="peer"><span>macbook</span><span>100.83.4.18</span></div>
+          <div class="peer"><span>router-edge</span><span>100.83.1.1</span></div>
+        </div>
+
+        <div class="acts">
+          <button class="btn sm">Disconnect</button>
+          <button class="btn sm">Reconcile</button>
+          <button class="btn sm danger">Remove</button>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<!-- Remove dialog: the destructive state, shown here as part of the mockup -->
+<div class="scrim" role="dialog" aria-modal="true" aria-labelledby="dlgh">
+  <div class="dialog">
+    <h3 id="dlgh">Remove homelab</h3>
+    <p>This runs the following on this host:</p>
+    <div class="cmds">
+      <span>tailscale logout <i># inside ns-homelab</i></span>
+      <span>ip netns delete ns-homelab</span>
+      <span>ip link delete vh4f2a91 <i># veth pair</i></span>
+      <span>iptables -D … <i># 4 rules in HYDRASCALE-FWD</i></span>
+      <span>rm -rf /var/lib/hydrascale/homelab</span>
+    </div>
+    <p style="margin-top:14px">The node stays authorized on the control server. Remove it there
+      as well if you want it gone from the tailnet.</p>
+    <div class="acts">
+      <button class="btn">Cancel</button>
+      <button class="btn danger">Remove homelab</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

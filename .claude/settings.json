@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go run:*)",
+      "Bash(go mod:*)",
+      "Bash(go doc:*)",
+      "Bash(gofmt:*)",
+      "Bash(govulncheck:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh api:*)",
+      "Bash(scripts/check-hygiene.sh)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v gofmt >/dev/null 2>&1 || exit 0; for f in $CLAUDE_FILE_PATHS; do case \"$f\" in *.go) gofmt -w \"$f\" ;; esac; done"
+          }
+        ]
+      }
+    ]
+  }
+}
