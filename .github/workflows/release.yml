@@ -27,7 +27,11 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          # The version is pinned, because "latest" makes the release depend on the
+          # newest GoReleaser at the moment the operator pushes the tag. A release that
+          # removes a configuration option then fails the release, not a pull request.
+          # This version reads the "formats" key that .goreleaser.yaml holds.
+          version: v2.17.1
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
