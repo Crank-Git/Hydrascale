@@ -305,8 +305,13 @@ func (m *RealManager) Stop(namespaceName string, tailnetID string) error {
 		return fmt.Errorf("invalid PID in file for %s: %w", tailnetID, err)
 	}
 
-	// Validate PID is actually tailscaled
-	if !validatePID(pid) {
+	switch readPIDState(pid) {
+	case pidExited:
+		// systemd sends SIGTERM to every process of the control group, so tailscaled
+		// exits before this path runs. That is a stop, not a stale PID file.
+		log.Printf("tailscaled for %s already stopped (PID %d exited)", tailnetID, pid)
+		return removePIDFile(pidPath)
+	case pidIsOtherProcess:
 		return errors.Join(
 			fmt.Errorf("stale PID %d for %s (process is not tailscaled)", pid, tailnetID),
 			removePIDFile(pidPath))
@@ -619,13 +624,38 @@ func (m *RealManager) cleanupExistingDaemon(tailnetID string) {
 	}
 }
 
-// validatePID checks that a PID belongs to a tailscaled process
-// by reading /proc/<pid>/cmdline.
-func validatePID(pid int) bool {
+// pidState names what a PID identifies now.
+type pidState int
+
+const (
+	// pidIsTailscaled means the PID identifies a tailscaled process.
+	pidIsTailscaled pidState = iota
+	// pidExited means the PID identifies no process.
+	pidExited
+	// pidIsOtherProcess means the PID identifies a process that is not tailscaled.
+	pidIsOtherProcess
+)
+
+// readPIDState returns the state of a PID from /proc/<pid>/cmdline.
+// A missing /proc entry is a process that exited, which is the normal result of a stop.
+// Any other read failure counts as another process, because the caller must not send a
+// signal to a PID that it cannot identify.
+func readPIDState(pid int) pidState {
 	cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", pid)
 	data, err := os.ReadFile(cmdlinePath)
 	if err != nil {
-		return false
+		if os.IsNotExist(err) {
+			return pidExited
+		}
+		return pidIsOtherProcess
 	}
-	return strings.Contains(string(data), "tailscaled")
+	if strings.Contains(string(data), "tailscaled") {
+		return pidIsTailscaled
+	}
+	return pidIsOtherProcess
+}
+
+// validatePID reports whether a PID identifies a tailscaled process.
+func validatePID(pid int) bool {
+	return readPIDState(pid) == pidIsTailscaled
 }

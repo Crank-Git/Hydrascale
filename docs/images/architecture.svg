@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img" aria-label="One Linux host. The reconciler, the console and the DNS forwarder sit on the host. A veth pair joins the host to one network namespace per tailnet, and each namespace runs its own tailscaled.">
+  <style>
+    .sans{font-family:'Space Grotesk',system-ui,sans-serif;letter-spacing:-.01em}
+    .mono{font-family:'Space Mono',ui-monospace,Menlo,monospace;letter-spacing:0}
+    .label{font-family:'Space Mono',ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.14em;fill:#5b544c}
+    .h{font-size:17px;font-weight:600;fill:#eceae6}
+    .v{font-size:12.5px;fill:#eceae6}
+    .m{font-size:11.5px;fill:#8d867d}
+    .d{font-size:11.5px;fill:#5b544c}
+    .card{fill:#24211e;stroke:#262320;stroke-width:1}
+    .ns{fill:#1c1a18;stroke:#262320;stroke-width:1}
+    .edge{fill:none;stroke:#3a352f;stroke-width:1.4;stroke-dasharray:2 6;stroke-linecap:round}
+  </style>
+
+  <rect width="960" height="560" fill="#0d0c0b"/>
+
+  <text class="label" x="24" y="34">HYDRASCALE ON ONE LINUX HOST</text>
+  <rect x="24" y="56" width="912" height="456" rx="20" fill="#141312" stroke="#262320"/>
+
+  <text class="label" x="286" y="306">VETH PAIR</text>
+  <text class="label" x="286" y="326">10.200.0.0/16</text>
+
+  <path class="edge" d="M252 224 C 400 224 412 187 560 187"/>
+  <path class="edge" d="M252 224 C 400 224 412 401 560 401"/>
+
+  <rect class="card" x="52" y="92" width="200" height="64" rx="12"/>
+  <text class="mono v" x="68" y="120">config.yaml</text>
+  <text class="sans m" x="68" y="140">the declared state</text>
+
+  <rect class="card" x="52" y="180" width="200" height="88" rx="12"/>
+  <text class="sans h" x="68" y="210">Reconciler</text>
+  <text class="mono d" x="68" y="234">read the config</text>
+  <text class="mono d" x="68" y="252">apply the difference</text>
+
+  <rect x="52" y="292" width="200" height="76" rx="12" fill="#24211e" stroke="#c8ff2e"/>
+  <text class="sans h" x="68" y="322">Console</text>
+  <text class="mono d" x="68" y="346">127.0.0.1:9443</text>
+
+  <rect class="card" x="52" y="396" width="200" height="76" rx="12"/>
+  <text class="sans h" x="68" y="426">DNS forwarder</text>
+  <text class="mono d" x="68" y="450">127.0.0.53:5354</text>
+
+  <rect class="ns" x="560" y="92" width="352" height="190" rx="16"/>
+  <text class="mono v" x="584" y="126">ns-alpha</text>
+  <rect class="card" x="584" y="146" width="148" height="56" rx="9"/>
+  <text class="mono v" x="600" y="180">tailscaled</text>
+  <rect class="card" x="748" y="146" width="140" height="56" rx="9"/>
+  <text class="mono v" x="764" y="180">tailscale0</text>
+  <text class="sans m" x="584" y="238">One tailnet, one network stack.</text>
+  <circle cx="590" cy="256" r="4" fill="#7ddc8f"/>
+  <text class="mono d" x="604" y="260">healthy</text>
+
+  <rect class="ns" x="560" y="306" width="352" height="190" rx="16"/>
+  <text class="mono v" x="584" y="340">ns-beta</text>
+  <rect class="card" x="584" y="360" width="148" height="56" rx="9"/>
+  <text class="mono v" x="600" y="394">tailscaled</text>
+  <rect class="card" x="748" y="360" width="140" height="56" rx="9"/>
+  <text class="mono v" x="764" y="394">tailscale0</text>
+  <text class="sans m" x="584" y="452">One tailnet, one network stack.</text>
+  <circle cx="590" cy="470" r="4" fill="#7ddc8f"/>
+  <text class="mono d" x="604" y="474">healthy</text>
+</svg>

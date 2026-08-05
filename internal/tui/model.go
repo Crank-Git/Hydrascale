@@ -15,7 +15,8 @@ import (
 
 // colWidths defines fixed column widths for the tailnet table.
 // Columns: ID, NAMESPACE, DAEMON, STATE, ERROR
-var colWidths = []int{14, 18, 9, 9, 30}
+// The DAEMON and the STATE column each hold a dot, a space, and the longest state word.
+var colWidths = []int{14, 18, 10, 11, 30}
 
 // ---- message types ----
 
@@ -580,12 +581,12 @@ func (m model) View() string {
 	title := titleStyle.Render("HYDRASCALE")
 	var connStatus string
 	if m.err != nil {
-		connStatus = errorStyle.Render("● Disconnected")
+		connStatus = stateCell(errorStyle, "disconnected")
 	} else if m.status != nil {
 		ago := time.Since(m.lastUpdate).Truncate(time.Second)
-		connStatus = healthyStyle.Render("● Connected") + dimStyle.Render(fmt.Sprintf("  Last: %s ago", ago))
+		connStatus = stateCell(healthyStyle, "connected") + dimStyle.Render(fmt.Sprintf("  Last: %s ago", ago))
 	} else {
-		connStatus = warnStyle.Render("● Connecting...")
+		connStatus = stateCell(warnStyle, "connecting")
 	}
 	header.WriteString(fmt.Sprintf(" %s  %s\n", title, connStatus))
 	header.WriteString(strings.Repeat("─", lineWidth) + "\n")
@@ -638,25 +639,25 @@ func (m model) View() string {
 			selected := i == m.cursor
 
 			nsName := namespaces.GetNamespaceName(id)
-			daemonStr := dimStyle.Render("absent")
-			stateStr := dimStyle.Render("pending")
+			daemonStr := stateCell(dimStyle, "absent")
+			stateStr := stateCell(dimStyle, "pending")
 			errStr := ""
 
 			if actual, ok := m.status.Actual[id]; ok && actual != nil {
 				if actual.DaemonHealthy {
-					daemonStr = healthyStyle.Render("healthy")
-					stateStr = healthyStyle.Render("running")
+					daemonStr = stateCell(healthyStyle, "healthy")
+					stateStr = stateCell(healthyStyle, "running")
 				} else if actual.NsExists {
-					daemonStr = errorStyle.Render("down")
-					stateStr = warnStyle.Render("degraded")
+					daemonStr = stateCell(errorStyle, "down")
+					stateStr = stateCell(warnStyle, "degraded")
 				}
 			}
 
 			if m.status.PausedStates[id] {
-				stateStr = warnStyle.Render("paused")
-				daemonStr = dimStyle.Render("stopped")
+				stateStr = stateCell(warnStyle, "paused")
+				daemonStr = stateCell(dimStyle, "stopped")
 			} else if m.status.ErrorStates[id] {
-				stateStr = errorStyle.Render("ERROR")
+				stateStr = stateCell(errorStyle, "error")
 			}
 			if lastErr, ok := m.status.LastErrors[id]; ok && lastErr != "" {
 				errStr = errorStyle.Render(truncate(lastErr, 28))
@@ -690,9 +691,13 @@ func (m model) View() string {
 
 	tailnets.WriteString("\n" + strings.Repeat("─", lineWidth) + "\n")
 
-	// Footer (fixed — always visible)
-	footerText := "a add  d delete  c connect  x disconnect  r reconcile  n dns  tab switch  ↑↓/jk select  enter expand  q quit"
-	footerLine := statusBar.Render(footerText)
+	// Footer (fixed — always visible). The local rule mode and the rule count come first,
+	// because the footer is wider than the line and the operator must read them.
+	footerText := accessSummary(m.status) + "  " +
+		"a add  d delete  c connect  x disconnect  r reconcile  n dns  tab switch  ↑↓/jk select  enter expand  q quit"
+	// The footer takes the width of the terminal rather than the width of the horizontal
+	// rule, so that a wide terminal shows every key hint.
+	footerLine := statusBar.Render(truncateVisible(footerText, m.width-2))
 
 	// Calculate available height for events section.
 	// Fixed lines: header(2) + tailnet header(2) + tailnet rows + separator(2) + events header(1) + separator(2) + status(0-1) + footer(1)
@@ -779,14 +784,26 @@ func renderRow(cols []string, widths []int, hasIndicator bool, selected bool) st
 
 	indicator := "  "
 	if hasIndicator && selected {
-		indicator = cursorStyle.Render("▸ ")
+		indicator = cursorStyle.Render("▸") + " "
 	}
 
-	row := indicator + strings.Join(parts, "  ")
+	// The indicator stays outside the row style, because the reset that ends the accent
+	// sequence would also end the background of the row.
+	row := strings.Join(parts, "  ")
 	if selected {
 		row = selectedRow.Render(row)
 	}
-	return row
+	return indicator + row
+}
+
+// accessSummary returns the local rule mode and the rule count for the footer. A status
+// response that holds no access field reports the word unknown, because the terminal
+// interface shows no invented value.
+func accessSummary(s *api.StatusResponse) string {
+	if s == nil || s.Access == nil {
+		return "access unknown  rules unknown"
+	}
+	return fmt.Sprintf("access %s  rules %d", s.Access.Mode, s.Access.Rules)
 }
 
 // overlayOnView replaces the middle lines of the main view with a centered
@@ -988,9 +1005,11 @@ func truncateVisible(s string, maxWidth int) string {
 	if lipgloss.Width(s) <= maxWidth {
 		return s
 	}
-	// Fallback: truncate by byte length (good enough for event lines)
-	if len(s) > maxWidth {
-		return s[:maxWidth-3] + "..."
+	// The cut runs on a rune boundary, because a cut inside a character of more than one
+	// byte renders as a replacement character. The footer holds the two arrow characters.
+	runes := []rune(s)
+	if maxWidth > 3 && len(runes) > maxWidth {
+		return string(runes[:maxWidth-3]) + "..."
 	}
 	return s
 }
