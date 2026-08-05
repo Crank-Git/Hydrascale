@@ -220,9 +220,17 @@ func (r *Reconciler) probeReachability(desired map[string]config.Tailnet, actual
 	ctx, cancel := context.WithTimeout(context.Background(), probeBudget)
 	defer cancel()
 
+	// mu guards results, because a goroutine writes the measurement of each namespace
+	// while the loop still writes the result of a namespace that it does not probe.
 	results := make(map[string]reach.Result, len(desired))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+
+	record := func(id string, res reach.Result) {
+		mu.Lock()
+		results[id] = res
+		mu.Unlock()
+	}
 
 	for id := range desired {
 		r.mu.Lock()
@@ -232,28 +240,25 @@ func (r *Reconciler) probeReachability(desired map[string]config.Tailnet, actual
 		state, ok := actual[id]
 		switch {
 		case paused:
-			results[id] = reach.Result{
+			record(id, reach.Result{
 				State:     reach.StateNotProbed,
 				CheckedAt: time.Now(),
 				Detail:    "the operator stopped this tailnet",
-			}
+			})
 			continue
 		case !ok || !state.NsExists:
-			results[id] = reach.Result{
+			record(id, reach.Result{
 				State:     reach.StateNotProbed,
 				CheckedAt: time.Now(),
 				Detail:    "the namespace does not exist",
-			}
+			})
 			continue
 		}
 
 		wg.Add(1)
 		go func(id, nsName string) {
 			defer wg.Done()
-			res := prober.Probe(ctx, nsName, target)
-			mu.Lock()
-			results[id] = res
-			mu.Unlock()
+			record(id, prober.Probe(ctx, nsName, target))
 		}(id, state.NsName)
 	}
 	wg.Wait()
