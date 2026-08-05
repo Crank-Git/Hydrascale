@@ -14,39 +14,58 @@
 <link rel="stylesheet" href="/brand/tokens/elevation.css">
 <link rel="stylesheet" href="/brand/tokens/motion.css">
 <link rel="stylesheet" href="/brand/tokens/fonts.css">
+<!-- tokens.css comes after the brand tokens, because it restates the values that the
+     brand sets with color-mix, for a browser that reads no color-mix function. -->
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
 <link rel="icon" href="/brand/logo-lime.svg" type="image/svg+xml">
-<style>
-  body{
-    margin:0;
-    min-height:100vh;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:var(--surface-page);
-    color:var(--text-body);
-    font-family:var(--font-body);
-    font-size:var(--fs-body);
-    line-height:var(--lh-body);
-    letter-spacing:var(--ls-body);
-  }
-  main{max-width:var(--maxw-read); padding:var(--pad-view);}
-  h1{
-    font-family:var(--font-display);
-    font-size:var(--fs-h1);
-    letter-spacing:var(--ls-h1);
-    line-height:var(--lh-head);
-    margin:0 0 var(--sp-4);
-  }
-  p{color:var(--text-secondary); margin:0 0 var(--sp-3);}
-  code{font-family:var(--font-data); font-size:var(--fs-data); color:var(--text-body);}
-</style>
 </head>
 <body>
-<main>
-  <h1>Hydrascale</h1>
-  <p>The daemon serves this console. The views arrive with the console shell.</p>
-  <p>The console has no authentication. Any local account on this host can reach
-     <code>/api/</code> and can drive the daemon, which runs as root.</p>
-</main>
+<a class="skip" href="#view-heading">Skip to the view</a>
+<div class="app">
+
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <img class="logo" src="/brand/logo-lime.svg" alt="" width="22" height="22">
+      <span class="wordmark">hydra<i>scale</i></span>
+    </div>
+
+    <a class="nav-link" href="#/overview" data-view="overview"><span class="icon" data-icon="overview" aria-hidden="true"></span>Overview</a>
+    <a class="nav-link" href="#/namespaces" data-view="namespaces"><span class="icon" data-icon="namespaces" aria-hidden="true"></span>Namespaces</a>
+    <a class="nav-link" href="#/access" data-view="access"><span class="icon" data-icon="access" aria-hidden="true"></span>Access</a>
+    <a class="nav-link" href="#/activity" data-view="activity"><span class="icon" data-icon="activity" aria-hidden="true"></span>Activity</a>
+    <a class="nav-link" href="#/settings" data-view="settings"><span class="icon" data-icon="settings" aria-hidden="true"></span>Settings</a>
+
+    <div class="nav-foot">
+      <span class="label">Daemon</span>
+      <span class="mono" id="daemon-version">no version yet</span>
+    </div>
+  </nav>
+
+  <main class="main" id="main">
+    <!-- The poll layer writes this region. It stays hidden while every poll succeeds. -->
+    <div class="bar" id="poll-bar" role="status" hidden>
+      <span class="dot" id="poll-dot"></span>
+      <p class="bar-text" id="poll-text"></p>
+      <button class="btn" id="poll-retry" type="button" hidden>Retry now</button>
+    </div>
+
+    <header class="head">
+      <h1 id="view-heading">Overview</h1>
+      <p class="sub" id="view-lead"></p>
+    </header>
+
+    <section class="view" id="view-overview" data-view="overview" hidden></section>
+    <section class="view" id="view-namespaces" data-view="namespaces" hidden></section>
+    <section class="view" id="view-access" data-view="access" hidden></section>
+    <section class="view" id="view-activity" data-view="activity" hidden></section>
+    <section class="view" id="view-settings" data-view="settings" hidden></section>
+  </main>
+
+</div>
+<!-- The content security policy allows no inline script, so app.js binds every handler.
+     Issue #143, issue #144 and issue #145 add one module per view, and each module calls
+     registerView. -->
+<script type="module" src="/app.js"></script>
 </body>
 </html>
