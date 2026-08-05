@@ -532,7 +532,7 @@ func TestPutOnePolicyReturnsHTTP409WhenTheHeadscaleControlServerRunsTheFilePolic
 	}
 	var got wireError
 	decodePolicy(t, payload, &got)
-	if !strings.Contains(got.Error, `policy.mode: "db"`) {
+	if !strings.Contains(got.Error, `policy.mode: "database"`) {
 		t.Errorf("the message %q does not state the reason", got.Error)
 	}
 }
