@@ -1,12 +1,14 @@
 package hostaccess
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"sync"
 
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/execx"
 )
 
 // DNSForwarder routes DNS queries by domain suffix to per-tailnet upstreams.
@@ -17,6 +19,10 @@ type DNSForwarder interface {
 
 // Manager coordinates host access features: routes, DNS, and namespace setup.
 type Manager struct {
+	// Runner runs every command that the Manager sends to the host. A test replaces
+	// Runner with an execx.Recorder and asserts the exact argument list.
+	Runner execx.Runner
+
 	mu          sync.Mutex
 	dnsMode     string // "hosts" or "resolved"
 	hostsPath   string
@@ -37,6 +43,7 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
 		infraSubnet = "10.200.0.0/16"
 	}
 	m := &Manager{
+		Runner:         execx.OSRunner{},
 		dnsMode:        dnsMode,
 		hostsPath:      hostsPath,
 		infraSubnet:    infraSubnet,
@@ -46,6 +53,22 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
 		m.resolved = NewResolvedManager()
 	}
 	return m
+}
+
+// runner returns the command runner. A Manager with no Runner runs on the host.
+func (m *Manager) runner() execx.Runner {
+	if m.Runner == nil {
+		return execx.OSRunner{}
+	}
+	return m.Runner
+}
+
+// run runs one command on the host and returns its combined output. Every command carries
+// a deadline, because a command that does not return blocks the reconcile cycle.
+func (m *Manager) run(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), hostCommandTimeout)
+	defer cancel()
+	return m.runner().Run(ctx, name, args...)
 }
 
 // SetForwarder wires a DNS forwarder for per-tailnet MagicDNS routing.
@@ -69,7 +92,7 @@ func (m *Manager) Sync(tailnetID string, status *daemon.TailscaleStatus, vethGW,
 	m.activeTailnets[tailnetID] = peers
 	m.mu.Unlock()
 
-	if err := SyncHostRoutes(peers, m.infraSubnet); err != nil {
+	if err := m.SyncHostRoutes(peers); err != nil {
 		log.Printf("host-access: route sync failed for %s: %v", tailnetID, err)
 	}
 
@@ -92,7 +115,7 @@ func (m *Manager) Teardown(tailnetID string) error {
 
 	var errs []error
 	if exists {
-		if err := RemoveAllHostRoutes(peers.VethHost, m.infraSubnet); err != nil {
+		if err := m.RemoveAllHostRoutes(peers.VethHost); err != nil {
 			errs = append(errs, fmt.Errorf("remove the host routes of %s: %w", tailnetID, err))
 		}
 	}
@@ -116,7 +139,7 @@ func (m *Manager) TeardownAll() error {
 
 	var errs []error
 	for id, peers := range tailnets {
-		if err := RemoveAllHostRoutes(peers.VethHost, m.infraSubnet); err != nil {
+		if err := m.RemoveAllHostRoutes(peers.VethHost); err != nil {
 			errs = append(errs, fmt.Errorf("remove the host routes of %s: %w", id, err))
 		}
 	}

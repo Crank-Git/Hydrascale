@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"hydrascale/internal/execx"
 )
 
 // DefaultStateDir is the base directory for per-tailnet state.
@@ -77,58 +78,85 @@ type Manager interface {
 }
 
 // RealManager implements Manager using real system calls.
-type RealManager struct{}
-
-// NewRealManager returns a new RealManager.
-func NewRealManager() *RealManager {
-	return &RealManager{}
+//
+// Runner runs every command that completes. Starter starts tailscaled, which outlives the
+// call. A test replaces both with an execx.Recorder and asserts the exact argument list.
+// StateDir names the base directory of the per-tailnet state, so a test writes into a
+// temporary directory.
+type RealManager struct {
+	Runner   execx.Runner
+	Starter  execx.Starter
+	StateDir string
 }
 
-func (m *RealManager) Start(tailnetID, nsName string, allowUnprotected bool) error {
-	return StartDaemon(tailnetID, nsName, allowUnprotected)
+// NewRealManager returns a new RealManager that runs a command on the host.
+func NewRealManager() *RealManager {
+	return &RealManager{
+		Runner:   execx.OSRunner{},
+		Starter:  execx.OSStarter{},
+		StateDir: DefaultStateDir,
+	}
+}
+
+// runner returns the command runner. A RealManager with no Runner runs on the host.
+func (m *RealManager) runner() execx.Runner {
+	if m.Runner == nil {
+		return execx.OSRunner{}
+	}
+	return m.Runner
+}
+
+// starter returns the child starter. A RealManager with no Starter starts on the host.
+func (m *RealManager) starter() execx.Starter {
+	if m.Starter == nil {
+		return execx.OSStarter{}
+	}
+	return m.Starter
+}
+
+// stateDir returns the base directory of the per-tailnet state.
+func (m *RealManager) stateDir() string {
+	if m.StateDir == "" {
+		return DefaultStateDir
+	}
+	return m.StateDir
+}
+
+// socketPath returns the tailscaled socket path of a tailnet.
+func (m *RealManager) socketPath(tailnetID string) string {
+	return filepath.Join(m.stateDir(), tailnetID, "tailscaled.sock")
+}
+
+// unprotectedFilePath returns the file in which the __nsdaemon helper of a tailnet
+// records an overlay mount failure.
+func (m *RealManager) unprotectedFilePath(tailnetID string) string {
+	return filepath.Join(m.stateDir(), tailnetID, "dns-unprotected")
 }
 
 func (m *RealManager) UnprotectedDNS(tailnetID string) (UnprotectedRecord, bool) {
-	return ReadUnprotected(UnprotectedFilePath(tailnetID))
-}
-
-func (m *RealManager) Stop(nsName, tailnetID string) error {
-	return StopDaemon(nsName, tailnetID)
-}
-
-func (m *RealManager) CheckHealth(nsName, tailnetID string) (bool, error) {
-	return CheckHealth(nsName, tailnetID)
+	return ReadUnprotected(m.unprotectedFilePath(tailnetID))
 }
 
 func (m *RealManager) GetSocketPath(tailnetID string) string {
-	return SocketPath(tailnetID)
-}
-
-func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
-	return AuthorizeDaemon(tailnetID, nsName, authKey, controlURL)
-}
-
-func (m *RealManager) RefreshDNSConfig(tailnetID, nsName string) error {
-	return RefreshDNSConfig(tailnetID, nsName)
-}
-
-func (m *RealManager) GetStatus(ctx context.Context, nsName, tailnetID string) (*TailscaleStatus, error) {
-	return GetStatus(ctx, nsName, tailnetID)
+	return m.socketPath(tailnetID)
 }
 
 // GetStatus returns parsed tailscale status for a tailnet.
 // The provided context is used as the parent; a 5-second hard timeout is applied on top.
 func GetStatus(ctx context.Context, namespaceName string, tailnetID string) (*TailscaleStatus, error) {
-	stateDir := filepath.Join(DefaultStateDir, tailnetID)
-	socketPath := filepath.Join(stateDir, "tailscaled.sock")
+	return NewRealManager().GetStatus(ctx, namespaceName, tailnetID)
+}
+
+// GetStatus returns parsed tailscale status for a tailnet.
+// The provided context is used as the parent; a 5-second hard timeout is applied on top.
+func (m *RealManager) GetStatus(ctx context.Context, namespaceName string, tailnetID string) (*TailscaleStatus, error) {
+	socketPath := m.socketPath(tailnetID)
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", namespaceName,
+	output, err := m.runner().Run(ctx, "ip", "netns", "exec", namespaceName,
 		"tailscale", "--socket="+socketPath, "status", "--json")
-
-	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tailscale status for %s: %w", tailnetID, err)
 	}
@@ -144,7 +172,13 @@ func GetStatus(ctx context.Context, namespaceName string, tailnetID string) (*Ta
 // StartDaemon launches tailscaled inside a network namespace.
 // It uses cmd.Start() to avoid blocking and writes the PID to a file.
 func StartDaemon(tailnetID string, namespaceName string, allowUnprotected bool) error {
-	stateDir := filepath.Join(DefaultStateDir, tailnetID)
+	return NewRealManager().Start(tailnetID, namespaceName, allowUnprotected)
+}
+
+// Start launches tailscaled inside a network namespace.
+// Start returns before the child exits, and it writes the process identifier to a file.
+func (m *RealManager) Start(tailnetID string, namespaceName string, allowUnprotected bool) error {
+	stateDir := filepath.Join(m.stateDir(), tailnetID)
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		return fmt.Errorf("failed to create state dir: %w", err)
 	}
@@ -167,7 +201,7 @@ func StartDaemon(tailnetID string, namespaceName string, allowUnprotected bool) 
 	etcWork := filepath.Join(stateDir, "etc-work")
 	// The helper writes this file when the overlay mount fails, so remove the record of
 	// the previous launch. A record that stays behind reports a failure that is over.
-	unprotectedFile := UnprotectedFilePath(tailnetID)
+	unprotectedFile := m.unprotectedFilePath(tailnetID)
 	if err := os.Remove(unprotectedFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove the DNS protection record for %s: %w", tailnetID, err)
 	}
@@ -190,33 +224,34 @@ func StartDaemon(tailnetID string, namespaceName string, allowUnprotected bool) 
 	)
 
 	// Kill any existing daemon before starting a new one
-	cleanupExistingDaemon(tailnetID)
+	m.cleanupExistingDaemon(tailnetID)
 
-	cmd := exec.Command("ip", args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
 	// Setpgid detaches the process group; Pdeathsig ensures tailscaled
 	// is killed if hydrascale dies unexpectedly (e.g. SIGKILL).
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid:   true,
-		Pdeathsig: syscall.SIGTERM,
-	}
-
-	if err := cmd.Start(); err != nil {
+	child, err := m.starter().Start(execx.Spec{
+		Name: "ip",
+		Args: args,
+		Env:  minimalChildEnv(),
+		SysProcAttr: &syscall.SysProcAttr{
+			Setpgid:   true,
+			Pdeathsig: syscall.SIGTERM,
+		},
+	})
+	if err != nil {
 		return fmt.Errorf("failed to start tailscaled in namespace %q: %w", namespaceName, err)
 	}
 
 	// Write PID file
 	pidPath := filepath.Join(stateDir, "tailscaled.pid")
-	pid := cmd.Process.Pid
+	pid := child.Pid()
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0600); err != nil {
 		// Kill the process if we can't track it
-		cmd.Process.Kill()
+		child.Kill()
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
 	// Release the process so it doesn't become a zombie
-	go cmd.Wait()
+	go child.Wait()
 
 	log.Printf("tailscaled started in namespace %q (PID %d)", namespaceName, pid)
 	return nil
@@ -238,7 +273,14 @@ func removePIDFile(pidPath string) error {
 // StopDaemon returns the failure of the PID file removal together with the failure of the
 // step that ran before it.
 func StopDaemon(namespaceName string, tailnetID string) error {
-	stateDir := filepath.Join(DefaultStateDir, tailnetID)
+	return NewRealManager().Stop(namespaceName, tailnetID)
+}
+
+// Stop stops the tailscaled process of a tailnet.
+// Stop returns the failure of the PID file removal together with the failure of the step
+// that ran before it.
+func (m *RealManager) Stop(namespaceName string, tailnetID string) error {
+	stateDir := filepath.Join(m.stateDir(), tailnetID)
 	pidPath := filepath.Join(stateDir, "tailscaled.pid")
 
 	pidData, err := os.ReadFile(pidPath)
@@ -307,16 +349,19 @@ func StopDaemon(namespaceName string, tailnetID string) error {
 // CheckHealth checks if the tailscaled daemon in a namespace is healthy.
 // Returns true if the daemon responds to status queries within the timeout.
 func CheckHealth(namespaceName string, tailnetID string) (bool, error) {
-	stateDir := filepath.Join(DefaultStateDir, tailnetID)
-	socketPath := filepath.Join(stateDir, "tailscaled.sock")
+	return NewRealManager().CheckHealth(namespaceName, tailnetID)
+}
+
+// CheckHealth reports whether the tailscaled daemon in a namespace answers a status
+// query within the deadline.
+func (m *RealManager) CheckHealth(namespaceName string, tailnetID string) (bool, error) {
+	socketPath := m.socketPath(tailnetID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", namespaceName,
+	output, err := m.runner().Run(ctx, "ip", "netns", "exec", namespaceName,
 		"tailscale", "--socket="+socketPath, "status", "--json")
-
-	output, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("health check failed for %s: %w", tailnetID, err)
 	}
@@ -328,6 +373,17 @@ func CheckHealth(namespaceName string, tailnetID string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// minimalChildEnv returns the environment of a child process of the daemon.
+// The daemon holds an auth key in HYDRASCALE_AUTHKEY_<ID> for each tailnet that uses
+// one. A child that inherits the complete environment carries the key of every tailnet
+// into /proc/<pid>/environ. See SA-20.
+func minimalChildEnv() []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+	}
 }
 
 // buildTailscaleUpArgs constructs the argument list for `tailscale up`.
@@ -354,7 +410,13 @@ func buildTailscaleUpArgs(socketPath, controlURL, authKeyFile string) []string {
 // AuthorizeDaemon waits for the tailscaled socket to become available,
 // then runs tailscale up with the provided auth key.
 func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
-	socketPath := SocketPath(tailnetID)
+	return NewRealManager().AuthorizeDaemon(tailnetID, nsName, authKey, controlURL)
+}
+
+// AuthorizeDaemon waits for the tailscaled socket to become available,
+// then runs tailscale up with the provided auth key.
+func (m *RealManager) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
+	socketPath := m.socketPath(tailnetID)
 
 	// Poll for socket existence (up to 30s, 500ms intervals)
 	deadline := time.After(30 * time.Second)
@@ -382,14 +444,12 @@ func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 	// so the secret never appears in argv or the environment. See issue #31.
 	var authKeyFile string
 	if authKey != "" {
-		stateDir := filepath.Join(DefaultStateDir, tailnetID)
-		f, err := os.CreateTemp(stateDir, "authkey-*")
+		authKeyFile = filepath.Join(m.stateDir(), tailnetID, "authkey")
+		f, err := os.OpenFile(authKeyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 		if err != nil {
 			return fmt.Errorf("stage auth key for %s: %w", tailnetID, err)
 		}
-		authKeyFile = f.Name()
 		defer os.Remove(authKeyFile)
-		_ = f.Chmod(0600)
 		if _, err := f.WriteString(authKey); err != nil {
 			f.Close()
 			return fmt.Errorf("write auth key for %s: %w", tailnetID, err)
@@ -399,13 +459,7 @@ func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 
 	tsArgs := buildTailscaleUpArgs(socketPath, controlURL, authKeyFile)
 	cmdArgs := append([]string{"netns", "exec", nsName}, tsArgs...)
-	cmd := exec.CommandContext(ctx, "ip", cmdArgs...)
-	// Minimal environment for the child process to avoid leaking parent env vars.
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-	}
-	output, err := cmd.CombinedOutput()
+	output, err := m.runner().Run(ctx, "ip", cmdArgs...)
 	if err != nil {
 		// Redact auth key from error output to prevent leaking it in logs
 		sanitized := strings.ReplaceAll(string(output), authKey, "[REDACTED]")
@@ -431,7 +485,13 @@ func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 // just become the initial prefs applied when the netmap eventually arrives,
 // and no DNS rebuild happens. So poll for BackendState=Running first.
 func RefreshDNSConfig(tailnetID, nsName string) error {
-	socketPath := SocketPath(tailnetID)
+	return NewRealManager().RefreshDNSConfig(tailnetID, nsName)
+}
+
+// RefreshDNSConfig forces tailscaled to re-initialize its DNS configuration by toggling
+// --accept-dns off and back on. See the note on the package function.
+func (m *RealManager) RefreshDNSConfig(tailnetID, nsName string) error {
+	socketPath := m.socketPath(tailnetID)
 
 	// Phase 1: wait for socket to appear (StartDaemon is non-blocking).
 	sockDeadline := time.After(30 * time.Second)
@@ -463,9 +523,8 @@ func RefreshDNSConfig(tailnetID, nsName string) error {
 			return fmt.Errorf("timeout waiting for tailscaled Running state for %s", tailnetID)
 		case <-runTick.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
+			output, err := m.runner().Run(ctx, "ip", "netns", "exec", nsName,
 				"tailscale", "--socket="+socketPath, "status", "--json")
-			output, err := cmd.Output()
 			cancel()
 			if err != nil {
 				continue
@@ -485,9 +544,8 @@ func RefreshDNSConfig(tailnetID, nsName string) error {
 	// Phase 3: real flip-flop against a stable, connected daemon.
 	for _, val := range []string{"false", "true"} {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		cmd := exec.CommandContext(ctx, "ip", "netns", "exec", nsName,
+		output, err := m.runner().Run(ctx, "ip", "netns", "exec", nsName,
 			"tailscale", "--socket="+socketPath, "set", "--accept-dns="+val)
-		output, err := cmd.CombinedOutput()
 		cancel()
 		if err != nil {
 			return fmt.Errorf("tailscale set --accept-dns=%s failed for %s: %v (%s)",
@@ -506,8 +564,8 @@ func SocketPath(tailnetID string) string {
 
 // cleanupExistingDaemon kills any running tailscaled for a tailnet before
 // starting a new one. Prevents orphan accumulation on restarts.
-func cleanupExistingDaemon(tailnetID string) {
-	stateDir := filepath.Join(DefaultStateDir, tailnetID)
+func (m *RealManager) cleanupExistingDaemon(tailnetID string) {
+	stateDir := filepath.Join(m.stateDir(), tailnetID)
 	pidPath := filepath.Join(stateDir, "tailscaled.pid")
 
 	pidData, err := os.ReadFile(pidPath)
