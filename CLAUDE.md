@@ -62,8 +62,12 @@ call is untestable and it is rejected in review.
 ### iptables
 
 The daemon owns the chains `HYDRASCALE-FWD` and `HYDRASCALE-OUT`, and one jump rule into
-each of `FORWARD` and `INPUT`. It writes no other rule. It appends the jump rather than
-inserting it at position 1, so an operator firewall rule keeps its position.
+each of `FORWARD` and `INPUT`. It writes no other rule. It inserts the jump at position 1,
+which the operator decided on 2026-08-05. The position is not stable, because
+`ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` each take position 1 after the daemon
+starts. The reconciler therefore reads the position on each tick, records the event
+`access.jump_displaced` when the position changes, and writes the jump rule again when the
+parent chain holds none. It moves no rule of the operator.
 
 ### Errors
 
