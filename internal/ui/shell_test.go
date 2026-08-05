@@ -200,8 +200,17 @@ func TestEveryFocusRuleUsesTheFocusRingToken(t *testing.T) {
 		t.Fatal("app.css holds no :focus-visible rule, so a control shows no focus ring")
 	}
 	for _, block := range blocks {
-		if !strings.Contains(block[2], "var(--ring-focus)") {
-			t.Errorf("the rule %q draws no ring from var(--ring-focus)", strings.TrimSpace(block[1]))
+		if strings.Contains(block[2], "var(--ring-focus)") {
+			continue
+		}
+		// An SVG element is not a CSS box, so box-shadow draws no ring on it and
+		// var(--ring-focus) states a box-shadow value. Such a rule draws the ring with the
+		// outline property, and it still takes its colour from a brand token.
+		outlined := strings.Contains(block[2], "outline:") &&
+			!strings.Contains(block[2], "outline:none") &&
+			strings.Contains(block[2], "var(--")
+		if !outlined {
+			t.Errorf("the rule %q draws no ring from var(--ring-focus) and no ring from an outline", strings.TrimSpace(block[1]))
 		}
 	}
 

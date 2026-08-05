@@ -14,6 +14,12 @@
 /** The route that the console polls. */
 export const STATUS_ROUTE = "/api/status";
 
+/** The route that holds the local rule set and the node list of the topology. */
+export const ACCESS_ROUTE = "/api/access";
+
+/** The route that holds the event log. */
+export const EVENTS_ROUTE = "/api/events";
+
 /** The poll interval that the console uses when the operator sets none. FR-console-15. */
 export const DEFAULT_POLL_INTERVAL_MS = 5000;
 
@@ -43,7 +49,7 @@ export const VIEWS = [
     heading: "Overview",
     lead: "The state of every tailnet on this host.",
     empty: "No tailnet is configured. Add one, and this view shows the tailnet count, the peer count, the reconciler state, and the topology.",
-    pending: "This view shows the tailnet count, the peer count, the reconciler state, and the topology. The shell and the poll layer are in place, and the view arrives with issue #143.",
+    pending: "This view shows the tailnet count, the peer count, the reconciler state, the topology, and the five newest events.",
   },
   {
     id: "namespaces",
@@ -122,6 +128,33 @@ export async function requestJSON(route, method = "GET", body) {
 }
 
 /**
+ * fetchConsoleState reads the three routes of one poll and returns one body.
+ *
+ * The status route holds neither the peer count, nor the local rule set, nor the event
+ * log, and the overview shows all three. The console therefore reads the three routes
+ * together on one tick rather than on three timers, so the whole console still holds one
+ * data source and one cadence. See FR-console-15.
+ *
+ * A failure of any one route fails the poll, which marks the state stale. The three routes
+ * come from the one daemon on the one listener, so a partial answer states nothing that a
+ * whole answer does not.
+ *
+ * @param {function} [request] the transport, which a test replaces.
+ */
+export async function fetchConsoleState(request = requestJSON) {
+  const [status, access, events] = await Promise.all([
+    request(STATUS_ROUTE),
+    request(ACCESS_ROUTE),
+    request(EVENTS_ROUTE),
+  ]);
+  return {
+    ...status,
+    access_model: access,
+    events: (events && events.events) || [],
+  };
+}
+
+/**
  * createPollLayer builds the one data source of the console.
  *
  * The layer polls STATUS_ROUTE on an interval. On a success it replaces the state. On a
@@ -136,7 +169,7 @@ export async function requestJSON(route, method = "GET", body) {
  */
 export function createPollLayer(options = {}) {
   const {
-    fetchStatus = () => requestJSON(STATUS_ROUTE),
+    fetchStatus = fetchConsoleState,
     now = () => Date.now(),
     setTimer = (fn, ms) => setTimeout(fn, ms),
     clearTimer = (handle) => clearTimeout(handle),
