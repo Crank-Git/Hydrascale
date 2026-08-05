@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/console-overview.png" alt="The Overview view of the console. Two tailnets report reachable, the reconciler reports converged, and a dotted curve joins each tailnet to the internet node." width="900">
+  <img src="docs/images/console-access.png" alt="The Access view of the console. A dotted curve joins each tailnet to the internet node, a reachability matrix marks the two allowed paths, and the rule list holds one row per rule." width="900">
 </p>
 
-<p align="center"><i>The Overview view. The tailnet names are placeholders.</i></p>
+<p align="center"><i>The Access view. A filled square and a drawn curve each mark an allowed path. A denied path has neither. The tailnet names are placeholders.</i></p>
 
 Hydrascale lets one Linux host join several Tailscale tailnets at the same time. It is for
 the operator who administers a host that must reach a work tailnet, a home tailnet, and a
