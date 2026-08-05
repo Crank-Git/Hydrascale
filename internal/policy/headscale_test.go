@@ -66,11 +66,28 @@ func TestHeadscaleWrite_returns_a_distinct_error_for_the_file_policy_mode(t *tes
 	if !errors.Is(err, ErrHeadscaleFileMode) {
 		t.Fatalf("Write returned %v, want ErrHeadscaleFileMode", err)
 	}
-	if !strings.Contains(err.Error(), `policy.mode: "db"`) {
-		t.Errorf("the error does not name policy.mode: \"db\": %v", err)
+	if !strings.Contains(err.Error(), `policy.mode: "database"`) {
+		t.Errorf("the error does not name policy.mode: \"database\": %v", err)
 	}
 	if !strings.Contains(err.Error(), "file policy mode") {
 		t.Errorf("the error does not name the file policy mode: %v", err)
+	}
+}
+
+// The body below is what the REST bridge returns for a read against a control server in
+// the database policy mode that holds no stored policy. Measured on Headscale v0.29.3 on
+// 2026-08-05.
+const headscaleNoStoredPolicyBody = `{"code":2,"message":"loading ACL from database: acl policy not found","details":[]}`
+
+func TestHeadscaleRead_reports_an_empty_database_policy_as_no_policy_and_not_as_a_failure(t *testing.T) {
+	client, _ := headscaleServer(t, http.StatusInternalServerError, headscaleNoStoredPolicyBody)
+
+	document, err := client.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read returned %v, want no error for a control server that holds no policy", err)
+	}
+	if document != "" {
+		t.Errorf("Read returned %q, want an empty document", document)
 	}
 }
 

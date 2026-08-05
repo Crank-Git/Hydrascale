@@ -67,7 +67,7 @@ Headscale exposes its gRPC service over a grpc-gateway REST bridge, so this proj
 | Method and path | Notes |
 |---|---|
 | `GET /api/v1/policy` | Works in both policy modes. |
-| `PUT /api/v1/policy` | Succeeds only when the control server runs `policy.mode: "db"`. `cmd/headscale/cli/policy.go:114` states the constraint. |
+| `PUT /api/v1/policy` | Succeeds only when the control server runs `policy.mode: "database"`. `hscontrol/types/config.go:54` at tag `v0.29.3` declares the value. |
 | `POST /api/v1/policy/check` | Checks a document for errors. Used as the validate step. |
 
 Authentication is a bearer token holding a Headscale API key.
@@ -83,7 +83,7 @@ lines 194-213 and
 - The response body of `GetPolicy` and of `SetPolicy` is
   `{"policy": "<document>", "updatedAt": "<timestamp>"}`. `CheckPolicyResponse` is empty.
 - `hscontrol/grpcv1.go:727` returns `types.ErrPolicyUpdateIsDisabled` when `policy.mode`
-  is not `db`. `hscontrol/types/policy.go:11` declares it as
+  is not `database`. `hscontrol/types/policy.go:11` declares it as
   `errors.New("update is disabled for modes other than 'database'")`. That error carries
   the gRPC code `Unknown`, therefore **the REST bridge answers HTTP 500 and not HTTP
   403**. A client detects the file policy mode from the `message` field of the answer,

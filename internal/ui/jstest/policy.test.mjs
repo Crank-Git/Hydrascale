@@ -278,7 +278,7 @@ test("a tailnet that reports no write availability draws a read-only editor", ()
 });
 
 test("the file policy mode gives a read-only editor and the statement names the database mode", () => {
-  const message = 'the Headscale control server runs the file policy mode, and a policy write needs policy.mode: "db"';
+  const message = 'the Headscale control server runs the file policy mode, and a policy write needs policy.mode: "database"';
   const state = createPolicyState({ request: async () => documentBody() });
   state.setList(listBody());
   state.setError("homelab", message);
@@ -289,7 +289,7 @@ test("the file policy mode gives a read-only editor and the statement names the 
   assert.equal(readFailure(message).kind, "file-mode");
 
   const markup = editorMarkup(model);
-  assert.match(markup, /policy\.mode: &quot;db&quot;/);
+  assert.match(markup, /policy\.mode: &quot;database&quot;/);
   assert.ok(!markup.includes("<textarea"), markup);
 });
 

@@ -43,7 +43,8 @@ an upgrade note that states what changed and what an operator must do.
 - **FR-docs-7** — `README.md` documents the credential setup for Tailscale and for
   Headscale.
 - **FR-docs-8** — `README.md` states that a Headscale control server needs
-  `policy.mode: "db"` for a policy write.
+  `policy.mode: "database"` for a policy write. `hscontrol/types/config.go:54` at tag
+  `v0.29.3` declares the value.
 - **FR-docs-9** — The table of contents matches the sections.
 
 ### The design document

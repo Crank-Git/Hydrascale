@@ -55,7 +55,7 @@ export const PUSH_STATEMENT = {
 export const CONFLICT_STATUS = 409;
 
 /** The text of policy.ErrHeadscaleFileMode that names the mode a write needs. */
-const FILE_MODE_MARKER = 'policy.mode: "db"';
+const FILE_MODE_MARKER = 'policy.mode: "database"';
 
 /** esc states a value that the daemon reported as text that an XML parser accepts. */
 function esc(value) {
