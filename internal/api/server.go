@@ -39,6 +39,11 @@ type Server struct {
 	// serves it under /api/, so one route set answers on both. See FR-console-4.
 	mux *http.ServeMux
 
+	// tailscaleBaseURL names the root of the Tailscale API. The daemon leaves it empty,
+	// which selects policy.DefaultTailscaleBaseURL. A test sets it to a local server, so
+	// that no test reaches a real control server.
+	tailscaleBaseURL string
+
 	// consoleServer serves the console listener. It is nil when console.enabled is false,
 	// and consoleAddress is then the empty string.
 	consoleServer  *http.Server
@@ -79,6 +84,11 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	// Registered after the exact-match tailnet routes above, which take priority.
 	mux.HandleFunc("GET /api/tailnet/{id}/detail", s.handleTailnetDetail)
 	mux.HandleFunc("GET /api/tailnet/{id}/removal-plan", s.handleTailnetRemovalPlan)
+	mux.HandleFunc("GET /api/policy", s.handlePolicyList)
+	mux.HandleFunc("GET /api/policy/{id}", s.handlePolicyRead)
+	mux.HandleFunc("PUT /api/policy/{id}", s.handlePolicyWrite)
+	mux.HandleFunc("POST /api/policy/{id}/validate", s.handlePolicyValidate)
+	mux.HandleFunc("PUT /api/policy/{id}/credentials", s.handlePolicyCredentials)
 
 	s.mux = mux
 	s.httpServer = &http.Server{Handler: mux}
