@@ -3,7 +3,7 @@ id: console-access-editor
 feature: Console access editor
 epic: "Epic 7: Console access editor"
 status: issued
-issues: [148, 149, 150, 151, 152]
+issues: [148, 149, 150, 151, 152, 199]
 mockups: [mockups/03-acl-editor.html]
 ---
 
@@ -83,11 +83,38 @@ the precise editor. The rule list carries the detail that a picture cannot hold.
 - **FR-editor-26** — **Apply** sends the whole rule set with `PUT /api/access`.
 - **FR-editor-27** — **Discard** returns the console to the daemon's rule set.
 - **FR-editor-28** — The console warns the operator when a staged edit removes the path
-  that the operator's own connection uses.
+  that the operator's own connection uses. The warning reads the field `active_paths` of
+  `GET /api/access`. The warning names each path, and it comes above the staged list and
+  above the apply action.
 - **FR-editor-29** — After a successful apply, the console clears the staged edits and
   polls the daemon.
 - **FR-editor-30** — When apply fails, the console keeps the staged edits and shows the
   daemon's error message.
+
+#### The value that the warning of FR-editor-28 reads
+
+The warning reads the field `active_paths` of `GET /api/access`. The field holds one entry
+for each tailnet that carries an active session to this host. `internal/session` builds it
+from two commands:
+
+1. `ss -H -tna` reports the sockets of the host, with the state of each one.
+2. `ip -json route get <address>` reports the device that carries the traffic to the
+   remote address of a session.
+
+A session whose device is the veth device of a tailnet carries the path from that tailnet
+to the host.
+
+The warning reads no property of the console request. `internal/api/console.go` refuses a
+console bind address that is not a loopback address. A console request therefore always
+arrives on the loopback address, and no local rule governs that path. The risk is a second
+program, such as a shell session, that reaches this host through a tailnet.
+
+The field holds two limits, and the console warns inside them:
+
+- The field reports an inbound session only. The compiler writes no rule for a source that
+  is the host, therefore an edit cuts an inbound session alone.
+- The field reports a session that ends on this host only. A session that the host
+  forwards between two namespaces holds no socket on the host, and `ss` reports none.
 
 ### Mode
 
@@ -122,12 +149,12 @@ the precise editor. The rule list carries the detail that a picture cannot hold.
 
 ### The operator would cut off their own connection
 
-1. The operator stages the removal of the rule from `host` to a tailnet that carries the
-   SSH session.
-2. The console detects that the staged rule set removes the path that the current request
-   used.
-3. The console shows a warning above the apply action, which names the path.
-4. The operator can still apply, because the console does not block a decision the
+1. The operator reaches the host with a shell session through the tailnet `jbones`.
+2. The operator stages the removal of the rule from `jbones` to `host`.
+3. The daemon reports the path `jbones` to `host` in the field `active_paths`.
+4. The console shows a warning above the staged list and above the apply action, and the
+   warning names the path.
+5. The operator can still apply, because the console does not block a decision the
    operator made.
 
 ## Screens & states
