@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale</title>
+<!-- Every stylesheet loads from the console origin. The console makes no request to
+     another host. Issue #146 adds the font files, and it edits brand/tokens/fonts.css
+     only, so this page does not change when the fonts arrive. -->
+<link rel="stylesheet" href="/brand/tokens/colors.css">
+<link rel="stylesheet" href="/brand/tokens/typography.css">
+<link rel="stylesheet" href="/brand/tokens/spacing.css">
+<link rel="stylesheet" href="/brand/tokens/radius.css">
+<link rel="stylesheet" href="/brand/tokens/elevation.css">
+<link rel="stylesheet" href="/brand/tokens/motion.css">
+<link rel="stylesheet" href="/brand/tokens/fonts.css">
+<link rel="icon" href="/brand/logo-lime.svg" type="image/svg+xml">
+<style>
+  body{
+    margin:0;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--surface-page);
+    color:var(--text-body);
+    font-family:var(--font-body);
+    font-size:var(--fs-body);
+    line-height:var(--lh-body);
+    letter-spacing:var(--ls-body);
+  }
+  main{max-width:var(--maxw-read); padding:var(--pad-view);}
+  h1{
+    font-family:var(--font-display);
+    font-size:var(--fs-h1);
+    letter-spacing:var(--ls-h1);
+    line-height:var(--lh-head);
+    margin:0 0 var(--sp-4);
+  }
+  p{color:var(--text-secondary); margin:0 0 var(--sp-3);}
+  code{font-family:var(--font-data); font-size:var(--fs-data); color:var(--text-body);}
+</style>
+</head>
+<body>
+<main>
+  <h1>Hydrascale</h1>
+  <p>The daemon serves this console. The views arrive with the console shell.</p>
+  <p>The console has no authentication. Any local account on this host can reach
+     <code>/api/</code> and can drive the daemon, which runs as root.</p>
+</main>
+</body>
+</html>
