@@ -1,0 +1,437 @@
+// The access view: the header, the staged state model, and the mode control.
+//
+// The view draws no matrix, no flow overview, and no rule row. Issue #149, issue #150 and
+// issue #151 add those, and each one writes into the staged state model that this file
+// holds.
+//
+// The model holds three things: the rule set that the daemon reported, the staged rule
+// set, and the difference between them. The staged count is the size of the difference.
+// A staged edit changes the model alone. Only the apply of issue #152 sends a rule set,
+// which FR-editor-23 states.
+//
+// The mode control is the one mutating request of this view. It sends the rule set of the
+// daemon with the new mode, therefore a staged rule reaches no host until the operator
+// applies it.
+//
+// Every function above the drawing section is pure, or it takes its transport as an
+// argument, so internal/ui/jstest asserts it under Node with no browser and no network.
+
+import { ACCESS_ROUTE, registerView, requestJSON } from "./app.js";
+
+/** The mode in which the daemon drops the packet that no rule allows. */
+export const MODE_ENFORCE = "enforce";
+
+/** The mode in which the daemon logs the packet that no rule allows and drops nothing. */
+export const MODE_OBSERVE = "observe";
+
+/** The command that shows what the daemon stops in enforce mode. FR-editor-32. */
+export const OBSERVE_LOG_COMMAND = "journalctl -u hydrascale | grep hydrascale-would-deny";
+
+/** ruleKey names one path. A path holds at most one rule, therefore the pair is the key. */
+function ruleKey(rule) {
+  // The separator is the space character, which no endpoint name holds: a tailnet
+  // identifier matches the pattern of the daemon, and the two other names are host and
+  // internet.
+  return `${rule.from} ${rule.to}`;
+}
+
+/** normalizeRule returns one rule with a port list, because the daemon reports none for
+ *  a rule that allows every port. */
+function normalizeRule(rule) {
+  return { from: rule.from, to: rule.to, ports: (rule.ports || []).slice() };
+}
+
+/** samePorts reports whether two rules hold the same ports in the same order. */
+function samePorts(one, other) {
+  const a = one.ports || [];
+  const b = other.ports || [];
+  return a.length === b.length && a.every((port, at) => port === b[at]);
+}
+
+/**
+ * createAccessState returns the staged state model of the access view.
+ *
+ * options.request sends one request. It takes the route, the method, and the body, and it
+ * rejects with the message that the daemon stated. A test replaces it.
+ *
+ * The model opens no request of its own. The poll layer gives it the answer of
+ * GET /api/access through setBase.
+ */
+export function createAccessState(options = {}) {
+  const request = options.request || ((route, method, body) => requestJSON(route, method, body));
+
+  let base = { mode: MODE_ENFORCE, rules: [], nodes: [] };
+  let staged = [];
+
+  function difference() {
+    const baseByKey = new Map(base.rules.map((rule) => [ruleKey(rule), rule]));
+    const stagedByKey = new Map(staged.map((rule) => [ruleKey(rule), rule]));
+
+    const added = [];
+    const changed = [];
+    for (const [key, rule] of stagedByKey) {
+      const before = baseByKey.get(key);
+      if (!before) {
+        added.push(rule);
+      } else if (!samePorts(before, rule)) {
+        changed.push(rule);
+      }
+    }
+    const removed = base.rules.filter((rule) => !stagedByKey.has(ruleKey(rule)));
+    return { added, removed, changed };
+  }
+
+  function count() {
+    const { added, removed, changed } = difference();
+    return added.length + removed.length + changed.length;
+  }
+
+  return {
+    /** base returns the mode, the rule set, and the node list that the daemon reported. */
+    base() {
+      return { mode: base.mode, rules: base.rules.map(normalizeRule), nodes: base.nodes.slice() };
+    },
+
+    /** rules returns the staged rule set, which the editor of the operator writes. */
+    rules() {
+      return staged.map(normalizeRule);
+    },
+
+    /**
+     * setBase takes one answer of GET /api/access.
+     *
+     * setBase replaces the staged rule set when the operator staged no edit, so that the
+     * view shows what the daemon holds now. It keeps every staged edit otherwise, because
+     * the console applies no edit and removes no edit on its own.
+     */
+    setBase(body) {
+      const wasClean = count() === 0;
+      base = {
+        mode: (body && body.mode) || MODE_ENFORCE,
+        rules: ((body && body.rules) || []).map(normalizeRule),
+        nodes: (body && body.nodes) || [],
+      };
+      if (wasClean) {
+        staged = base.rules.map(normalizeRule);
+      }
+    },
+
+    /** setRules replaces the staged rule set. It sends nothing. FR-editor-23. */
+    setRules(rules) {
+      staged = rules.map(normalizeRule);
+    },
+
+    /** discard returns the staged rule set to the rule set of the daemon. FR-editor-27. */
+    discard() {
+      staged = base.rules.map(normalizeRule);
+    },
+
+    /** difference returns the added rules, the removed rules, and the changed rules. */
+    difference,
+
+    /** count returns the number of staged edits. FR-editor-24. */
+    count,
+
+    /** send runs one request through the transport that the model holds. */
+    send(route, method, body) {
+      return request(route, method, body);
+    },
+  };
+}
+
+/**
+ * headerModel returns the header of the view: the mode, the staged count, and the
+ * controls.
+ *
+ * mode is the mode that the daemon reported and count is the number of staged edits.
+ * The accent belongs to one thing per view, and this view gives it to the apply action.
+ * Issue #152 gives the apply control and the discard control their behaviour.
+ */
+export function headerModel(mode, count) {
+  const staged = count === 1 ? "1 staged" : `${count} staged`;
+  return {
+    mode: {
+      word: mode === MODE_OBSERVE ? MODE_OBSERVE : MODE_ENFORCE,
+      tone: mode === MODE_OBSERVE ? "warn" : "ok",
+    },
+    staged,
+    controls: [
+      { id: "mode", label: "Change the mode", kind: "button", accent: false, disabled: false },
+      { id: "discard", label: "Discard", kind: "button", accent: false, disabled: count === 0 },
+      { id: "apply", label: "Apply", kind: "button", accent: true, disabled: count === 0 },
+    ],
+  };
+}
+
+/**
+ * observeStatement returns the statement of observe mode, and null in enforce mode.
+ *
+ * FR-editor-32 states that the view names the log command that shows what the daemon
+ * stops in enforce mode.
+ */
+export function observeStatement(mode) {
+  if (mode !== MODE_OBSERVE) {
+    return null;
+  }
+  return {
+    sentence: "The daemon denies nothing in this mode. It logs the packet that no rule allows.",
+    lead: "Read what the daemon stops in enforce mode with:",
+    command: OBSERVE_LOG_COMMAND,
+  };
+}
+
+/**
+ * modeChange returns the dialog of the mode control. FR-editor-33.
+ *
+ * mode is the mode that the daemon holds now. The dialog states what the change does, and
+ * the change to enforce carries the warning first, because a connection stops at once.
+ */
+export function modeChange(mode) {
+  if (mode === MODE_OBSERVE) {
+    return {
+      next: MODE_ENFORCE,
+      heading: "Change the mode to enforce",
+      sentences: [
+        "Warning: a connection that no rule allows stops at once.",
+        "In enforce mode the daemon drops the packet that no rule allows.",
+        "The rule set does not change, and the console sends no staged edit.",
+      ],
+      confirmLabel: "Change to enforce",
+    };
+  }
+  return {
+    next: MODE_OBSERVE,
+    heading: "Change the mode to observe",
+    sentences: [
+      "In observe mode the daemon drops no packet.",
+      "The daemon logs the packet that no rule allows, and it stops nothing.",
+      "The rule set does not change, and the console sends no staged edit.",
+    ],
+    confirmLabel: "Change to observe",
+  };
+}
+
+/**
+ * sendModeChange sends the new mode with PUT /api/access.
+ *
+ * state is the model, and next is the mode to apply. sendModeChange sends the rule set of
+ * the daemon rather than the staged rule set, therefore a staged edit reaches no host
+ * before the operator applies it. See FR-editor-23.
+ * sendModeChange rejects with the message that the daemon stated.
+ */
+export function sendModeChange(state, next) {
+  return state.send(ACCESS_ROUTE, "PUT", { mode: next, rules: state.base().rules });
+}
+
+/**
+ * emptyStatement returns the empty state of the view, and null for a rule set that holds
+ * one rule.
+ *
+ * A host that declares no tailnet states the tailnet as the first step. A host that holds
+ * no rule states that nothing reaches anything, and it names the matrix.
+ */
+export function emptyStatement(body) {
+  const nodes = (body && body.nodes) || [];
+  const rules = (body && body.rules) || [];
+  if (nodes.filter((node) => node.kind === "tailnet").length === 0) {
+    return {
+      label: "Empty",
+      sentence: "No tailnet is configured. Add a tailnet, and this view shows the paths that the host allows.",
+    };
+  }
+  if (rules.length === 0) {
+    return {
+      label: "Empty",
+      sentence: "No rule exists, therefore nothing reaches anything. Click a square in the matrix to allow a path.",
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// The drawing. Everything below this line needs a document.
+// ---------------------------------------------------------------------------
+
+const state = createAccessState();
+
+let dialog = null; // null, or {sending, error}
+let redraw = () => {};
+
+/** el builds one element with a class and a text. */
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== undefined) {
+    node.textContent = text;
+  }
+  return node;
+}
+
+/** chip builds one chip. A machine value takes the mono typeface. */
+function chip(text, dotTone) {
+  const node = el("span", "chip");
+  if (dotTone) {
+    node.append(el("span", `dot ${dotTone}`));
+  }
+  node.append(el("span", "mono", text));
+  return node;
+}
+
+/** control builds one button of the header from its model. */
+function control(model, onClick) {
+  const button = el("button", model.accent ? "btn primary" : "btn", model.label);
+  button.type = "button";
+  button.disabled = model.disabled;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+/** drawHeader draws the mode, the staged count, and the three controls. */
+function drawHeader(base) {
+  const header = headerModel(base.mode, state.count());
+  const row = el("div", "ac-head");
+
+  const states = el("div", "ac-states");
+  states.append(chip(header.mode.word, header.mode.tone));
+  states.append(chip(header.staged));
+  row.append(states);
+
+  const acts = el("div", "ac-acts");
+  for (const model of header.controls) {
+    // Issue #152 gives the apply action and the discard action their behaviour. Both stay
+    // disabled while the console holds no staged edit, which is every state of this issue.
+    const onClick = model.id === "mode" ? openModeDialog : () => {};
+    acts.append(control(model, onClick));
+  }
+  row.append(acts);
+  return row;
+}
+
+/** drawObserve draws the statement of observe mode and the log command. */
+function drawObserve(statement) {
+  const card = el("div", "card ac-observe");
+  const alert = el("div", "alert");
+  alert.append(el("span", "dot warn"));
+  const text = el("div");
+  text.append(el("p", undefined, statement.sentence));
+  text.append(el("p", undefined, statement.lead));
+  alert.append(text);
+  card.append(alert);
+  card.append(el("code", "ns-cmds mono", statement.command));
+  return card;
+}
+
+/** drawEmpty draws the empty state of the view. */
+function drawEmpty(statement) {
+  const card = el("div", "card empty");
+  card.append(el("span", "label", statement.label));
+  card.append(el("p", undefined, statement.sentence));
+  return card;
+}
+
+/** openModeDialog opens the dialog that states what the mode change does. */
+function openModeDialog() {
+  dialog = { sending: false, error: null };
+  redraw();
+}
+
+/** closeModeDialog closes the dialog and keeps the mode that the daemon holds. */
+function closeModeDialog() {
+  dialog = null;
+  redraw();
+}
+
+/** confirmModeChange sends the new mode and closes the dialog on a success. */
+function confirmModeChange(next) {
+  dialog = { sending: true, error: null };
+  redraw();
+  sendModeChange(state, next)
+    .then((body) => {
+      state.setBase(body);
+      dialog = null;
+      redraw();
+    })
+    .catch((err) => {
+      dialog = { sending: false, error: err && err.message ? err.message : String(err) };
+      redraw();
+    });
+}
+
+/** drawModeDialog draws the dialog of the mode control. FR-editor-33. */
+function drawModeDialog(mode) {
+  const change = modeChange(mode);
+  const box = el("div", "ac-dialog");
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-modal", "true");
+  box.setAttribute("aria-label", change.heading);
+  box.append(el("h3", undefined, change.heading));
+  for (const sentence of change.sentences) {
+    box.append(el("p", "note", sentence));
+  }
+  if (dialog.error) {
+    box.append(el("p", "ns-error", "The daemon refused the change."));
+    box.append(el("code", "ns-cmds mono", dialog.error));
+  }
+
+  const acts = el("div", "ns-acts ns-dialog-acts");
+  const cancel = el("button", "btn", "Cancel");
+  cancel.type = "button";
+  cancel.addEventListener("click", closeModeDialog);
+  acts.append(cancel);
+
+  const confirm = el("button", "btn", dialog.sending ? "The daemon applies the change" : change.confirmLabel);
+  confirm.type = "button";
+  confirm.disabled = dialog.sending;
+  confirm.addEventListener("click", () => confirmModeChange(change.next));
+  acts.append(confirm);
+
+  box.append(acts);
+  return box;
+}
+
+/**
+ * draw draws the access view from one poll snapshot.
+ *
+ * snapshot.status.access_model holds the answer of GET /api/access, which the poll layer
+ * reads on every tick. The view opens no request of its own and it starts no timer.
+ */
+function draw(section, snapshot) {
+  redraw = () => draw(section, snapshot);
+  section.replaceChildren();
+
+  if (snapshot.loading) {
+    const card = el("div", "card");
+    card.append(el("span", "label", "Loading"));
+    card.append(el("p", "note", "The first poll has not returned."));
+    section.append(card);
+    return;
+  }
+
+  const body = snapshot.status && snapshot.status.access_model;
+  if (body) {
+    state.setBase(body);
+  }
+  const base = state.base();
+
+  section.append(drawHeader(base));
+
+  const observe = observeStatement(base.mode);
+  if (observe) {
+    section.append(drawObserve(observe));
+  }
+
+  const empty = emptyStatement(base);
+  if (empty) {
+    section.append(drawEmpty(empty));
+  }
+
+  if (dialog) {
+    const scrim = el("div", "ac-scrim");
+    scrim.append(drawModeDialog(base.mode));
+    section.append(scrim);
+  }
+}
+
+registerView("access", draw);
