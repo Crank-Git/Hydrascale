@@ -63,6 +63,7 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	mux.HandleFunc("/api/config/dns", s.handleConfigDNS)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/dns", s.handleDNS)
+	mux.HandleFunc("/api/access", s.handleAccess)
 	// Method-qualified pattern (Go 1.22+) — restricts to GET only and supports {id} wildcard.
 	// Registered after the exact-match tailnet routes above, which take priority.
 	mux.HandleFunc("GET /api/tailnet/{id}/detail", s.handleTailnetDetail)
@@ -167,8 +168,20 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ServerVersion: s.version,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	// The access field carries the mode and the count of rules, which the terminal
+	// interface shows. A configuration file that the daemon cannot read leaves the field
+	// absent rather than reporting a mode that the daemon does not apply.
+	if cfg, err := config.LoadConfig(s.reconciler.ConfigPath()); err == nil {
+		status := AccessStatus{Mode: cfg.AccessMode()}
+		if cfg.Access != nil {
+			status.Rules = len(cfg.Access.Rules)
+		}
+		resp.Access = &status
+	} else {
+		log.Printf("api: read the access block for the status response: %v", err)
+	}
+
+	writeJSON(w, resp)
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

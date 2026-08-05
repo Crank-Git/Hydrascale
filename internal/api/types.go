@@ -4,6 +4,7 @@ package api
 import (
 	"time"
 
+	"hydrascale/internal/access"
 	"hydrascale/internal/config"
 	"hydrascale/internal/reconciler"
 )
@@ -20,6 +21,37 @@ type StatusResponse struct {
 	FailureCounts map[string]int                      `json:"failure_counts"`
 	LastErrors    map[string]string                   `json:"last_errors"`
 	ServerVersion string                              `json:"server_version,omitempty"`
+	Access        *AccessStatus                       `json:"access,omitempty"`
+}
+
+// AccessStatus is the access field of GET /api/status. It holds the mode that the daemon
+// applies the local rule set in, and the count of rules.
+type AccessStatus struct {
+	Mode  string `json:"mode"`
+	Rules int    `json:"rules"`
+}
+
+// AccessNode is one endpoint of the local rule model. Kind holds tailnet, host, or
+// internet. Peers and Veth carry a value for a tailnet only.
+type AccessNode struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Peers int    `json:"peers,omitempty"`
+	Veth  string `json:"veth,omitempty"`
+}
+
+// AccessRequest is the request body of PUT /api/access. It replaces the whole rule set.
+type AccessRequest struct {
+	Mode  string        `json:"mode"`
+	Rules []access.Rule `json:"rules"`
+}
+
+// AccessResponse is the JSON response for GET /api/access and for PUT /api/access.
+// Rules is never null, because the console reads the field as a list.
+type AccessResponse struct {
+	Mode  string        `json:"mode"`
+	Rules []access.Rule `json:"rules"`
+	Nodes []AccessNode  `json:"nodes"`
 }
 
 // EventsResponse is the JSON response for GET /api/events.
