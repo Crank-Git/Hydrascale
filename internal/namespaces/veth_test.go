@@ -158,6 +158,89 @@ func TestSetupVethReturnsTheErrorOfAFailedCommand(t *testing.T) {
 	}
 }
 
+func TestEnsureForwardPathWritesTheMasqueradeRuleThatTheHostDoesNotHold(t *testing.T) {
+	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
+	const index = 1
+
+	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		t.Fatalf("VethIPs: %v", err)
+	}
+
+	want := []execx.Call{
+		{Name: "iptables", Args: []string{"-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
+		{Name: "iptables", Args: []string{"-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
+	}
+
+	rec := execx.NewRecorder(t)
+	rec.Script(absent, want[0].Name, want[0].Args...)
+	rec.Script(execx.Result{}, want[1].Name, want[1].Args...)
+
+	m := &RealManager{Runner: rec}
+	written, err := m.EnsureForwardPath(nsName, index, infraSubnet)
+	if err != nil {
+		t.Fatalf("EnsureForwardPath: %v", err)
+	}
+	if len(written) != 1 {
+		t.Fatalf("EnsureForwardPath wrote %d rules, want 1: %v", len(written), written)
+	}
+
+	got := rec.Calls()
+	if len(got) != len(want) {
+		t.Fatalf("EnsureForwardPath ran %d commands, want %d:\ngot:\n%s\nwant:\n%s",
+			len(got), len(want), format(got), format(want))
+	}
+	for i := range want {
+		if got[i].String() != want[i].String() {
+			t.Errorf("command %d = %q, want %q", i, got[i].String(), want[i].String())
+		}
+	}
+}
+
+func TestEnsureForwardPathWritesNothingWhenTheHostHoldsTheRule(t *testing.T) {
+	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
+	const index = 1
+
+	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		t.Fatalf("VethIPs: %v", err)
+	}
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{}, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+
+	m := &RealManager{Runner: rec}
+	written, err := m.EnsureForwardPath(nsName, index, infraSubnet)
+	if err != nil {
+		t.Fatalf("EnsureForwardPath: %v", err)
+	}
+	if len(written) != 0 {
+		t.Errorf("EnsureForwardPath wrote %v, want no rule", written)
+	}
+	if len(rec.Calls()) != 1 {
+		t.Errorf("EnsureForwardPath ran %d commands, want 1:\n%s", len(rec.Calls()), format(rec.Calls()))
+	}
+}
+
+func TestEnsureForwardPathReturnsTheErrorOfAFailedWrite(t *testing.T) {
+	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
+	const index = 1
+
+	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		t.Fatalf("VethIPs: %v", err)
+	}
+
+	rec := execx.NewRecorder(t)
+	rec.Script(absent, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(broken, "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+
+	m := &RealManager{Runner: rec}
+	if _, err := m.EnsureForwardPath(nsName, index, infraSubnet); err == nil {
+		t.Fatal("EnsureForwardPath returned no error for a failed write")
+	}
+}
+
 func TestTeardownVethRunsTheFullCommandListInOrder(t *testing.T) {
 	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
 
