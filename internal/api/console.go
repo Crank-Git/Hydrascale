@@ -76,15 +76,17 @@ func (s *Server) StartConsole(enabled bool, bindAddress string) error {
 		return fmt.Errorf("failed to open the console listener on port %s: %w: set console.bind_address to a free port", port, err)
 	}
 
-	s.consoleListener = ln
-	s.consoleAddress = ln.Addr().String()
-	s.consoleServer = &http.Server{
+	// The goroutine reads the local variable rather than the field, because Shutdown
+	// writes the field and the race detector reports the pair.
+	server := &http.Server{
 		Handler:           s.consoleControls(s.consoleRoutes()),
 		ReadHeaderTimeout: consoleReadHeaderTimeout,
 	}
+	s.consoleAddress = ln.Addr().String()
+	s.consoleServer = server
 
 	go func() {
-		if err := s.consoleServer.Serve(ln); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Printf("api: console server error: %v", err)
 		}
 	}()

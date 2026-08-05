@@ -38,11 +38,10 @@ type Server struct {
 	// serves it under /api/, so one route set answers on both. See FR-console-4.
 	mux *http.ServeMux
 
-	// consoleListener and consoleServer hold the console listener. Both are nil when
-	// console.enabled is false, and consoleAddress is then the empty string.
-	consoleListener net.Listener
-	consoleServer   *http.Server
-	consoleAddress  string
+	// consoleServer serves the console listener. It is nil when console.enabled is false,
+	// and consoleAddress is then the empty string.
+	consoleServer  *http.Server
+	consoleAddress string
 }
 
 // SetSocketGroup configures a unix group that may reach the control socket.
@@ -147,9 +146,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if err := s.consoleServer.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("console shutdown error: %w", err))
 		}
-		s.consoleServer = nil
-		s.consoleListener = nil
-		s.consoleAddress = ""
 	}
 	if s.httpServer != nil {
 		if err := s.httpServer.Shutdown(ctx); err != nil {
