@@ -499,3 +499,36 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
 .ac-observe .ns-cmds{margin-top:var(--sp-3)}
 .ac-observe + .card{margin-top:var(--sp-3)}
+
+/* The reachability matrix. The accent of this view marks the allowed path: a filled
+   square, and the row label and the column label of the square under the pointer. An
+   empty square is the absence of a rule, therefore no rule paints a refused path. The
+   square carries the 6 pixel radius token, because a grid must read as a grid.
+   FR-editor-7 to FR-editor-15. */
+.ac-matrix{margin-top:var(--sp-3)}
+.ac-mtx{--ac-square:34px; border-collapse:separate; border-spacing:4px; margin-top:var(--sp-3)}
+.ac-mtx th{
+  font-family:var(--font-data);
+  font-size:var(--fs-label);
+  font-weight:400;
+  letter-spacing:var(--ls-mono);
+  color:var(--text-tertiary);
+  text-align:left;
+  padding:0 4px;
+}
+.ac-mtx th.col{writing-mode:vertical-rl; transform:rotate(180deg); height:78px; vertical-align:bottom; text-align:right}
+.ac-mtx th.hot{color:var(--accent)}
+.ac-square{
+  width:var(--ac-square);
+  height:var(--ac-square);
+  padding:0;
+  border-radius:var(--r-xs);
+  border:1px solid var(--border-default);
+  background:var(--surface-inset);
+  cursor:pointer;
+  transition:background var(--dur-1) var(--ease);
+}
+.ac-square:hover{background:var(--surface-raised)}
+.ac-square.on{background:var(--accent); border-color:var(--accent)}
+.ac-square.inert{background:transparent; border-color:var(--border-soft); cursor:default}
+.ac-square.inert:hover{background:transparent}
