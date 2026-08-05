@@ -18,6 +18,7 @@ import (
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/dns"
 	"hydrascale/internal/hostaccess"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/routing"
@@ -90,6 +91,8 @@ type Reconciler struct {
 	lastErrors    map[string]string // tailnetID -> last error message
 	events        []Event
 
+	hostFile *dns.HostFileMonitor
+
 	eventLogPath string
 	eventFile    *os.File
 }
@@ -111,7 +114,23 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		errorStates:   make(map[string]bool),
 		pausedStates:  make(map[string]bool),
 		lastErrors:    make(map[string]string),
+		hostFile:      dns.NewHostFileMonitor(dns.DefaultHostResolvConf),
 	}
+}
+
+// SetHostFileMonitor replaces the monitor of the host resolv.conf file.
+// A test uses SetHostFileMonitor to observe a temporary file.
+func (r *Reconciler) SetHostFileMonitor(m *dns.HostFileMonitor) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hostFile = m
+}
+
+// HostFileMonitor returns the monitor of the host resolv.conf file.
+func (r *Reconciler) HostFileMonitor() *dns.HostFileMonitor {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hostFile
 }
 
 // DesiredState reads the config and returns the desired set of tailnets.
