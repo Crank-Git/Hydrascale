@@ -1,7 +1,7 @@
 # Hydrascale
 
 <p align="center">
-  <img src="assets/logo.png" alt="Hydrascale Logo" width="300">
+  <img src="internal/ui/static/brand/logo-lime.svg" alt="Hydrascale logo" width="120">
 </p>
 
 <p align="center">Run multiple Tailscale tailnets simultaneously on a single Linux machine.</p>
@@ -12,12 +12,11 @@
 - [Requirements](#requirements)
 - [Install](#install)
 - [Quick Start](#quick-start)
-- [Desktop GUI](#desktop-gui)
 - [Uninstall](#uninstall)
 - [Host Access](#host-access) -- transparent access to all tailnet peers from the host
 - [Headscale / Custom Control Server](#headscale--custom-control-server)
 - [Config Reference](#config-reference)
-- [Remote / GUI access](#remote--gui-access)
+- [Remote Access](#remote-access)
 - [Networking](#networking)
 - [CLI Commands](#cli-commands)
 - [Environment Variables](#environment-variables)
@@ -111,48 +110,6 @@ sudo hydrascale apply
 ```bash
 sudo hydrascale serve
 ```
-
-## Desktop GUI
-
-Hydrascale ships a cross-platform desktop app (macOS, Windows, Linux) for managing
-your tailnets visually: a live dashboard, per-tailnet detail with peers, an
-add-tailnet wizard, and remove. Because the daemon is Linux-only, the app is a
-**remote client** — it talks to the daemon's control API and runs on any OS.
-
-> **No system tray yet.** The app is a normal window; closing it quits it (and drops
-> its SSH tunnel). A menu-bar / system-tray presence with close-to-background is
-> planned for a future **Wails v3 migration** — Wails v2 (what the app is built on)
-> has no built-in tray, so it's deliberately deferred rather than hacked in.
-
-### Download
-
-Grab the app for your OS from the [Releases](https://github.com/Crank-Git/Hydrascale/releases)
-page — `Hydrascale.app` (macOS), `.exe` (Windows), or the Linux binary. On macOS the app
-is currently unsigned; right-click → **Open** the first time to get past Gatekeeper.
-
-### Build from source
-
-The GUI is a separate Go module under `gui/`, built with [Wails](https://wails.io) v2
-(needs the Wails CLI and its platform deps — run `wails doctor`):
-
-```bash
-cd gui
-wails build      # → build/bin/ (.app / .exe / binary)
-# or: wails dev  # hot-reload dev window
-```
-
-### Connecting
-
-Open **Settings** (the gear in the sidebar) and point the app at your daemon:
-
-- **Local** — app on the same Linux host as the daemon: leave *SSH host* blank, socket
-  path `/var/lib/hydrascale/api.sock`.
-- **Remote** — app on your Mac/Windows/another box: set *SSH host* (`user@host`) and the
-  daemon socket path. The app forwards the socket over SSH.
-
-The statusbar shows the version of the **daemon it's connected to**. Remote access
-requires a non-root path to the control socket — see
-[Remote / GUI access](#remote--gui-access).
 
 ## Uninstall
 
@@ -350,9 +307,9 @@ host_access: false
 # infra_subnet: "10.200.0.0/16"
 
 # Unix group granted access to the control socket (default: empty = root-only).
-# Required for the desktop GUI and any non-root or SSH-forwarded client. When set,
-# the daemon makes /var/lib/hydrascale and api.sock group-accessible; add your user
-# to this group. See "Remote / GUI access" below.
+# Required for any non-root client, and for a client that reaches the socket over an
+# SSH forward. When set, the daemon makes /var/lib/hydrascale and api.sock
+# group-accessible; add your user to this group. See "Remote Access" below.
 # socket_group: hydrascale
 
 # List of tailnets to manage
@@ -378,13 +335,15 @@ reconciler:
   interval: 10s                  # how often the control loop runs (Go duration)
 ```
 
-## Remote / GUI access
+## Remote Access
 
-The daemon's control socket (`/var/lib/hydrascale/api.sock`) is **root-only by
-default** — mode `0600`, and `/var/lib/hydrascale` isn't traversable by other users.
-The desktop GUI, and any non-root or SSH-forwarded client, needs group access.
+The daemon serves its control API on the control socket
+`/var/lib/hydrascale/api.sock`. The socket is **root-only by default** — mode `0600`,
+and `/var/lib/hydrascale` is not traversable by another user. A client that does not
+run as root needs group access to the socket. A client on another machine reaches the
+socket over an SSH forward, and the SSH user needs the same group access.
 
-Set `socket_group` and add your user to it:
+Create the group and add your user to it:
 
 ```bash
 sudo groupadd hydrascale
@@ -392,14 +351,12 @@ sudo usermod -aG hydrascale "$USER"    # log out/in for it to take effect
 # set `socket_group: hydrascale` in the config, then restart the daemon
 ```
 
-`hydrascale init` offers this as a step. Once set, the daemon owns the socket
-`root:hydrascale 0660` and makes the directory group-traversable, so group members
-reach the API without being root.
+`hydrascale init` offers this as a step. When `socket_group` is set, the daemon owns
+the socket `root:hydrascale 0660` and makes the directory group-traversable. A member
+of the group then reaches the control API without root.
 
-**Remote (GUI on another machine):** in the app's Settings, set the **SSH host**
-(`user@linux-host`) and socket path — the GUI forwards the socket over SSH for you.
-The forward connects as your SSH user, which must be in the socket group on the host.
-For non-GUI clients, forward it yourself:
+**From another machine.** Forward the socket over SSH, then send the request to the
+forwarded path. The SSH user must be a member of the socket group on the host:
 
 ```bash
 ssh -L /tmp/hydrascale.sock:/var/lib/hydrascale/api.sock user@linux-host
