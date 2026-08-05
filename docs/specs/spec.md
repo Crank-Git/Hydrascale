@@ -558,6 +558,9 @@ security and DNS work must not wait behind the console.
 | 2026-08-04 | 1 | First draft. Written from three interview rounds and a code survey. |
 | 2026-08-04 | 1 | Approved. The operator resolved risk R8: `docs/specs/`, `CLAUDE.md` and `.claude/` are all tracked. |
 | 2026-08-04 | 1 | Corrected assumption 4a: `vendor/` is untracked on purpose and this is not a defect. Recorded that the test host `/etc/resolv.conf` is immutable, which blocks the Epic 4 reproduction until the attribute is cleared. |
+| 2026-08-05 | 1 | Epic 0 built. `internal/routing` now runs `ip route replace` where it ran `ip route add`, because the acceptance criteria of issue #53 name `replace` and because `replace` succeeds for a destination that is already present. |
+| 2026-08-05 | 1 | Epic 0 built. **FR-foundation-6** fixes the `Runner` interface to combined output, so `routing.PollStatus` and `namespaces.ListNamespaces` now read the standard output and the standard error stream together, where they read the standard output alone. No command that they run writes to the standard error stream on success, so no defect is known. Epic 5 must keep this in view. |
+| 2026-08-05 | 1 | Epic 0 built. The skill `verify-on-phobos` takes the host as `phobos@192.168.1.221` rather than the bare name `phobos`, which does not resolve. The skill gained an explicit `rollback` command block, which **FR-foundation-12** requires and which the first draft did not hold. |
 
 ## Issue map
 
