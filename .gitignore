@@ -34,6 +34,10 @@ CLAUDE.local.md
 # Build output. The daemon binary must never be committed.
 /hydrascale
 
+# The desktop client that Epic 1 removed. The files stay on disk on a developer
+# machine, therefore an untargeted `git add` re-tracks the compiled binary.
+/gui/
+
 # Private design source. Only the assets the console uses are committed, under
 # internal/ui/static/brand/ (see docs/specs/features/01-desktop-client-removal.md).
 branding/

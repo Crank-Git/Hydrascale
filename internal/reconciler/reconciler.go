@@ -18,6 +18,7 @@ import (
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/dns"
 	"hydrascale/internal/hostaccess"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/routing"
@@ -88,7 +89,10 @@ type Reconciler struct {
 	errorStates   map[string]bool   // tailnetID -> true if in error state
 	pausedStates  map[string]bool   // tailnetID -> true if manually disconnected
 	lastErrors    map[string]string // tailnetID -> last error message
+	unprotected   map[string]string // tailnetID -> the reported overlay mount error
 	events        []Event
+
+	hostFile *dns.HostFileMonitor
 
 	eventLogPath string
 	eventFile    *os.File
@@ -111,7 +115,24 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		errorStates:   make(map[string]bool),
 		pausedStates:  make(map[string]bool),
 		lastErrors:    make(map[string]string),
+		unprotected:   make(map[string]string),
+		hostFile:      dns.NewHostFileMonitor(dns.DefaultHostResolvConf),
 	}
+}
+
+// SetHostFileMonitor replaces the monitor of the host resolv.conf file.
+// A test uses SetHostFileMonitor to observe a temporary file.
+func (r *Reconciler) SetHostFileMonitor(m *dns.HostFileMonitor) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hostFile = m
+}
+
+// HostFileMonitor returns the monitor of the host resolv.conf file.
+func (r *Reconciler) HostFileMonitor() *dns.HostFileMonitor {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hostFile
 }
 
 // DesiredState reads the config and returns the desired set of tailnets.
@@ -337,7 +358,11 @@ func (r *Reconciler) executeAction(action Action) error {
 		if err := namespaces.WriteNamespaceResolvConf(action.NsName); err != nil {
 			log.Printf("namespace: failed to write resolv.conf for %s: %v", action.NsName, err)
 		}
-		return r.dm.Start(action.TailnetID, action.NsName)
+		allowUnprotected := false
+		if cfg, err := config.LoadConfig(r.configPath); err == nil {
+			allowUnprotected = cfg.DNS.AllowUnprotected
+		}
+		return r.dm.Start(action.TailnetID, action.NsName, allowUnprotected)
 	case ActionStopDaemon:
 		return r.dm.Stop(action.NsName, action.TailnetID)
 	case ActionAuthDaemon:
@@ -387,6 +412,8 @@ func (r *Reconciler) Reconcile() error {
 
 	r.emit("reconcile_start", "", "")
 
+	r.checkHostFile()
+
 	desired, err := r.DesiredState()
 	if err != nil {
 		return err
@@ -398,15 +425,85 @@ func (r *Reconciler) Reconcile() error {
 	}
 
 	actions := r.Diff(desired, actual)
+	if len(actions) > 0 {
+		r.emit("reconcile_apply", "", fmt.Sprintf("%d actions", len(actions)))
+		r.Apply(actions)
+	}
+
+	// Runs after Apply, because Apply clears the last error of a tailnet whose actions
+	// all succeeded, and an unprotected namespace must keep its error.
+	r.checkDNSProtection(desired)
+
 	if len(actions) == 0 {
 		r.emit("reconcile_complete", "", "no changes needed")
 		return nil
 	}
-
-	r.emit("reconcile_apply", "", fmt.Sprintf("%d actions", len(actions)))
-	r.Apply(actions)
 	r.emit("reconcile_complete", "", fmt.Sprintf("applied %d actions", len(actions)))
 	return nil
+}
+
+// checkDNSProtection records the event dns.unprotected for each tailnet whose overlay
+// mount on /etc failed, and places that tailnet in an error state. A tailnet that
+// dns.allow_unprotected covers keeps its event and stays out of the error state, because
+// the operator chose to run it without the overlay mount. checkDNSProtection records one
+// event for one failure, so a repeated cycle adds no event. See issue #76.
+func (r *Reconciler) checkDNSProtection(desired map[string]config.Tailnet) {
+	for id := range desired {
+		record, unprotected := r.dm.UnprotectedDNS(id)
+
+		r.mu.Lock()
+		if !unprotected {
+			delete(r.unprotected, id)
+			r.mu.Unlock()
+			continue
+		}
+		reported, seen := r.unprotected[id]
+		r.unprotected[id] = record.Reason
+		if !record.Allowed {
+			r.errorStates[id] = true
+			r.lastErrors[id] = record.Reason
+		}
+		r.mu.Unlock()
+
+		if !seen || reported != record.Reason {
+			r.emit("dns.unprotected", id, record.Reason)
+		}
+	}
+}
+
+// checkHostFile compares the checksum of the host resolv.conf file with the recorded
+// checksum and records dns.host_file_changed on a difference.
+// The check reports the change. The daemon does not write the host file, because a daemon
+// that rewrites the host file becomes the thing that it protects against. The event holds
+// the first line of each version only, because a resolv.conf file can contain a search
+// domain that names an internal host.
+func (r *Reconciler) checkHostFile() {
+	m := r.HostFileMonitor()
+	if m == nil {
+		return
+	}
+
+	changed, previous, current, err := m.Check()
+	if err != nil {
+		r.emit("dns.host_file_error", "", err.Error())
+		return
+	}
+	if !changed {
+		return
+	}
+
+	r.emit("dns.host_file_changed", "", fmt.Sprintf(
+		"%s: previous first line %q, current first line %q",
+		current.Path, describeHostFile(previous), describeHostFile(current)))
+}
+
+// describeHostFile returns the first line of the state, or "(missing)" when the file does
+// not exist.
+func describeHostFile(state dns.HostFileState) string {
+	if state.Missing {
+		return "(missing)"
+	}
+	return state.FirstLine
 }
 
 // Loop runs the reconciliation loop until the context is cancelled.
@@ -484,6 +581,8 @@ func (r *Reconciler) ResetError(tailnetID string) {
 	delete(r.errorStates, tailnetID)
 	delete(r.failureCounts, tailnetID)
 	delete(r.pausedStates, tailnetID)
+	// The next cycle reports an overlay mount that still fails.
+	delete(r.unprotected, tailnetID)
 }
 
 // ResetAllErrors clears all error states. Called by one-shot apply.
@@ -492,6 +591,7 @@ func (r *Reconciler) ResetAllErrors() {
 	defer r.mu.Unlock()
 	r.errorStates = make(map[string]bool)
 	r.failureCounts = make(map[string]int)
+	r.unprotected = make(map[string]string)
 }
 
 // ErrorStates returns a copy of the current error states.
@@ -500,6 +600,19 @@ func (r *Reconciler) ErrorStates() map[string]bool {
 	defer r.mu.Unlock()
 	cp := make(map[string]bool, len(r.errorStates))
 	for k, v := range r.errorStates {
+		cp[k] = v
+	}
+	return cp
+}
+
+// Unprotected returns a copy of the overlay mount error of each unprotected tailnet.
+// The map holds one entry for each tailnet that runs without the overlay mount on /etc.
+// A tailnet that keeps the overlay mount holds no entry.
+func (r *Reconciler) Unprotected() map[string]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make(map[string]string, len(r.unprotected))
+	for k, v := range r.unprotected {
 		cp[k] = v
 	}
 	return cp

@@ -38,6 +38,13 @@ type HostDNSConfig struct {
 	Mode string `yaml:"mode,omitempty"` // "hosts" (default) or "resolved"
 }
 
+// DNSConfig holds the DNS protection settings.
+type DNSConfig struct {
+	// AllowUnprotected lets a namespace start when the overlay mount on /etc fails.
+	// The default is false, so a host that cannot mount OverlayFS fails loudly.
+	AllowUnprotected bool `yaml:"allow_unprotected,omitempty"`
+}
+
 // Mesh is a stub for forward compatibility with Phase 2 mesh mode.
 type Mesh struct {
 	Enabled bool `yaml:"enabled"`
@@ -66,6 +73,7 @@ type Config struct {
 	Mesh        Mesh             `yaml:"mesh,omitempty"`
 	EventLog    string           `yaml:"event_log,omitempty"`
 	HostDNS     HostDNSConfig    `yaml:"host_dns,omitempty"`
+	DNS         DNSConfig        `yaml:"dns,omitempty"`
 	InfraSubnet string           `yaml:"infra_subnet,omitempty"` // Default: 10.200.0.0/16
 	// SocketGroup, when set, makes the API control socket group-accessible:
 	// the daemon chowns /var/lib/hydrascale + api.sock to root:<group> with
