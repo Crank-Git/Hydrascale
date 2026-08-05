@@ -24,11 +24,17 @@ var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 // CLI and the service always read the same file.
 const DefaultConfigPath = "/etc/hydrascale/config.yaml"
 
+// DefaultSecretsPath is the default location of the secrets file.
+// The daemon reads a credential from this file at mode 0600 and owner root.
+const DefaultSecretsPath = "/etc/hydrascale/secrets.yaml"
+
 // Tailnet represents a single Tailscale tailnet configuration.
 type Tailnet struct {
-	ID         string `yaml:"id"`
-	ExitNode   string `yaml:"exit_node,omitempty"`
-	AuthKey    string `yaml:"auth_key,omitempty"`
+	ID       string `yaml:"id"`
+	ExitNode string `yaml:"exit_node,omitempty"`
+	// AuthKey carries the tag json:"-", because GET /api/status encodes this struct and
+	// returned the key to every caller of the control socket. See SA-1.
+	AuthKey    string `yaml:"auth_key,omitempty" json:"-"`
 	HostAccess *bool  `yaml:"host_access,omitempty"`
 	ControlURL string `yaml:"control_url,omitempty"`
 }
@@ -80,6 +86,9 @@ type Config struct {
 	// group-traversable/rw modes. Add a trusted user to that group to let it
 	// reach the API (e.g. an SSH-forwarded remote GUI) without being root.
 	SocketGroup string `yaml:"socket_group,omitempty"`
+	// SecretsFile names the root-only credential store. LoadConfig applies
+	// DefaultSecretsPath when the key is absent.
+	SecretsFile string `yaml:"secrets_file,omitempty"`
 }
 
 // TailnetHostAccess returns whether host access is enabled for a specific tailnet,
@@ -172,6 +181,10 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Reconciler.Interval = 10 * time.Second
 	}
 
+	if cfg.SecretsFile == "" {
+		cfg.SecretsFile = DefaultSecretsPath
+	}
+
 	// Validate and default infra_subnet
 	if cfg.InfraSubnet == "" {
 		cfg.InfraSubnet = "10.200.0.0/16"
@@ -197,6 +210,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Version:     2,
 		InfraSubnet: "10.200.0.0/16",
+		SecretsFile: DefaultSecretsPath,
 		Tailnets:    []Tailnet{},
 		Resolver: ResolverConfig{
 			Mode: "unified",

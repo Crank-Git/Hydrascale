@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -146,6 +147,44 @@ func firstRunAndVerify(p *prompter, cfg *config.Config, answers []tailnetAnswers
 	return nil
 }
 
+// stageAuthKey writes key to a new file under dir, with mode 0600, and returns the path
+// of that file. The caller removes the file after the command ends.
+// An argument of a command reaches /proc/<pid>/cmdline, and any local account reads that
+// file. The daemon path already applies this form; see SA-6 and issue #31.
+func stageAuthKey(dir, key string) (string, error) {
+	f, err := os.CreateTemp(dir, "authkey-*")
+	if err != nil {
+		return "", fmt.Errorf("create the auth key file: %w", err)
+	}
+	path := f.Name()
+	if err := f.Chmod(0600); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", fmt.Errorf("set the mode of the auth key file: %w", err)
+	}
+	if _, err := f.WriteString(key); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", fmt.Errorf("write the auth key file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return "", fmt.Errorf("close the auth key file: %w", err)
+	}
+	return path, nil
+}
+
+// nsTailscaleUpArgs returns the arguments of the ip command that authenticates a tailnet
+// inside its namespace. authKeyFile names the file that holds the auth key.
+func nsTailscaleUpArgs(nsName, socketPath, authKeyFile string) []string {
+	return []string{
+		"netns", "exec", nsName,
+		"tailscale", "--socket=" + socketPath,
+		"up", "--accept-dns=true",
+		"--auth-key=file:" + authKeyFile,
+	}
+}
+
 // verifyAuth checks that a tailnet's namespace is authenticated. For auth-key
 // tailnets it retries `up --authkey` once if the initial login raced; for
 // browser tailnets it prints the login URL and polls until logged in.
@@ -160,8 +199,15 @@ func verifyAuth(a tailnetAnswers) {
 		if key := os.Getenv(config.AuthKeyEnvVar(a.ID)); key != "" {
 			ns := namespaces.GetNamespaceName(a.ID)
 			sock := daemon.SocketPath(a.ID)
-			_ = exec.Command("ip", "netns", "exec", ns, "tailscale", "--socket="+sock,
-				"up", "--accept-dns=true", "--authkey="+key).Run()
+			keyFile, err := stageAuthKey(filepath.Dir(sock), key)
+			if err != nil {
+				fmt.Printf("  ✗ %s: cannot stage the auth key: %v\n", a.ID, err)
+				return
+			}
+			_ = exec.Command("ip", nsTailscaleUpArgs(ns, sock, keyFile)...).Run()
+			if err := os.Remove(keyFile); err != nil {
+				fmt.Printf("  ! %s: cannot remove the auth key file %s: %v\n", a.ID, keyFile, err)
+			}
 			if status, _ = nsTailscaleStatus(a.ID); isLoggedIn(status) {
 				fmt.Printf("  ✓ %s: authenticated (after retry)\n", a.ID)
 				return

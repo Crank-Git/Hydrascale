@@ -195,6 +195,7 @@ func StartDaemon(tailnetID string, namespaceName string, allowUnprotected bool) 
 	cmd := exec.Command("ip", args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	cmd.Env = minimalChildEnv()
 	// Setpgid detaches the process group; Pdeathsig ensures tailscaled
 	// is killed if hydrascale dies unexpectedly (e.g. SIGKILL).
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -330,6 +331,17 @@ func CheckHealth(namespaceName string, tailnetID string) (bool, error) {
 	return true, nil
 }
 
+// minimalChildEnv returns the environment of a child process of the daemon.
+// The daemon holds an auth key in HYDRASCALE_AUTHKEY_<ID> for each tailnet that uses
+// one. A child that inherits the complete environment carries the key of every tailnet
+// into /proc/<pid>/environ. See SA-20.
+func minimalChildEnv() []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+	}
+}
+
 // buildTailscaleUpArgs constructs the argument list for `tailscale up`.
 // When controlURL is non-empty, --login-server is appended (for Headscale).
 func buildTailscaleUpArgs(socketPath, controlURL, authKeyFile string) []string {
@@ -400,11 +412,7 @@ func AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error {
 	tsArgs := buildTailscaleUpArgs(socketPath, controlURL, authKeyFile)
 	cmdArgs := append([]string{"netns", "exec", nsName}, tsArgs...)
 	cmd := exec.CommandContext(ctx, "ip", cmdArgs...)
-	// Minimal environment for the child process to avoid leaking parent env vars.
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-	}
+	cmd.Env = minimalChildEnv()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Redact auth key from error output to prevent leaking it in logs
