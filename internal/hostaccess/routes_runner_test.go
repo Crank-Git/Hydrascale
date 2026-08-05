@@ -1,6 +1,7 @@
 package hostaccess
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,3 +153,9 @@ func callList(calls []execx.Call) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// quietRunner answers every command with empty output and no error. A test that asserts a
+// file uses it, so that the test changes no state on the host that runs the test suite.
+type quietRunner struct{}
+
+func (quietRunner) Run(context.Context, string, ...string) ([]byte, error) { return nil, nil }

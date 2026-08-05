@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os/exec"
 	"strings"
+	"time"
 )
+
+// hostCommandTimeout is the time that one command to the host gets. A command that does
+// not return blocks the reconcile cycle, so every command carries this deadline.
+// See SA-21.
+const hostCommandTimeout = 5 * time.Second
 
 var (
 	cgnatNet *net.IPNet
@@ -30,6 +35,19 @@ var (
 func init() {
 	_, cgnatNet, _ = net.ParseCIDR("100.64.0.0/10")
 	_, tsV6Net, _ = net.ParseCIDR("fd7a:115c:a1e0::/48")
+}
+
+// validRouteDest reports whether dest is an address or a CIDR block.
+//
+// The control server advertises the destination, and tailscaled writes it into table 52.
+// The destination becomes one argument of `ip route replace`, and ip reads an argument
+// that starts with a hyphen as an option. See SA-18.
+func validRouteDest(dest string) bool {
+	if net.ParseIP(dest) != nil {
+		return true
+	}
+	_, _, err := net.ParseCIDR(dest)
+	return err == nil
 }
 
 // isExitNodeSplitDefault reports whether dest is one of the Tailscale
@@ -97,6 +115,10 @@ func parseHostRoutes(output string, vethDev string, infraSubnet string) []string
 		if vethDev != "" && !strings.Contains(line, "dev "+vethDev) {
 			continue
 		}
+		if !validRouteDest(dest) {
+			log.Printf("hostaccess: the destination %q is not an address and not a CIDR block", dest)
+			continue
+		}
 		routes = append(routes, dest)
 	}
 	return routes
@@ -120,6 +142,10 @@ func parseHostRoutesV6(output string, vethDev string) []string {
 			continue
 		}
 		if vethDev != "" && !strings.Contains(line, "dev "+vethDev) {
+			continue
+		}
+		if !validRouteDest(dest) {
+			log.Printf("hostaccess: the destination %q is not an address and not a CIDR block", dest)
 			continue
 		}
 		routes = append(routes, dest)
@@ -171,6 +197,10 @@ func parseTableRoutes(output string, infraSubnet string) []string {
 				}
 			}
 		}
+		if !validRouteDest(dest) {
+			log.Printf("hostaccess: the destination %q is not an address and not a CIDR block", dest)
+			continue
+		}
 		routes = append(routes, dest)
 	}
 	return routes
@@ -216,8 +246,8 @@ func diffRoutes(desired, actual []string) (toAdd, toRemove []string) {
 
 // listNsTableRoutes reads routing table 52 from inside a namespace and returns
 // the route destinations (subnet routes accepted by tailscaled via --accept-routes).
-func listNsTableRoutes(nsName string, infraSubnet string) ([]string, error) {
-	out, err := exec.Command("ip", "netns", "exec", nsName, "ip", "route", "show", "table", "52").Output()
+func (m *Manager) listNsTableRoutes(nsName string, infraSubnet string) ([]string, error) {
+	out, err := m.run("ip", "netns", "exec", nsName, "ip", "route", "show", "table", "52")
 	if err != nil {
 		return nil, fmt.Errorf("ip netns exec %s ip route show table 52: %w", nsName, err)
 	}
@@ -226,8 +256,8 @@ func listNsTableRoutes(nsName string, infraSubnet string) ([]string, error) {
 
 // listNsTableRoutesV6 reads IPv6 routing table 52 from inside a namespace,
 // returning only non-Tailscale subnet routes.
-func listNsTableRoutesV6(nsName string) ([]string, error) {
-	out, err := exec.Command("ip", "netns", "exec", nsName, "ip", "-6", "route", "show", "table", "52").Output()
+func (m *Manager) listNsTableRoutesV6(nsName string) ([]string, error) {
+	out, err := m.run("ip", "netns", "exec", nsName, "ip", "-6", "route", "show", "table", "52")
 	if err != nil {
 		return nil, fmt.Errorf("ip netns exec %s ip -6 route show table 52: %w", nsName, err)
 	}
@@ -249,6 +279,10 @@ func listNsTableRoutesV6(nsName string) ([]string, error) {
 			continue
 		}
 		if isTailscaleV6(dest) {
+			continue
+		}
+		if !validRouteDest(dest) {
+			log.Printf("hostaccess: the destination %q is not an address and not a CIDR block", dest)
 			continue
 		}
 		routes = append(routes, dest)
@@ -284,7 +318,7 @@ func parseRouteGetOutput(output string) (dev string, hasVia bool) {
 // We probe with `ip [-6] route get <network-addr>`: if the kernel resolves
 // the destination via a non-vh* device with no `via` gateway, the destination
 // is on a directly-attached LAN and we must not replace its route. Issue #21.
-func wouldClobberDirectLAN(dest string, v6 bool) bool {
+func (m *Manager) wouldClobberDirectLAN(dest string, v6 bool) bool {
 	addr := dest
 	if i := strings.Index(addr, "/"); i >= 0 {
 		addr = addr[:i]
@@ -293,7 +327,7 @@ func wouldClobberDirectLAN(dest string, v6 bool) bool {
 	if v6 {
 		args = []string{"-6", "route", "get", addr}
 	}
-	out, err := exec.Command("ip", args...).Output()
+	out, err := m.run("ip", args...)
 	if err != nil {
 		// If the kernel can't resolve it (no route at all), installing
 		// our route is fine — there's nothing to clobber.
@@ -311,13 +345,17 @@ func wouldClobberDirectLAN(dest string, v6 bool) bool {
 
 // filterClobberingRoutes drops candidate destinations that would shadow a
 // directly-connected non-vh* route on the host. Skipped entries are logged.
-func filterClobberingRoutes(candidates []string, v6 bool) []string {
+func (m *Manager) filterClobberingRoutes(candidates []string, v6 bool) []string {
 	if len(candidates) == 0 {
 		return candidates
 	}
 	out := make([]string, 0, len(candidates))
 	for _, dest := range candidates {
-		if wouldClobberDirectLAN(dest, v6) {
+		if !validRouteDest(dest) {
+			log.Printf("hostaccess: the destination %q is not an address and not a CIDR block", dest)
+			continue
+		}
+		if m.wouldClobberDirectLAN(dest, v6) {
 			log.Printf("hostaccess: skipping route %s — would clobber a directly-connected host LAN route", dest)
 			continue
 		}
@@ -330,7 +368,8 @@ func filterClobberingRoutes(candidates []string, v6 bool) []string {
 // TailnetPeers set and for any accepted subnet routes from table 52 in the namespace.
 // Both desired sets are merged before diffing so that peer routes don't remove
 // subnet routes (or vice versa).
-func SyncHostRoutes(peers TailnetPeers, infraSubnet string) error {
+func (m *Manager) SyncHostRoutes(peers TailnetPeers) error {
+	infraSubnet := m.infraSubnet
 	vethDev := peers.VethHost
 	gw := peers.VethGateway
 
@@ -338,11 +377,11 @@ func SyncHostRoutes(peers TailnetPeers, infraSubnet string) error {
 	wantV4, wantV6 := desiredPeerRoutes(peers)
 
 	if peers.NsName != "" {
-		nsV4, err := listNsTableRoutes(peers.NsName, infraSubnet)
+		nsV4, err := m.listNsTableRoutes(peers.NsName, infraSubnet)
 		if err != nil {
 			log.Printf("hostaccess: failed to read table 52 v4 routes from %s: %v", peers.NsName, err)
 		}
-		nsV6, err := listNsTableRoutesV6(peers.NsName)
+		nsV6, err := m.listNsTableRoutesV6(peers.NsName)
 		if err != nil {
 			log.Printf("hostaccess: failed to read table 52 v6 routes from %s: %v", peers.NsName, err)
 		}
@@ -354,15 +393,15 @@ func SyncHostRoutes(peers TailnetPeers, infraSubnet string) error {
 	// route. Peer IPs are CGNAT (or fd7a:115c:a1e0::/48) so they never
 	// overlap a real LAN; the filter is meaningful for accepted subnet
 	// routes from table 52. See issue #21.
-	wantV4 = filterClobberingRoutes(wantV4, false)
-	wantV6 = filterClobberingRoutes(wantV6, true)
+	wantV4 = m.filterClobberingRoutes(wantV4, false)
+	wantV6 = m.filterClobberingRoutes(wantV6, true)
 
 	// Gather current host routes
-	v4Out, err := exec.Command("ip", "route", "show").Output()
+	v4Out, err := m.run("ip", "route", "show")
 	if err != nil {
 		return fmt.Errorf("ip route show: %w", err)
 	}
-	v6Out, err := exec.Command("ip", "-6", "route", "show").Output()
+	v6Out, err := m.run("ip", "-6", "route", "show")
 	if err != nil {
 		return fmt.Errorf("ip -6 route show: %w", err)
 	}
@@ -377,14 +416,14 @@ func SyncHostRoutes(peers TailnetPeers, infraSubnet string) error {
 
 	for _, ip := range addV4 {
 		args := []string{"route", "replace", ip, "via", gw, "dev", vethDev}
-		if out, e := exec.Command("ip", args...).CombinedOutput(); e != nil {
+		if out, e := m.run("ip", args...); e != nil {
 			errs = append(errs, fmt.Errorf("ip route replace %s: %w (%s)", ip, e, out))
 		} else {
 			log.Printf("hostaccess: added route %s via %s dev %s", ip, gw, vethDev)
 		}
 	}
 	for _, ip := range delV4 {
-		if out, e := exec.Command("ip", "route", "del", ip).CombinedOutput(); e != nil {
+		if out, e := m.run("ip", "route", "del", ip); e != nil {
 			errs = append(errs, fmt.Errorf("ip route del %s: %w (%s)", ip, e, out))
 		} else {
 			log.Printf("hostaccess: removed route %s", ip)
@@ -392,14 +431,14 @@ func SyncHostRoutes(peers TailnetPeers, infraSubnet string) error {
 	}
 	for _, ip := range addV6 {
 		args := []string{"-6", "route", "replace", ip, "dev", vethDev}
-		if out, e := exec.Command("ip", args...).CombinedOutput(); e != nil {
+		if out, e := m.run("ip", args...); e != nil {
 			errs = append(errs, fmt.Errorf("ip -6 route replace %s: %w (%s)", ip, e, out))
 		} else {
 			log.Printf("hostaccess: added v6 route %s dev %s", ip, vethDev)
 		}
 	}
 	for _, ip := range delV6 {
-		if out, e := exec.Command("ip", "-6", "route", "del", ip).CombinedOutput(); e != nil {
+		if out, e := m.run("ip", "-6", "route", "del", ip); e != nil {
 			errs = append(errs, fmt.Errorf("ip -6 route del %s: %w (%s)", ip, e, out))
 		} else {
 			log.Printf("hostaccess: removed v6 route %s", ip)
@@ -431,26 +470,27 @@ func mergeRoutes(a, b []string) []string {
 // RemoveAllHostRoutes removes all host routes on vethDev (excluding MagicDNS and infra).
 // A step that fails does not stop the remaining steps. RemoveAllHostRoutes collects every
 // failure and returns the failures together.
-func RemoveAllHostRoutes(vethDev string, infraSubnet string) error {
+func (m *Manager) RemoveAllHostRoutes(vethDev string) error {
+	infraSubnet := m.infraSubnet
 	var errs []error
 
-	v4Out, err := exec.Command("ip", "route", "show").Output()
+	v4Out, err := m.run("ip", "route", "show")
 	if err != nil {
 		errs = append(errs, fmt.Errorf("ip route show: %w", err))
 	} else {
 		for _, ip := range parseHostRoutes(string(v4Out), vethDev, infraSubnet) {
-			if out, e := exec.Command("ip", "route", "del", ip).CombinedOutput(); e != nil {
+			if out, e := m.run("ip", "route", "del", ip); e != nil {
 				errs = append(errs, fmt.Errorf("ip route del %s: %w (%s)", ip, e, out))
 			}
 		}
 	}
 
-	v6Out, err := exec.Command("ip", "-6", "route", "show").Output()
+	v6Out, err := m.run("ip", "-6", "route", "show")
 	if err != nil {
 		errs = append(errs, fmt.Errorf("ip -6 route show: %w", err))
 	} else {
 		for _, ip := range parseHostRoutesV6(string(v6Out), vethDev) {
-			if out, e := exec.Command("ip", "-6", "route", "del", ip).CombinedOutput(); e != nil {
+			if out, e := m.run("ip", "-6", "route", "del", ip); e != nil {
 				errs = append(errs, fmt.Errorf("ip -6 route del %s: %w (%s)", ip, e, out))
 			}
 		}
