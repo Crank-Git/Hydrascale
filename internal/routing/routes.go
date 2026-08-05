@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os/exec"
 	"strings"
 	"time"
+
+	"hydrascale/internal/execx"
 )
 
 // Manager defines the interface for route management operations.
@@ -19,23 +20,24 @@ type Manager interface {
 }
 
 // RealManager implements Manager using real system calls.
-type RealManager struct{}
+// Runner holds the command runner. A test replaces Runner with an execx.Recorder and
+// asserts the exact argument list of every command.
+type RealManager struct {
+	Runner execx.Runner
+}
 
-// NewRealManager returns a new RealManager.
+// NewRealManager returns a new RealManager that runs a command on the host.
 func NewRealManager() *RealManager {
-	return &RealManager{}
+	return &RealManager{Runner: execx.OSRunner{}}
 }
 
-func (m *RealManager) PollStatus(nsName, socketPath string) ([]Route, error) {
-	return PollStatus(nsName, socketPath)
-}
-
-func (m *RealManager) SyncRoutes(nsName string, routes []Route, infraSubnet string) error {
-	return SyncRoutes(nsName, routes, infraSubnet)
-}
-
-func (m *RealManager) ListRoutes(nsName string, infraSubnet string) ([]string, error) {
-	return ListRoutes(nsName, infraSubnet)
+// runner returns the command runner. A RealManager that a caller builds as a composite
+// literal holds no Runner, so runner returns the host runner in that case.
+func (m *RealManager) runner() execx.Runner {
+	if m.Runner == nil {
+		return execx.OSRunner{}
+	}
+	return m.Runner
 }
 
 // Route represents a Tailscale route.
@@ -64,13 +66,17 @@ type Link struct {
 // PollStatus polls the Tailscale daemon for routes in the given namespace.
 // Uses tailscale status --json via ip netns exec with a 5s timeout.
 func PollStatus(namespaceName string, socketPath string) ([]Route, error) {
+	return NewRealManager().PollStatus(namespaceName, socketPath)
+}
+
+// PollStatus polls the Tailscale daemon for routes in the given namespace.
+// Uses tailscale status --json via ip netns exec with a 5s timeout.
+func (m *RealManager) PollStatus(namespaceName string, socketPath string) ([]Route, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", namespaceName,
+	output, err := m.runner().Run(ctx, "ip", "netns", "exec", namespaceName,
 		"tailscale", "--socket="+socketPath, "status", "--json")
-
-	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tailscale status: %w", err)
 	}
@@ -95,7 +101,13 @@ func parseCIDR(network string) (net.IP, int, error) {
 // ListRoutes returns the route destinations currently configured in the namespace.
 // It parses the output of "ip netns exec <ns> ip route show".
 func ListRoutes(nsName string, infraSubnet string) ([]string, error) {
-	output, err := exec.Command("ip", "netns", "exec", nsName, "ip", "route", "show").Output()
+	return NewRealManager().ListRoutes(nsName, infraSubnet)
+}
+
+// ListRoutes returns the route destinations currently configured in the namespace.
+// It parses the output of "ip netns exec <ns> ip route show".
+func (m *RealManager) ListRoutes(nsName string, infraSubnet string) ([]string, error) {
+	output, err := m.runner().Run(context.Background(), "ip", "netns", "exec", nsName, "ip", "route", "show")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routes in %s: %w", nsName, err)
 	}
@@ -143,7 +155,14 @@ func parseRouteOutput(output string, infraSubnet string) []string {
 // It compares desired routes against actual routes, adding missing and removing stale ones.
 // Individual failures are collected and returned as a combined error.
 func SyncRoutes(namespaceName string, routes []Route, infraSubnet string) error {
-	actual, err := ListRoutes(namespaceName, infraSubnet)
+	return NewRealManager().SyncRoutes(namespaceName, routes, infraSubnet)
+}
+
+// SyncRoutes synchronizes routes to the specified namespace using a diff-based approach.
+// It compares desired routes against actual routes, adding missing and removing stale ones.
+// Individual failures are collected and returned as a combined error.
+func (m *RealManager) SyncRoutes(namespaceName string, routes []Route, infraSubnet string) error {
+	actual, err := m.ListRoutes(namespaceName, infraSubnet)
 	if err != nil {
 		return fmt.Errorf("failed to list current routes: %w", err)
 	}
@@ -163,7 +182,7 @@ func SyncRoutes(namespaceName string, routes []Route, infraSubnet string) error 
 	// Add missing routes (desired minus actual)
 	for _, r := range routes {
 		if !actualSet[r.Network] {
-			if err := addRoute(namespaceName, r.Network); err != nil {
+			if err := m.addRoute(namespaceName, r.Network); err != nil {
 				errs = append(errs, fmt.Errorf("failed to add route %s: %w", r.Network, err))
 			}
 		}
@@ -172,7 +191,7 @@ func SyncRoutes(namespaceName string, routes []Route, infraSubnet string) error 
 	// Remove stale routes (actual minus desired)
 	for _, a := range actual {
 		if !desiredSet[a] {
-			if err := deleteRoute(namespaceName, a); err != nil {
+			if err := m.deleteRoute(namespaceName, a); err != nil {
 				errs = append(errs, fmt.Errorf("failed to delete route %s: %w", a, err))
 			}
 		}
@@ -181,17 +200,21 @@ func SyncRoutes(namespaceName string, routes []Route, infraSubnet string) error 
 	return errors.Join(errs...)
 }
 
-// addRoute adds a single route to the namespace using ip route add.
-func addRoute(namespaceName, destination string) error {
+// addRoute adds a single route to the namespace using ip route replace.
+// The command is "replace" rather than "add", because "add" fails when the destination
+// is already present and "replace" gives the same result for a destination that is not.
+func (m *RealManager) addRoute(namespaceName, destination string) error {
 	if _, _, err := parseCIDR(destination); err != nil {
 		return fmt.Errorf("invalid route destination %s: %w", destination, err)
 	}
-	return exec.Command("ip", "netns", "exec", namespaceName, "ip", "route", "add", destination).Run()
+	_, err := m.runner().Run(context.Background(), "ip", "netns", "exec", namespaceName, "ip", "route", "replace", destination)
+	return err
 }
 
 // deleteRoute removes a single route from the namespace.
-func deleteRoute(namespaceName, destination string) error {
-	return exec.Command("ip", "netns", "exec", namespaceName, "ip", "route", "del", destination).Run()
+func (m *RealManager) deleteRoute(namespaceName, destination string) error {
+	_, err := m.runner().Run(context.Background(), "ip", "netns", "exec", namespaceName, "ip", "route", "del", destination)
+	return err
 }
 
 // GetDefaultRoute extracts the default route from Tailscale status.
