@@ -94,6 +94,12 @@ type Reconciler struct {
 	unprotected   map[string]string // tailnetID -> the reported overlay mount error
 	events        []Event
 
+	// jumpPositions holds the position of the jump rule of the daemon in each parent
+	// chain, as the last tick measured it. A parent chain that holds no jump rule gets
+	// the position 0. The reconciler records an event for a change of position only, so
+	// a host that keeps its chain adds no event on the next tick.
+	jumpPositions map[string]int
+
 	// hostAccessRules holds true for a tailnet whose namespace carries the host access
 	// rules, and false for a tailnet whose rules the reconciler removed. A tailnet with no
 	// entry is a tailnet the reconciler has not seen since it started, so the first cycle
@@ -133,8 +139,9 @@ type StaleRuleReaper interface {
 // ChainWriter writes the compiled local rule set into the chains that the daemon owns.
 // access.Writer carries the ability.
 type ChainWriter interface {
-	// Apply makes the chains hold the compiled rule set and reports whether it wrote.
-	Apply(ctx context.Context, c access.Compiled) (bool, error)
+	// Apply makes the chains hold the compiled rule set. It returns the write state and
+	// the placement of each jump rule that the daemon owns.
+	Apply(ctx context.Context, c access.Compiled) (access.Result, error)
 	// Teardown removes both chains and both jump rules.
 	Teardown(ctx context.Context) error
 }
@@ -165,6 +172,7 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		pausedStates:       make(map[string]bool),
 		lastErrors:         make(map[string]string),
 		unprotected:        make(map[string]string),
+		jumpPositions:      make(map[string]int),
 		hostAccessRules:    make(map[string]bool),
 		teardownHostAccess: namespaces.TeardownHostAccess,
 		hostFile:           dns.NewHostFileMonitor(dns.DefaultHostResolvConf),
@@ -621,15 +629,16 @@ func (r *Reconciler) applyAccess() {
 	ctx, cancel := context.WithTimeout(context.Background(), accessTimeout)
 	defer cancel()
 
-	wrote, err := writer.Apply(ctx, compiled)
+	res, err := writer.Apply(ctx, compiled)
 	if err != nil {
 		r.emit("access.write_failed", "", err.Error())
 		return
 	}
-	if wrote {
+	if res.Wrote {
 		r.emit("access.written", "", fmt.Sprintf("mode %s, %d forward rules, %d out rules",
 			set.EffectiveMode(), len(compiled.Forward), len(compiled.Out)))
 	}
+	r.reportJumps(res.Jumps)
 	// The chain now holds the rules of the operator, therefore the version 0.9 rules are
 	// no longer the path that accepts the traffic of a namespace.
 	if set.EffectiveMode() == access.ModeEnforce {

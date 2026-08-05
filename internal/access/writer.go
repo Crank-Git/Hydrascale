@@ -57,42 +57,70 @@ type jump struct {
 	chain  string
 }
 
+// ParentForward and ParentInput name the two chains of the filter table that hold a jump
+// rule of the daemon.
+const (
+	ParentForward = "FORWARD"
+	ParentInput   = "INPUT"
+)
+
 // jumps holds the two jump rules that the daemon owns. The operator decided on 2026-08-05
 // that the daemon inserts the jump at position 1.
 var jumps = []jump{
-	{parent: "FORWARD", chain: ChainForward},
-	{parent: "INPUT", chain: ChainOut},
+	{parent: ParentForward, chain: ChainForward},
+	{parent: ParentInput, chain: ChainOut},
+}
+
+// Placement states where the jump rule of the daemon sits in a parent chain.
+// Position counts from 1, and it is 0 when the parent chain holds no jump rule.
+// Above holds the target of each rule above the jump rule, in the order of the chain.
+type Placement struct {
+	Parent   string
+	Position int
+	Above    []string
+}
+
+// Result is the outcome of one Apply.
+// Wrote is true when Apply wrote the chains, and false when the live chains already held
+// the compiled rule set.
+// Jumps holds one Placement for each jump rule that the daemon owns. Apply reads the
+// placement before it adds an absent jump rule, therefore a Placement with the position 0
+// states that the parent chain held no jump rule at the start of this call.
+type Result struct {
+	Wrote bool
+	Jumps []Placement
 }
 
 // Apply makes the two chains hold the compiled rule set, and it makes FORWARD and INPUT
 // each hold one jump rule into the matching chain.
 // ctx bounds every command, and c is the output of Compile.
-// Apply reports true when it wrote the chains, and false when the live chains already held
-// the compiled rule set.
+// Apply returns the write state of the chains and the placement of each jump rule.
 // Apply returns an error when a command fails. A failed write leaves the previous chains in
 // place, because iptables-restore applies the file as one transaction.
-func (w *Writer) Apply(ctx context.Context, c Compiled) (bool, error) {
+func (w *Writer) Apply(ctx context.Context, c Compiled) (Result, error) {
 	want := fingerprint(c)
 
 	live, err := w.liveFingerprints(ctx)
 	if err != nil {
-		return false, err
+		return Result{}, err
 	}
 
-	wrote := false
+	var res Result
 	if live[ChainForward] != want || live[ChainOut] != want {
 		file := restoreFile(c, want)
 		if out, err := w.runner().RunInput(ctx, file, "iptables-restore", "--noflush"); err != nil {
-			return false, fmt.Errorf("iptables-restore --noflush: %v (%s)", err, out)
+			return Result{}, fmt.Errorf("iptables-restore --noflush: %v (%s)", err, out)
 		}
-		wrote = true
+		res.Wrote = true
 	}
 
 	var errs []error
 	for _, j := range jumps {
-		errs = append(errs, w.ensureJump(ctx, j))
+		placement, err := w.ensureJump(ctx, j)
+		res.Jumps = append(res.Jumps, placement)
+		errs = append(errs, err)
 	}
-	return wrote, errors.Join(errs...)
+	return res, errors.Join(errs...)
 }
 
 // Teardown removes both chains and both jump rules.
@@ -111,18 +139,62 @@ func (w *Writer) Teardown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// ensureJump makes the parent chain hold one jump rule into the daemon chain.
-// ensureJump runs the check first, so that a tick on an unchanged host writes nothing. An
-// operator firewall that reloads and removes the jump gets the jump back on the next tick.
-func (w *Writer) ensureJump(ctx context.Context, j jump) error {
-	if _, err := w.runner().Run(ctx, "iptables", "-C", j.parent, "-j", j.chain); err == nil {
-		return nil
-	}
-	out, err := w.runner().Run(ctx, "iptables", "-I", j.parent, "1", "-j", j.chain)
+// ensureJump makes the parent chain hold one jump rule into the daemon chain, and it
+// returns where that rule sat before this call.
+// ensureJump reads the parent chain first, so that a tick on an unchanged host writes
+// nothing. The read also carries the position, which the caller reports; the daemon holds
+// no guarantee that another service keeps its jump rule at position 1. An operator
+// firewall that reloads and removes the jump gets the jump back on this tick.
+func (w *Writer) ensureJump(ctx context.Context, j jump) (Placement, error) {
+	out, err := w.runner().Run(ctx, "iptables", "-S", j.parent)
 	if err != nil {
-		return fmt.Errorf("iptables -I %s 1 -j %s: %v (%s)", j.parent, j.chain, err, out)
+		return Placement{Parent: j.parent}, fmt.Errorf("iptables -S %s: %v (%s)", j.parent, err, out)
 	}
-	return nil
+
+	placement := placementOf(string(out), j)
+	if placement.Position > 0 {
+		return placement, nil
+	}
+	if out, err := w.runner().Run(ctx, "iptables", "-I", j.parent, "1", "-j", j.chain); err != nil {
+		return placement, fmt.Errorf("iptables -I %s 1 -j %s: %v (%s)", j.parent, j.chain, err, out)
+	}
+	return placement, nil
+}
+
+// placementOf returns where the jump rule of the daemon sits in the output of
+// `iptables -S <parent>`.
+// placementOf matches the exact rule that the daemon writes, therefore a conditional jump
+// of the operator into the same chain does not count as the rule of the daemon.
+func placementOf(output string, j jump) Placement {
+	placement := Placement{Parent: j.parent}
+
+	position := 0
+	var above []string
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "-A" || fields[1] != j.parent {
+			continue
+		}
+		position++
+		if len(fields) == 4 && fields[2] == "-j" && fields[3] == j.chain {
+			placement.Position = position
+			placement.Above = above
+			return placement
+		}
+		above = append(above, targetOf(fields))
+	}
+	return placement
+}
+
+// targetOf returns the target of one rule of `iptables -S`, and the value none for a rule
+// that holds no target.
+func targetOf(fields []string) string {
+	for i := len(fields) - 2; i >= 0; i-- {
+		if fields[i] == "-j" || fields[i] == "-g" {
+			return fields[i+1]
+		}
+	}
+	return "none"
 }
 
 // deleteRule runs one iptables command that removes a rule or a chain.

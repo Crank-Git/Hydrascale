@@ -25,10 +25,14 @@ type StatusResponse struct {
 }
 
 // AccessStatus is the access field of GET /api/status. It holds the mode that the daemon
-// applies the local rule set in, and the count of rules.
+// applies the local rule set in, the count of rules, and the position of the jump rule.
+// JumpPosition is the position of the jump rule into HYDRASCALE-FWD in the FORWARD chain,
+// as the last tick measured it. It counts from 1. It is 0 before the first tick, and for a
+// FORWARD chain that held no jump rule on the last tick.
 type AccessStatus struct {
-	Mode  string `json:"mode"`
-	Rules int    `json:"rules"`
+	Mode         string `json:"mode"`
+	Rules        int    `json:"rules"`
+	JumpPosition int    `json:"jump_position"`
 }
 
 // AccessNode is one endpoint of the local rule model. Kind holds tailnet, host, or
