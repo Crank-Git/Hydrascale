@@ -20,7 +20,6 @@ const Internet = "internet"
 const ModeEnforce = "enforce"
 
 // ModeObserve logs a packet that no rule allows and drops nothing.
-// Issue #136 adds the chain tail that this mode needs.
 const ModeObserve = "observe"
 
 // Rule allows traffic from one endpoint to another endpoint on a list of ports.
