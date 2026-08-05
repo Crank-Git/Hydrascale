@@ -23,13 +23,6 @@ config.yaml
 /vendor/
 .gstack/
 
-# Wails GUI subproject: its frontend/dist (the actual frontend source) and
-# build/ (icons + platform plists Wails needs) must be tracked despite the
-# global dist/ and build/ ignores above. Only the compiled output is ignored.
-!gui/frontend/dist/
-!gui/build/
-gui/build/bin/
-
 # Claude Code
 .claude/settings.local.json
 .claude/worktrees/

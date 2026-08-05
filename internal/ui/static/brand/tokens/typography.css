@@ -1,0 +1,36 @@
+:root{
+  --sans:'Space Grotesk', system-ui, sans-serif; /* @kind font */
+  --mono:'Space Mono', ui-monospace, Menlo, monospace; /* @kind font */
+  --font-display:var(--sans);
+  --font-body:var(--sans);
+  --font-data:var(--mono);
+
+  /* display: negative tracking, always. */
+  --fs-display:44px;
+  --fs-h1:30px;
+  --fs-h2:21px;
+  --fs-h3:17px;
+  --fs-lead:15px;
+  --fs-body:14px;
+  --fs-sm:13px;
+  --fs-data:12.5px;
+  --fs-micro:11.5px;
+  --fs-label:11px;   /* uppercase mono label */
+
+  --ls-display:-.04em;
+  --ls-h1:-.035em;
+  --ls-h2:-.025em;
+  --ls-body:-.01em;
+  --ls-label:.14em;  /* uppercase mono only */
+  --ls-mono:0em;
+
+  --lh-display:1.02; /* @kind other */
+  --lh-head:1.12;    /* @kind other */
+  --lh-body:1.5;     /* @kind other */
+  --lh-data:1.35;    /* @kind other */
+
+  --fw-regular:400;  /* @kind font */
+  --fw-medium:500;   /* @kind font */
+  --fw-semibold:600; /* @kind font */
+  --fw-bold:700;     /* @kind font */
+}

@@ -1,0 +1,22 @@
+/* One 4px-derived scale. Density 6: comfortable, not airy, never cramped. */
+:root{
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px;
+  --sp-6:24px; --sp-7:32px; --sp-8:40px; --sp-9:56px; --sp-10:80px;
+
+  --pad-card:18px 20px;
+  --pad-card-lg:22px 24px;
+  --pad-row:12px 16px;
+  --pad-btn:10px 16px;
+  --pad-btn-sm:7px 12px;
+  --pad-input:11px 13px;
+  --pad-view:28px 32px;
+
+  --w-nav:212px;        /* left navigation */
+  --w-side:320px;       /* contextual right panel */
+  --h-topbar:60px;
+  --maxw-read:640px;    /* prose never wider */
+  --maxw-app:1440px;
+
+  --dot:8px;
+  --dot-sm:6px;
+}
