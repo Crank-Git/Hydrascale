@@ -198,7 +198,7 @@ comes from an OAuth client. Verified against the Tailscale OpenAPI schema, retri
 | Method and path | Purpose | Notes |
 |---|---|---|
 | `GET /tailnet/{tailnet}/acl` | Read the policy. | Returns `application/json` or `application/hujson`. The scope `policy_file:read` covers it. The response carries an `ETag` header. |
-| `POST /tailnet/{tailnet}/acl` | Write the policy. | Accepts `application/json` or `application/hujson`. The optional `If-Match` header carries the `ETag` value from the read. A mismatch returns HTTP 412. |
+| `POST /tailnet/{tailnet}/acl` | Write the policy. | Accepts `application/json` or `application/hujson`. The optional `If-Match` header carries the `ETag` value from the read. A mismatch returns HTTP 412. The scope `policy_file` covers it, confirmed 2026-08-05. |
 | `POST /tailnet/{tailnet}/acl/validate` | Validate and test the policy. | Accepts the same content types. |
 | `POST /tailnet/{tailnet}/acl/preview` | Preview which rules match. | Version 1.0 does not use it. |
 
@@ -274,7 +274,15 @@ and adds no gRPC dependency.
 
 ## Open questions
 
-- The OAuth scope name that a Tailscale policy write needs. The OpenAPI schema names
-  `policy_file:read` for the read and it names no scope for the write. The epic confirms
-  the write scope from the Tailscale OAuth documentation before it writes the setup
-  guide. `spec.md` records this as risk R1.
+- ~~The OAuth scope name that a Tailscale policy write needs.~~ **Answered 2026-08-05 by
+  issue #155.** The scope is `policy_file`. The OpenAPI schema states
+  `OAuth Scope: policy_file.` for `operationId: setPolicyFile`, and
+  `https://tailscale.com/kb/1623/` states that `policy_file` covers
+  `POST /api/v2/tailnet/:tailnet/acl`. The same page states that
+  `devices:posture_attributes` and `devices:core:read` are required with the scope.
+  Risk R1 in `spec.md` is closed.
+- The media type that `POST /tailnet/{tailnet}/acl/validate` accepts. The OpenAPI schema
+  names `application/json` for the request body of that endpoint alone, and the table
+  above states that validate "Accepts the same content types". The client sends
+  `application/json`, which the schema confirms. Issue #159 measures a document that holds
+  a comment against a real tailnet before the console offers the validate action.
