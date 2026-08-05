@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -237,8 +238,15 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 		t.Skip("node is not on this host, so the console JavaScript tests do not run here")
 	}
 
-	out, err := exec.Command(node, "--test", "jstest/").CombinedOutput()
-	t.Logf("node --test jstest/\n%s", out)
+	// The test names each file, because Node 26 reads a directory argument as a module
+	// to run rather than as a set of tests to find.
+	files, err := filepath.Glob("jstest/*.test.mjs")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("the package holds no console JavaScript test: %v", err)
+	}
+
+	out, err := exec.Command(node, append([]string{"--test"}, files...)...).CombinedOutput()
+	t.Logf("node --test %s\n%s", strings.Join(files, " "), out)
 	if err != nil {
 		t.Fatalf("the console JavaScript tests fail: %v", err)
 	}

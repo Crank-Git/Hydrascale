@@ -1,0 +1,29 @@
+# dev-config.yaml drives the console during development.
+#
+# It declares two tailnets and it names no credential, so the daemon creates the
+# namespaces and every tailnet stays unauthenticated. That is the state that most needs a
+# designed empty view, and it is the state that the console must show without inventing
+# data. See the section "Seed data" of docs/specs/spec.md.
+#
+# Run the daemon with it on the Linux test host, and open http://127.0.0.1:9443:
+#
+#   sudo hydrascale serve --config contrib/dev-config.yaml
+#
+# The console has no authentication. Any local account on the host reaches it.
+
+version: 2
+
+tailnets:
+  - id: dev-one
+  - id: dev-two
+
+resolver:
+  mode: unified
+  bind_address: "127.0.0.53:5354"
+
+reconciler:
+  interval: 10s
+
+console:
+  enabled: true
+  bind_address: "127.0.0.1:9443"

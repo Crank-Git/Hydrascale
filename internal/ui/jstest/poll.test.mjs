@@ -279,5 +279,13 @@ test("the shell names five views and each one holds a heading and an empty state
       view.empty.endsWith("."),
       `${view.id} states no empty state as a sentence`,
     );
+    assert.ok(
+      view.pending.endsWith("."),
+      `${view.id} states no sentence for the view that a later issue adds`,
+    );
+    assert.ok(
+      !view.pending.startsWith("No tailnet"),
+      `${view.id} states the empty state where it holds data`,
+    );
   }
 });
