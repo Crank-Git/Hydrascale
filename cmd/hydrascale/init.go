@@ -428,11 +428,7 @@ func nativeTailscaleAcceptDNS() bool {
 }
 
 func backupFile(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path+".bak", data, 0640)
+	return config.BackupFile(path, path+".bak")
 }
 
 // printCheatSheet shows how to run commands inside tailnet namespaces.

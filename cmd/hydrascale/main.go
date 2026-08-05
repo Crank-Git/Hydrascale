@@ -493,6 +493,12 @@ func serveCmd() *cobra.Command {
 				}
 			}
 
+			// The migration runs before the first reconcile, so the daemon applies the
+			// preserving rule set on the first cycle after the upgrade from version 0.9.
+			if err := r.MigrateAccess(); err != nil {
+				return fmt.Errorf("migrate the access block: %w", err)
+			}
+
 			// Start API server
 			apiServer := api.NewServer(api.DefaultSocketPath, r)
 			apiServer.SetSocketGroup(cfg.SocketGroup)
