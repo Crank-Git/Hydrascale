@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"hydrascale/internal/access"
 )
 
 func TestLoadConfigAccessBlock(t *testing.T) {
@@ -53,6 +55,60 @@ access:
 		}
 		if cfg.Access.Rules[0].Ports[0] != "tcp/22" {
 			t.Errorf("Ports[0] = %q, want %q", cfg.Access.Rules[0].Ports[0], "tcp/22")
+		}
+	})
+
+	t.Run("loads the mode enforce when the access block holds no mode key", func(t *testing.T) {
+		tmp := writeTemp(t, `
+version: 2
+tailnets:
+  - id: "alpha"
+  - id: "beta"
+access:
+  rules:
+    - from: "alpha"
+      to: "beta"
+`)
+		cfg, err := LoadConfig(tmp)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.AccessMode() != access.ModeEnforce {
+			t.Errorf("AccessMode() = %q, want %q", cfg.AccessMode(), access.ModeEnforce)
+		}
+	})
+
+	t.Run("loads the mode enforce when the file holds no access key", func(t *testing.T) {
+		tmp := writeTemp(t, `
+version: 2
+tailnets:
+  - id: "alpha"
+`)
+		cfg, err := LoadConfig(tmp)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.AccessMode() != access.ModeEnforce {
+			t.Errorf("AccessMode() = %q, want %q", cfg.AccessMode(), access.ModeEnforce)
+		}
+	})
+
+	t.Run("rejects a mode that the daemon does not run and names both accepted values", func(t *testing.T) {
+		tmp := writeTemp(t, `
+version: 2
+tailnets:
+  - id: "alpha"
+access:
+  mode: "audit"
+`)
+		_, err := LoadConfig(tmp)
+		if err == nil {
+			t.Fatal("LoadConfig returned no error, want an error")
+		}
+		for _, want := range []string{"audit", access.ModeEnforce, access.ModeObserve} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q, want the value %q in the message", err, want)
+			}
 		}
 	})
 
