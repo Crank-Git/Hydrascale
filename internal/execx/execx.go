@@ -6,6 +6,7 @@
 package execx
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
 	"syscall"
@@ -18,6 +19,18 @@ type Runner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
+// InputRunner runs one external command that reads its input on standard input.
+//
+// Run gives a command an empty standard input. iptables-restore reads its rule file on
+// standard input, therefore the daemon needs the second method. InputRunner is a separate
+// interface, so that a test double of Runner in another package stays valid.
+type InputRunner interface {
+	// RunInput executes name with args, writes stdin to the standard input of the
+	// command, and returns the combined output.
+	// RunInput returns an error when the command fails to start or exits non-zero.
+	RunInput(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
+}
+
 // OSRunner runs a command on the host.
 type OSRunner struct{}
 
@@ -25,6 +38,15 @@ type OSRunner struct{}
 // Run kills the command when ctx ends.
 func (OSRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+// RunInput executes name with args on the host, writes stdin to the standard input of the
+// command, and returns the combined output.
+// RunInput kills the command when ctx ends.
+func (OSRunner) RunInput(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	return cmd.CombinedOutput()
 }
 
 // Spec describes one long-lived child process that a Starter starts.

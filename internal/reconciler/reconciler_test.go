@@ -44,8 +44,10 @@ type mockNS struct {
 	createErr  error
 	deleteErr  error
 	listErr    error
-	reapCount  int   // the count that ReapStaleRules returns
-	reapErr    error // the error that ReapStaleRules returns
+	reapCount  int    // the count that ReapStaleRules returns
+	reapErr    error  // the error that ReapStaleRules returns
+	legacy     int    // the count that RemoveLegacyForwardRules returns
+	forwarding string // the value that NamespaceForwarding returns
 }
 
 func newMockNS() *mockNS {
@@ -97,6 +99,17 @@ func (m *mockNS) TeardownVeth(nsName string, infraSubnet string) error {
 
 func (m *mockNS) ReapStaleRules() (int, error) {
 	return m.reapCount, m.reapErr
+}
+
+func (m *mockNS) RemoveLegacyForwardRules() (int, error) {
+	return m.legacy, nil
+}
+
+func (m *mockNS) NamespaceForwarding(nsName string) (string, error) {
+	if m.forwarding == "" {
+		return "0", nil
+	}
+	return m.forwarding, nil
 }
 
 type mockDaemon struct {
