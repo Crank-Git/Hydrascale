@@ -10,13 +10,18 @@ import test from "node:test";
 
 import { CONSOLE_HEADER, consoleRequestInit } from "../static/app.js";
 import {
+  APPLYING_LABEL,
+  DRY_RUN_ROUTE,
   MODE_ENFORCE,
   MODE_OBSERVE,
   OBSERVE_LOG_COMMAND,
   SQUARE_SIDE,
   SQUARE_SIDE_DENSE,
+  applyFailureStatement,
+  applyStagedRules,
   createAccessState,
   deleteRule,
+  droppedStatement,
   emptyStatement,
   flowCaption,
   flowMarkup,
@@ -29,9 +34,11 @@ import {
   modeChange,
   observeStatement,
   parsePorts,
+  rebaseOffer,
   ruleListModel,
   sendModeChange,
   setRulePorts,
+  stagedListModel,
   toggleSquare,
 } from "../static/access.js";
 
@@ -866,6 +873,343 @@ test("a port chip renders in the mono typeface", async () => {
   assert.match(source, /ac-ports/);
   const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
   assert.match(style, /\.ac-ports\{/);
+});
+
+// ---------------------------------------------------------------------------
+// The staged list
+// ---------------------------------------------------------------------------
+
+test("the staged list states every staged edit before the operator applies it", () => {
+  // FR-editor-25. The list holds one row per staged edit, in the order add, change,
+  // remove, therefore the operator reads what the apply sends.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules([
+    { from: "jbones", to: "host", ports: ["tcp/22", "tcp/443"] },
+    { from: "homelab", to: "internet", ports: [] },
+  ]);
+
+  const list = stagedListModel(state.difference());
+  assert.equal(list.count, 3);
+  assert.equal(list.count, state.count());
+  assert.deepEqual(list.rows.map((row) => row.kind), ["add", "change", "remove"]);
+  assert.deepEqual(list.rows.map((row) => `${row.from} ${row.to}`), [
+    "homelab internet",
+    "jbones host",
+    "jbones internet",
+  ]);
+  assert.equal(list.rows[0].portsLabel, "all ports");
+  assert.equal(list.rows[1].portsLabel, "tcp/22, tcp/443");
+  for (const row of list.rows) {
+    assert.ok(row.word.length > 0);
+  }
+});
+
+test("a staged list of 40 edits holds 40 rows, it scrolls, and the count is exact", async () => {
+  // The edge case "The operator stages 40 edits". The count comes from the one difference
+  // of the model, therefore the header and the list cannot state two numbers.
+  const nodes = [];
+  const rules = [];
+  for (let index = 0; index < 40; index += 1) {
+    nodes.push({ id: `net${index}`, kind: "tailnet", peers: 1, veth: "10.99.0.2" });
+    rules.push({ from: `net${index}`, to: "internet", ports: [] });
+  }
+
+  const state = createAccessState();
+  state.setBase(accessBody({
+    rules: [],
+    nodes: [...nodes, { id: "host", kind: "host" }, { id: "internet", kind: "internet" }],
+  }));
+  state.setRules(rules);
+
+  assert.equal(state.count(), 40);
+  const list = stagedListModel(state.difference());
+  assert.equal(list.count, 40);
+  assert.equal(list.rows.length, 40);
+  assert.equal(headerModel(MODE_ENFORCE, list.count).staged, "40 staged");
+
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ac-stagedlist\{[^}]*overflow-y:auto/);
+});
+
+// ---------------------------------------------------------------------------
+// The apply and the discard
+// ---------------------------------------------------------------------------
+
+test("apply sends the dry run and then one PUT /api/access with the whole rule set", async () => {
+  // FR-editor-26. The dry run computes the effect before the write, which the section
+  // Interfaces of features/07-console-access-editor.md states. Both requests carry the
+  // whole rule set, so that two consoles cannot interleave partial writes.
+  const sent = [];
+  const request = async (route, method, body) => {
+    sent.push({ route, method, body });
+    return accessBody();
+  };
+
+  const state = createAccessState({ request });
+  state.setBase(accessBody());
+  state.setRules(toggleSquare(state.rules(), "jbones", "homelab"));
+
+  const result = await applyStagedRules(state);
+
+  assert.equal(result.ok, true);
+  assert.equal(DRY_RUN_ROUTE, "/api/access?dry_run=true");
+  assert.deepEqual(sent.map((one) => one.route), ["/api/access?dry_run=true", "/api/access"]);
+  for (const one of sent) {
+    assert.equal(one.method, "PUT");
+    assert.equal(one.body.mode, MODE_ENFORCE);
+    assert.deepEqual(one.body.rules, [
+      { from: "jbones", to: "internet", ports: [] },
+      { from: "jbones", to: "host", ports: ["tcp/22"] },
+      { from: "jbones", to: "homelab", ports: [] },
+    ]);
+  }
+});
+
+test("the apply carries the console header", () => {
+  // FR-console-8. The apply is a mutating request, therefore it carries the header that
+  // internal/api/console.go requires.
+  const init = consoleRequestInit("PUT", { mode: "enforce", rules: [] });
+  assert.equal(init.headers[CONSOLE_HEADER], "1");
+});
+
+test("a successful apply clears the staged edits", async () => {
+  // FR-editor-29. The daemon answers with the rule set that it holds now, therefore the
+  // model takes that answer as the new rule set and it holds no staged edit.
+  const applied = accessBody({
+    rules: [...accessBody().rules, { from: "jbones", to: "homelab", ports: [] }],
+  });
+  const state = createAccessState({ request: async () => applied });
+  state.setBase(accessBody());
+  state.setRules(toggleSquare(state.rules(), "jbones", "homelab"));
+  assert.equal(state.count(), 1);
+
+  const result = await applyStagedRules(state);
+
+  assert.equal(result.ok, true);
+  assert.equal(state.count(), 0);
+  assert.equal(state.baseChanged(), false);
+  assert.deepEqual(state.rules(), applied.rules);
+});
+
+test("a successful apply polls the daemon", async () => {
+  // FR-editor-29. The poll layer of app.js is the one data source of the console, so the
+  // view asks it for a new tick rather than reading the route a second time.
+  const shell = await readFile(new URL("../static/app.js", import.meta.url), "utf8");
+  assert.match(shell, /export function refreshConsole/);
+
+  const source = await readFile(new URL("../static/access.js", import.meta.url), "utf8");
+  assert.match(source, /refreshConsole\(\)/);
+});
+
+test("a failed dry run keeps every staged edit and states the message of the daemon verbatim", async () => {
+  // FR-editor-30, and the edge case "The daemon returns HTTP 400 on apply". The daemon
+  // answers with {"error": "<message>"} and requestJSON rejects with that message.
+  const message = 'invalid rule 1: unknown tailnet "corp-dev"';
+  const sent = [];
+  const request = async (route) => {
+    sent.push(route);
+    throw new Error(message);
+  };
+
+  const state = createAccessState({ request });
+  state.setBase(accessBody());
+  state.setRules(toggleSquare(state.rules(), "jbones", "homelab"));
+
+  const result = await applyStagedRules(state);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, message);
+  // The dry run refused the rule set, therefore the console sent no write.
+  assert.deepEqual(sent, [DRY_RUN_ROUTE]);
+  assert.equal(state.count(), 1);
+  assert.equal(applyFailureStatement(result.error).message, message);
+});
+
+test("a failed write keeps every staged edit and states the message of the daemon verbatim", async () => {
+  // FR-editor-30. The dry run passes and the write fails, therefore the console keeps the
+  // edits of the operator and it repeats the message of the daemon.
+  const message = "failed to apply the rule set: iptables: Permission denied";
+  const request = async (route) => {
+    if (route === DRY_RUN_ROUTE) {
+      return accessBody();
+    }
+    throw new Error(message);
+  };
+
+  const state = createAccessState({ request });
+  state.setBase(accessBody());
+  state.setRules(deleteRule(state.rules(), "jbones", "host"));
+
+  const result = await applyStagedRules(state);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, message);
+  assert.equal(state.count(), 1);
+});
+
+test("the failure statement repeats the message of the daemon and it names what survives", () => {
+  // .claude/rules/ste.md: a rewritten message is destroyed evidence. The statement holds
+  // the message unchanged, and it states the rule set that the host still enforces.
+  const message = 'invalid port "22": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>';
+  const statement = applyFailureStatement(message);
+
+  assert.equal(statement.message, message);
+  assert.match(statement.lead, /refused/);
+  assert.match(statement.lead, /keeps the rule set/);
+});
+
+test("the console writes the message of the daemon as text and never as markup", () => {
+  // A message that holds markup characters must reach the screen as text. The statement
+  // returns the message unchanged and the view writes it through textContent.
+  const hostile = '<script>alert("x")</script>';
+  assert.equal(applyFailureStatement(hostile).message, hostile);
+});
+
+test("the apply action is disabled while the daemon applies and it states that the daemon applies", () => {
+  // The screen state "Apply in progress". The header takes the third argument, therefore
+  // one model states the resting label and the label of the request.
+  const resting = headerModel(MODE_ENFORCE, 2, false).controls;
+  assert.equal(resting.find((one) => one.id === "apply").label, "Apply");
+  assert.equal(resting.find((one) => one.id === "apply").disabled, false);
+
+  const sending = headerModel(MODE_ENFORCE, 2, true).controls;
+  const apply = sending.find((one) => one.id === "apply");
+  assert.equal(apply.label, APPLYING_LABEL);
+  assert.equal(apply.label, "The daemon applies the rule set");
+  assert.equal(apply.disabled, true);
+  // The discard and the mode change both write, therefore neither runs during the apply.
+  assert.equal(sending.find((one) => one.id === "discard").disabled, true);
+  assert.equal(sending.find((one) => one.id === "mode").disabled, true);
+  // The accent still marks one thing.
+  assert.equal(sending.filter((one) => one.accent).length, 1);
+});
+
+test("the discard control returns the view to the newest rule set of the daemon", () => {
+  // FR-editor-27. Another console changed the rule set, therefore the discard returns the
+  // view to that rule set rather than to the rule set of the first poll.
+  const changed = accessBody({ rules: [{ from: "homelab", to: "host", ports: [] }] });
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules([]);
+  state.setBase(changed);
+
+  state.discard();
+
+  assert.deepEqual(state.rules(), changed.rules);
+  assert.equal(state.count(), 0);
+  assert.equal(state.baseChanged(), false);
+});
+
+test("the console applies no edit automatically, including after a timeout", () => {
+  // A behaviour rule of features/07-console-access-editor.md. The view starts no timer,
+  // therefore no apply runs without the operator.
+  return readFile(new URL("../static/access.js", import.meta.url), "utf8").then((source) => {
+    assert.doesNotMatch(source, /setTimeout|setInterval/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The rebase
+// ---------------------------------------------------------------------------
+
+// changedBody is the answer of the daemon after another console added one rule.
+function changedBody() {
+  return accessBody({
+    rules: [...accessBody().rules, { from: "homelab", to: "host", ports: [] }],
+  });
+}
+
+test("a rule set that changed on the daemon offers to rebase the staged edits or to discard them", () => {
+  // The edge case "Another console applies a change while edits are staged".
+  const state = createAccessState();
+  state.setBase(accessBody());
+  assert.equal(state.baseChanged(), false);
+
+  state.setRules([...state.rules(), { from: "homelab", to: "internet", ports: [] }]);
+  assert.equal(state.baseChanged(), false, "the daemon changed nothing yet");
+
+  state.setBase(changedBody());
+  assert.equal(state.baseChanged(), true);
+
+  const offer = rebaseOffer(state.baseChanged(), state.count());
+  assert.deepEqual(offer.controls.map((one) => one.id), ["rebase", "discard"]);
+  assert.match(offer.sentences.join(" "), /changed/);
+  // The accent belongs to the apply action alone, therefore the offer takes none.
+  for (const one of offer.controls) {
+    assert.equal(one.accent, false);
+    assert.equal(one.kind, "button");
+  }
+  assert.equal(rebaseOffer(false, 1), null);
+});
+
+test("the rebase moves the staged edits onto the newest rule set of the daemon", () => {
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules([...state.rules(), { from: "homelab", to: "internet", ports: [] }]);
+  state.setBase(changedBody());
+
+  state.rebase();
+
+  // The rule that the other console added survives, and the staged edit survives with it.
+  assert.deepEqual(state.rules(), [
+    { from: "jbones", to: "internet", ports: [] },
+    { from: "jbones", to: "host", ports: ["tcp/22"] },
+    { from: "homelab", to: "host", ports: [] },
+    { from: "homelab", to: "internet", ports: [] },
+  ]);
+  assert.equal(state.count(), 1);
+  assert.equal(state.baseChanged(), false);
+});
+
+test("the rebase keeps a staged removal", () => {
+  // The staged edit is the difference that the operator made, therefore the rebase repeats
+  // the removal on the new rule set rather than the rule set that the operator saw.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules(deleteRule(state.rules(), "jbones", "host"));
+  state.setBase(changedBody());
+
+  state.rebase();
+
+  assert.deepEqual(state.rules().map((rule) => `${rule.from} ${rule.to}`), [
+    "jbones internet",
+    "homelab host",
+  ]);
+  assert.equal(state.count(), 1);
+});
+
+test("a staged rule that names a removed tailnet is dropped, and the console states which one", () => {
+  // The edge case "A tailnet is removed while a staged rule names it". The daemon reports
+  // no node for the tailnet, therefore the rule cannot reach the daemon.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules([...state.rules(), { from: "homelab", to: "internet", ports: [] }]);
+
+  state.setBase(accessBody({
+    rules: accessBody().rules,
+    nodes: accessBody().nodes.filter((node) => node.id !== "homelab"),
+  }));
+
+  assert.ok(!state.rules().some((rule) => rule.from === "homelab"));
+  assert.equal(state.count(), 0);
+
+  const statement = droppedStatement(state.dropped());
+  assert.deepEqual(statement.rules, ["homelab to internet"]);
+  assert.match(statement.sentence, /dropped/);
+  assert.equal(droppedStatement([]), null);
+});
+
+test("the discard clears the statement of a dropped rule", () => {
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules([...state.rules(), { from: "homelab", to: "internet", ports: [] }]);
+  state.setBase(accessBody({ nodes: accessBody().nodes.filter((node) => node.id !== "homelab") }));
+  assert.equal(state.dropped().length, 1);
+
+  state.discard();
+
+  assert.deepEqual(state.dropped(), []);
 });
 
 // The drawing rules
