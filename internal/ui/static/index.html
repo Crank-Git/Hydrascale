@@ -64,8 +64,9 @@
 
 </div>
 <!-- The content security policy allows no inline script, so app.js binds every handler.
-     Issue #143, issue #144 and issue #145 add one module per view, and each module calls
-     registerView. -->
+     A view module loads after the shell, and each one calls registerView. Issue #144 and
+     issue #145 add the remaining modules. -->
 <script type="module" src="/app.js"></script>
+<script type="module" src="/overview.js"></script>
 </body>
 </html>
