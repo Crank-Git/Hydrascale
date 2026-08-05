@@ -24,7 +24,8 @@ jobs:
 
       - name: Format
         run: |
-          # gofmt walks vendor/ as well, so the check drops those paths.
+          # A developer machine holds an untracked vendor/ after go mod vendor, and gofmt
+          # walks it. The filter keeps the same command correct on that machine.
           unformatted=$(gofmt -l . | grep -v '^vendor/' || true)
           if [ -n "$unformatted" ]; then
             echo "gofmt reports that these files are not formatted:"

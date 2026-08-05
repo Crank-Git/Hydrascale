@@ -91,6 +91,12 @@ type Config struct {
 	// SecretsFile names the root-only credential store. LoadConfig applies
 	// DefaultSecretsPath when the key is absent.
 	SecretsFile string `yaml:"secrets_file,omitempty"`
+	// ProbeTarget is the address that each namespace sends one packet to, so that the
+	// status response reports measured reachability. An empty value selects
+	// reach.DefaultTarget, which is public. An operator who accepts no packet to a third
+	// party declares an address inside a tailnet here. An address on the local network
+	// reports unreachable, because the default rule set denies every private destination.
+	ProbeTarget string `yaml:"probe_target,omitempty"`
 	// Access holds the local rule set. The field is a pointer, because a nil value means
 	// that the file holds no access key, which is what the version 0.9 migration detects.
 	Access *access.RuleSet `yaml:"access,omitempty"`
@@ -194,6 +200,13 @@ func LoadConfig(path string) (*Config, error) {
 	// that holds no console key gets the loopback default rather than an error.
 	if err := ValidateConsoleBindAddress(cfg.ConsoleBindAddress()); err != nil {
 		return nil, err
+	}
+
+	// The daemon passes the probe target to `ping` inside a namespace, therefore the file
+	// declares an address and never a name. A name needs a resolver inside the namespace,
+	// and a failed lookup would report a broken path.
+	if cfg.ProbeTarget != "" && net.ParseIP(cfg.ProbeTarget) == nil {
+		return nil, fmt.Errorf("invalid probe_target %q: declare an IP address", cfg.ProbeTarget)
 	}
 
 	// Auto-migrate v1 to v2
