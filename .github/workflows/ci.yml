@@ -37,3 +37,12 @@ jobs:
 
       - name: Test with race detector
         run: go test -race -v ./...
+
+      - name: Vulnerability check
+        run: |
+          # govulncheck exits non-zero only when a reported vulnerability affects a
+          # called function, so a vulnerability in an uncalled dependency passes.
+          # The version is pinned, because a new release of the tool must not fail the
+          # build at an unpredictable moment. The pinned version needs Go 1.25, so the
+          # Go toolchain rule gets go1.25 for this step alone.
+          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
