@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"hydrascale/internal/access"
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
@@ -172,7 +173,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// interface shows. A configuration file that the daemon cannot read leaves the field
 	// absent rather than reporting a mode that the daemon does not apply.
 	if cfg, err := config.LoadConfig(s.reconciler.ConfigPath()); err == nil {
-		status := AccessStatus{Mode: cfg.AccessMode()}
+		status := AccessStatus{
+			Mode:         cfg.AccessMode(),
+			JumpPosition: s.reconciler.AccessJumpPosition(access.ParentForward),
+		}
 		if cfg.Access != nil {
 			status.Rules = len(cfg.Access.Rules)
 		}

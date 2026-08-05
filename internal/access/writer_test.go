@@ -22,9 +22,42 @@ var absentRule = execx.Result{
 	Err:    errors.New("exit status 1"),
 }
 
-// missingRule is the result that iptables returns for a check of a rule that is not
-// present. The check writes no message that names the state.
-var missingRule = execx.Result{Err: errors.New("exit status 1")}
+// fillers holds the target of each rule that another service writes into FORWARD. The
+// security audit measured these three rules above the rules of the daemon on the test
+// host.
+var fillers = []string{"ts-forward", "DOCKER-USER", "DOCKER-FORWARD"}
+
+// listing returns the output of `iptables -S <parent>` where the jump rule of the daemon
+// sits at the position. The position counts from 1. A position of 0 returns a listing
+// that holds every filler rule and no jump rule.
+func listing(j jump, position int) string {
+	var b strings.Builder
+	b.WriteString("-P " + j.parent + " DROP\n")
+
+	above := len(fillers)
+	if position > 0 {
+		above = position - 1
+	}
+	for i := 0; i < above; i++ {
+		b.WriteString("-A " + j.parent + " -j " + fillers[i] + "\n")
+	}
+	if position > 0 {
+		b.WriteString("-A " + j.parent + " -j " + j.chain + "\n")
+	}
+	return b.String()
+}
+
+// placementIn returns the placement of the parent chain in the result of Apply.
+func placementIn(t *testing.T, res Result, parent string) Placement {
+	t.Helper()
+	for _, p := range res.Jumps {
+		if p.Parent == parent {
+			return p
+		}
+	}
+	t.Fatalf("the result holds no placement for %s: %+v", parent, res.Jumps)
+	return Placement{}
+}
 
 // testSet returns a small compiled rule set: one namespace that reaches the host, and the
 // enforce tail.
@@ -56,7 +89,7 @@ func writerFixture(t *testing.T, present string) (*execx.Recorder, *Writer) {
 			out := "-N " + j.chain + "\n-A " + j.chain + " -m comment --comment " + markerPrefix + present + "\n"
 			rec.Script(execx.Result{Output: []byte(out)}, "iptables", "-S", j.chain)
 		}
-		rec.Script(missingRule, "iptables", "-C", j.parent, "-j", j.chain)
+		rec.Script(execx.Result{Output: []byte(listing(j, 0))}, "iptables", "-S", j.parent)
 		rec.Script(execx.Result{}, "iptables", "-I", j.parent, "1", "-j", j.chain)
 	}
 	rec.Script(execx.Result{}, "iptables-restore", "--noflush")
@@ -67,11 +100,11 @@ func writerFixture(t *testing.T, present string) (*execx.Recorder, *Writer) {
 func TestApplyWritesTheCompiledRuleSetWithIptablesRestoreOnStandardInput(t *testing.T) {
 	rec, w := writerFixture(t, "")
 
-	wrote, err := w.Apply(context.Background(), testSet())
+	res, err := w.Apply(context.Background(), testSet())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if !wrote {
+	if !res.Wrote {
 		t.Error("Apply reported no write for a host that holds no chain")
 	}
 
@@ -159,11 +192,11 @@ func TestApplyWritesNoRuleOutsideTheTwoChainsAndTheTwoJumps(t *testing.T) {
 func TestApplyRunsNoWriteWhenTheLiveChainHoldsTheCompiledRuleSet(t *testing.T) {
 	rec, w := writerFixture(t, fingerprint(testSet()))
 
-	wrote, err := w.Apply(context.Background(), testSet())
+	res, err := w.Apply(context.Background(), testSet())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if wrote {
+	if res.Wrote {
 		t.Error("Apply reported a write for a host that already holds the compiled rule set")
 	}
 	for _, c := range rec.Calls() {
@@ -176,11 +209,11 @@ func TestApplyRunsNoWriteWhenTheLiveChainHoldsTheCompiledRuleSet(t *testing.T) {
 func TestApplyWritesWhenTheLiveChainHoldsAnotherRuleSet(t *testing.T) {
 	rec, w := writerFixture(t, "0123456789abcdef")
 
-	wrote, err := w.Apply(context.Background(), testSet())
+	res, err := w.Apply(context.Background(), testSet())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if !wrote {
+	if !res.Wrote {
 		t.Error("Apply reported no write for a chain that holds another rule set")
 	}
 	if countName(rec, "iptables-restore") != 1 {
@@ -191,7 +224,7 @@ func TestApplyWritesWhenTheLiveChainHoldsAnotherRuleSet(t *testing.T) {
 func TestApplyKeepsAJumpRuleThatIsAlreadyPresent(t *testing.T) {
 	rec, w := writerFixture(t, fingerprint(testSet()))
 	for _, j := range jumps {
-		rec.Script(execx.Result{}, "iptables", "-C", j.parent, "-j", j.chain)
+		rec.Script(execx.Result{Output: []byte(listing(j, 1))}, "iptables", "-S", j.parent)
 	}
 
 	if _, err := w.Apply(context.Background(), testSet()); err != nil {
@@ -205,6 +238,87 @@ func TestApplyKeepsAJumpRuleThatIsAlreadyPresent(t *testing.T) {
 	}
 }
 
+func TestApplyReportsThePositionOfTheJumpRuleAndTheTargetOfEachRuleAboveIt(t *testing.T) {
+	rec, w := writerFixture(t, fingerprint(testSet()))
+	for _, j := range jumps {
+		rec.Script(execx.Result{Output: []byte(listing(j, 4))}, "iptables", "-S", j.parent)
+	}
+
+	res, err := w.Apply(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	got := placementIn(t, res, "FORWARD")
+	if got.Position != 4 {
+		t.Errorf("the position of the jump rule = %d, want 4", got.Position)
+	}
+	if strings.Join(got.Above, ",") != strings.Join(fillers, ",") {
+		t.Errorf("the rules above the jump rule = %v, want %v", got.Above, fillers)
+	}
+	for _, c := range rec.Calls() {
+		if c.Name == "iptables" && c.Args[0] == "-I" {
+			t.Errorf("Apply wrote a jump rule that is already present: %s", c)
+		}
+	}
+}
+
+func TestApplyReportsThePositionOneWhenTheJumpRuleHeadsTheParentChain(t *testing.T) {
+	rec, w := writerFixture(t, fingerprint(testSet()))
+	for _, j := range jumps {
+		rec.Script(execx.Result{Output: []byte(listing(j, 1))}, "iptables", "-S", j.parent)
+	}
+
+	res, err := w.Apply(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	got := placementIn(t, res, "FORWARD")
+	if got.Position != 1 {
+		t.Errorf("the position of the jump rule = %d, want 1", got.Position)
+	}
+	if len(got.Above) != 0 {
+		t.Errorf("the rules above the jump rule = %v, want none", got.Above)
+	}
+}
+
+func TestApplyReportsThePositionZeroForAParentChainThatHoldsNoJumpRule(t *testing.T) {
+	rec, w := writerFixture(t, fingerprint(testSet()))
+
+	res, err := w.Apply(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	got := placementIn(t, res, "FORWARD")
+	if got.Position != 0 {
+		t.Errorf("the position of the jump rule = %d, want 0", got.Position)
+	}
+
+	want := execx.Call{Name: "iptables", Args: []string{"-I", "FORWARD", "1", "-j", ChainForward}}
+	if n := countCalls(rec, want); n != 1 {
+		t.Errorf("Apply wrote %d jump rules into FORWARD, want 1", n)
+	}
+}
+
+func TestApplyCountsNoConditionalJumpOfTheOperatorAsTheJumpRuleOfTheDaemon(t *testing.T) {
+	rec, w := writerFixture(t, fingerprint(testSet()))
+	for _, j := range jumps {
+		out := "-P " + j.parent + " DROP\n-A " + j.parent + " -i eth0 -j " + j.chain + "\n"
+		rec.Script(execx.Result{Output: []byte(out)}, "iptables", "-S", j.parent)
+	}
+
+	res, err := w.Apply(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if got := placementIn(t, res, "FORWARD").Position; got != 0 {
+		t.Errorf("the position of the jump rule = %d, want 0", got)
+	}
+}
+
 func TestApplyReturnsTheErrorOfAFailedWrite(t *testing.T) {
 	rec, w := writerFixture(t, "")
 	rec.Script(execx.Result{
@@ -212,11 +326,11 @@ func TestApplyReturnsTheErrorOfAFailedWrite(t *testing.T) {
 		Err:    errors.New("exit status 1"),
 	}, "iptables-restore", "--noflush")
 
-	wrote, err := w.Apply(context.Background(), testSet())
+	res, err := w.Apply(context.Background(), testSet())
 	if err == nil {
 		t.Fatal("Apply returned no error for a failed write")
 	}
-	if wrote {
+	if res.Wrote {
 		t.Error("Apply reported a write that failed")
 	}
 	if !strings.Contains(err.Error(), "line 7 failed") {
