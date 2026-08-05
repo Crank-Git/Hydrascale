@@ -92,6 +92,7 @@ body{
 .icon[data-icon="overview"]{-webkit-mask-image:url("/brand/icons/overview.svg"); mask-image:url("/brand/icons/overview.svg")}
 .icon[data-icon="namespaces"]{-webkit-mask-image:url("/brand/icons/namespaces.svg"); mask-image:url("/brand/icons/namespaces.svg")}
 .icon[data-icon="access"]{-webkit-mask-image:url("/brand/icons/access.svg"); mask-image:url("/brand/icons/access.svg")}
+.icon[data-icon="policy"]{-webkit-mask-image:url("/brand/icons/policy.svg"); mask-image:url("/brand/icons/policy.svg")}
 .icon[data-icon="activity"]{-webkit-mask-image:url("/brand/icons/activity.svg"); mask-image:url("/brand/icons/activity.svg")}
 .icon[data-icon="settings"]{-webkit-mask-image:url("/brand/icons/settings.svg"); mask-image:url("/brand/icons/settings.svg")}
 
@@ -571,3 +572,145 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-del{flex:none}
 .ac-ruleline .ns-error{display:block; margin-top:var(--sp-2)}
 .ac-ruleline .ns-error:empty{display:none}
+
+/* The policy view: the tailnet list, the document editor, the two actions, and the result.
+   The accent of this view marks the push action and nothing else, because the push is the
+   affirmative action of the view. Issue #158 gave the accent to the selected row while the
+   view drew no action, and issue #159 moved it to the push. The selected row now shows the
+   selection with a surface and a brighter border, as the namespace list does.
+   The credential state of a row is a coloured dot and a lowercase word. The document is a
+   machine value, therefore the gutter and the text area both carry the mono typeface.
+   FR-policy-22 to FR-policy-28. */
+
+.pol-grid{display:grid; grid-template-columns:var(--w-side) 1fr; gap:var(--sp-3); align-items:start}
+.pol-side{min-width:0}
+.pol-main{min-width:0}
+
+.pol-row{
+  display:flex;
+  flex-direction:column;
+  gap:var(--sp-2);
+  padding:var(--pad-row);
+  border-radius:var(--r);
+  cursor:pointer;
+  background:var(--surface-card);
+  border:1px solid var(--border-default);
+  transition:background var(--dur-1) var(--ease);
+}
+.pol-row + .pol-row{margin-top:var(--sp-2)}
+.pol-row:hover{background:var(--surface-raised)}
+.pol-row[aria-selected="true"]{background:var(--surface-raised); border-color:var(--text-tertiary)}
+.pol-row:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.pol-line{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3)}
+.pol-state{display:flex; align-items:center; gap:var(--sp-2)}
+.pol-word{color:var(--text-secondary); font-size:var(--fs-sm)}
+.pol-kind{color:var(--text-tertiary); font-size:var(--fs-micro)}
+.pol-reason{
+  margin:0;
+  color:var(--text-secondary);
+  font-size:var(--fs-micro);
+  overflow-wrap:anywhere;
+}
+
+.pol-region{min-width:0}
+.pol-warning{margin-bottom:var(--sp-3)}
+.pol-name{display:block; color:var(--text-secondary); font-size:var(--fs-micro)}
+.pol-detail{
+  margin:var(--sp-3) 0 0;
+  padding:var(--pad-card);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  color:var(--text-body);
+  font-size:var(--fs-micro);
+  overflow-wrap:anywhere;
+}
+
+.pol-ed{
+  margin-top:var(--sp-3);
+  border:1px solid var(--border-default);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  overflow:hidden;
+}
+.pol-bar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--sp-3);
+  padding:var(--sp-2) var(--sp-4);
+  border-bottom:1px solid var(--border-default);
+  background:var(--surface-raised);
+}
+.pol-bar .pol-name{display:inline}
+
+/* A 400 kilobyte document scrolls inside the editor and never pushes the view apart. The
+   gutter scrolls with the text, therefore the two share one scrolling box. */
+.pol-code{display:flex; max-height:440px; overflow:auto; font-size:var(--fs-data); line-height:1.6}
+.pol-gut{
+  flex:none;
+  padding:var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  color:var(--text-tertiary);
+  text-align:right;
+  user-select:none;
+  font-family:var(--font-data);
+}
+.pol-doc{
+  flex:1;
+  min-width:0;
+  border:none;
+  outline-offset:-2px;
+  resize:none;
+  padding:var(--sp-3) var(--sp-4) var(--sp-3) 0;
+  background:transparent;
+  color:var(--text-body);
+  font:inherit;
+  font-family:var(--font-data);
+  line-height:inherit;
+  white-space:pre;
+  overflow-y:hidden;
+  overflow-x:auto;
+}
+.pol-doc:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.pol-doc[readonly]{color:var(--text-secondary)}
+.pol-meta{display:flex; gap:var(--sp-2); margin-top:var(--sp-3); flex-wrap:wrap}
+
+/* The two sentences of the push come before the controls, because a warning comes before
+   the step that it applies to. */
+.pol-acts{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:var(--sp-4);
+  margin-top:var(--sp-4);
+  flex-wrap:wrap;
+}
+.pol-acts:empty{display:none}
+.pol-push-note{max-width:62ch}
+.pol-push-note .note{margin:0}
+.pol-push-note .note + .note{margin-top:var(--sp-1)}
+.pol-btns{display:flex; gap:var(--sp-2); flex:none}
+
+.pol-result{margin-top:var(--sp-4)}
+.pol-result:empty{display:none}
+.pol-res-head{display:flex; align-items:center; gap:var(--sp-2)}
+.pol-result .note{margin:var(--sp-2) 0 0}
+.pol-result .pol-btns{margin-top:var(--sp-3)}
+
+/* One error of the validate, with the line number that the control server stated. The
+   message is the text of the control server, therefore it draws in the mono typeface. */
+.pol-errs{
+  margin-top:var(--sp-3);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  padding:var(--pad-card);
+  display:flex;
+  flex-direction:column;
+  gap:var(--sp-2);
+}
+.pol-err{display:flex; gap:var(--sp-3); font-size:var(--fs-micro)}
+.pol-err-line{flex:none; color:var(--text-tertiary)}
+.pol-err-msg{color:var(--text-body); overflow-wrap:anywhere}
+
+@media (max-width:1040px){
+  .pol-grid{grid-template-columns:1fr}
+}

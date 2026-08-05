@@ -34,15 +34,30 @@ OAuth client.
 
 | Method and path | Notes |
 |---|---|
+| `POST /oauth/token` | Returns an access token from the client credentials. Retrieved 2026-08-05. |
 | `GET /tailnet/{tailnet}/acl` | Returns `application/json` or `application/hujson`. The response carries an `ETag` header. The scope `policy_file:read` covers it. |
-| `POST /tailnet/{tailnet}/acl` | Accepts the same content types. The optional `If-Match` header carries the `ETag` value from the read. A mismatch returns HTTP 412. |
-| `POST /tailnet/{tailnet}/acl/validate` | Validates and tests a document. |
+| `POST /tailnet/{tailnet}/acl` | Accepts `application/json` or `application/hujson`. The optional `If-Match` header carries the `ETag` value from the read. A mismatch returns HTTP 412. The scope `policy_file` covers it. |
+| `POST /tailnet/{tailnet}/acl/validate` | Validates and tests a document. The schema names `application/json` for the request body of this endpoint alone. The scope `policy_file:read` covers it. |
 | `POST /tailnet/{tailnet}/acl/preview` | Previews rule matches. Version 1.0 does not use it. |
 
-**Unconfirmed:** the OAuth scope that a policy write needs. The schema names
-`policy_file:read` for the read and names no scope for the write. Confirm it from the
-Tailscale OAuth documentation before you document the credential setup. Risk R1 in
-`docs/specs/spec.md` tracks this.
+**Confirmed 2026-08-05:** the OAuth scope that a policy write needs is `policy_file`.
+
+- The OpenAPI schema states `OAuth Scope: policy_file.` in the description of
+  `operationId: setPolicyFile`, which is `POST /tailnet/{tailnet}/acl`. Retrieved from
+  `https://api.tailscale.com/api/v2?outputOpenapiSchema=true` on 2026-08-05.
+- `https://tailscale.com/kb/1623/`, "Trust credentials", `Scopes`, states verbatim:
+  "policy_file The credential has access to read, validate, and modify the tailnet policy
+  file. devices:posture_attributes and devices:core:read are required when using this
+  scope. Endpoints from policy_file:read POST /api/v2/tailnet/:tailnet/acl". The page
+  states "Last validated: Jan 30, 2026". Retrieved 2026-08-05.
+- A credential with the `policy_file` scope therefore also needs the scopes
+  `devices:posture_attributes` and `devices:core:read`. Issue #161 documents this.
+
+The token endpoint is `https://api.tailscale.com/api/v2/oauth/token`, which
+`https://tailscale.com/kb/1215/oauth-clients` states. It accepts the OAuth 2.0 client
+credentials grant request format, and it answers with the client credentials grant
+response format: `access_token`, `token_type`, `expires_in`, and `scope`. An access token
+expires after one hour. Retrieved 2026-08-05.
 
 ### Headscale — the policy document
 
@@ -56,6 +71,25 @@ Headscale exposes its gRPC service over a grpc-gateway REST bridge, so this proj
 | `POST /api/v1/policy/check` | Checks a document for errors. Used as the validate step. |
 
 Authentication is a bearer token holding a Headscale API key.
+
+Confirmed again 2026-08-05 for issue #156, from
+`https://raw.githubusercontent.com/juanfont/headscale/v0.29.3/proto/headscale/v1/headscale.proto`
+lines 194-213 and
+`https://raw.githubusercontent.com/juanfont/headscale/v0.29.3/proto/headscale/v1/policy.proto`:
+
+- The three routes above are the `google.api.http` annotations of `GetPolicy`,
+  `SetPolicy`, and `CheckPolicy`. `SetPolicy` and `CheckPolicy` both carry `body: "*"`.
+- The request body of `SetPolicy` and of `CheckPolicy` is `{"policy": "<document>"}`.
+- The response body of `GetPolicy` and of `SetPolicy` is
+  `{"policy": "<document>", "updatedAt": "<timestamp>"}`. `CheckPolicyResponse` is empty.
+- `hscontrol/grpcv1.go:727` returns `types.ErrPolicyUpdateIsDisabled` when `policy.mode`
+  is not `db`. `hscontrol/types/policy.go:11` declares it as
+  `errors.New("update is disabled for modes other than 'database'")`. That error carries
+  the gRPC code `Unknown`, therefore **the REST bridge answers HTTP 500 and not HTTP
+  403**. A client detects the file policy mode from the `message` field of the answer,
+  not from the status.
+- An error answer of the REST bridge has the shape
+  `{"code": <number>, "message": "<text>", "details": []}`.
 
 ## Rules
 

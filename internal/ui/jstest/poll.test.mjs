@@ -271,10 +271,10 @@ test("a mutating request carries the console header and a read does not", () => 
   }
 });
 
-test("the shell names five views and each one holds a heading and an empty state", () => {
+test("the shell names six views and each one holds a heading and an empty state", () => {
   assert.deepEqual(
     VIEWS.map((view) => view.id),
-    ["overview", "namespaces", "access", "activity", "settings"],
+    ["overview", "namespaces", "access", "policy", "activity", "settings"],
   );
   for (const view of VIEWS) {
     assert.equal(typeof view.heading, "string");

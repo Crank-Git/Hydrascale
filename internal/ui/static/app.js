@@ -38,7 +38,8 @@ export const POLL_INTERVAL_KEY = "hydrascale.poll-interval";
 export const CONSOLE_HEADER = "X-Hydrascale-Console";
 
 /**
- * VIEWS is the navigation, in order. FR-console-12 names the five entries.
+ * VIEWS is the navigation, in order. FR-console-12 names five entries, and FR-policy-22
+ * adds the policy view as the sixth.
  *
  * Each entry states the heading of the view, the sentence under it, the empty state, and
  * the sentence that the shell draws until the view itself lands. FR-console-17 states
@@ -66,6 +67,13 @@ export const VIEWS = [
     lead: "The local rules that this host enforces between the tailnets, the host, and the internet.",
     empty: "No tailnet is configured. Add one, and this view shows the paths that the host allows.",
     pending: "This view shows the paths that the host allows, and it edits them. The view arrives with the access editor of issue #147.",
+  },
+  {
+    id: "policy",
+    heading: "Policy",
+    lead: "The access policy that each control server holds. A policy change affects every device in the tailnet, not only this host.",
+    empty: "The daemon declares no tailnet. Add one, and this view lists it with its control server kind and its credential state.",
+    pending: "This view lists every tailnet with its control server kind and its credential state, and it shows the policy document of a selection.",
   },
   {
     id: "activity",
@@ -110,6 +118,9 @@ export function consoleRequestInit(method, body) {
  * requestJSON sends one request to the console origin and reads the JSON reply.
  * It rejects with the message that the daemon returned, because every route states the
  * reason in the error field.
+ * The rejected error carries the status in the field status. A caller that classifies a
+ * failure reads that status, because a message is text for a person and the status is the
+ * value that the daemon owns.
  */
 export async function requestJSON(route, method = "GET", body) {
   const reply = await fetch(route, consoleRequestInit(method, body));
@@ -124,7 +135,9 @@ export async function requestJSON(route, method = "GET", body) {
   }
   if (!reply.ok) {
     const stated = parsed && parsed.error ? parsed.error : `${reply.status} ${reply.statusText}`;
-    throw new Error(stated);
+    const failure = new Error(stated);
+    failure.status = reply.status;
+    throw failure;
   }
   return parsed;
 }
