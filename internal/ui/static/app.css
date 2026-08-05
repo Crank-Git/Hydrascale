@@ -254,8 +254,9 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 .ev-kind{color:var(--text-secondary); flex:none; width:112px; font-size:var(--fs-micro)}
 .ev p{margin:0; font-size:var(--fs-sm); color:var(--text-body); min-width:0}
 
-/* The empty state of the overview holds no topology, therefore the add action takes the
-   accent there. See FR-console-40. */
+/* The affirmative action is the one thing that takes the accent, in every view. The
+   overview empty state, the namespace add flow, and the removal dialog all use this one
+   rule, so no view holds a second accent use. See FR-console-40. */
 .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:var(--fw-semibold)}
 a.btn{display:inline-block; text-decoration:none}
 a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
@@ -270,4 +271,128 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   .nav{border-right:none; border-bottom:1px solid var(--border-default); flex-direction:row; flex-wrap:wrap; align-items:center}
   .brand{padding:var(--sp-1) var(--sp-2)}
   .nav-foot{margin-top:0}
+}
+
+/* The namespace view: the list, the panel, the add flow, and the removal dialog. The
+   affirmative action takes the accent from the one .btn.primary rule above. The selected
+   row shows the selection with a surface and a border, so the view holds one accent use. */
+
+.btn.primary:hover{filter:brightness(.92)}
+
+.ns-head{display:flex; justify-content:flex-end; margin-bottom:var(--sp-4)}
+.ns-sm{padding:var(--pad-btn-sm); font-size:var(--fs-sm)}
+.ns-danger{color:var(--status-crit); border-color:var(--status-crit)}
+
+.ns-grid{display:grid; grid-template-columns:1fr var(--w-side); gap:var(--sp-3); align-items:start}
+.ns-list{min-width:0}
+
+.ns-row{
+  display:flex;
+  align-items:center;
+  gap:var(--sp-4);
+  padding:var(--pad-row);
+  border-radius:var(--r);
+  cursor:pointer;
+  background:var(--surface-card);
+  border:1px solid var(--border-default);
+  transition:background var(--dur-1) var(--ease);
+}
+.ns-row + .ns-row{margin-top:var(--sp-2)}
+.ns-row:hover{background:var(--surface-raised)}
+.ns-row[aria-selected="true"]{background:var(--surface-raised); border-color:var(--text-tertiary)}
+.ns-row:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.ns-muted{opacity:.5; cursor:default}
+
+.ns-id{min-width:104px}
+.ns-state{display:flex; align-items:center; gap:var(--sp-2); min-width:130px}
+.ns-word{color:var(--text-secondary); font-size:var(--fs-sm)}
+.ns-peers{color:var(--text-secondary); font-size:var(--fs-micro); min-width:76px}
+.ns-addr{color:var(--text-tertiary); font-size:var(--fs-micro); margin-left:auto}
+
+.ns-panel{position:sticky; top:var(--sp-5)}
+.ns-panel-head{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3)}
+.ns-panel-head h2{margin:0}
+.ns-panel-states{display:flex; gap:var(--sp-4); margin-top:var(--sp-2)}
+.ns-section{display:block; margin-top:var(--sp-5)}
+
+.ns-kv{margin:var(--sp-4) 0 0}
+.ns-pair{display:flex; justify-content:space-between; gap:var(--sp-4); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
+.ns-pair:last-child{border-bottom:none}
+.ns-pair dt{color:var(--text-secondary); font-size:var(--fs-sm)}
+.ns-pair dd{margin:0; color:var(--text-body); text-align:right; overflow-wrap:anywhere}
+
+/* A tailnet with 200 peers scrolls inside the panel and never pushes the actions away. */
+.ns-peers-list{margin-top:var(--sp-3); max-height:190px; overflow:auto}
+.ns-peer{display:flex; justify-content:space-between; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
+.ns-peer:last-child{border-bottom:none}
+.ns-peer-addr{color:var(--text-tertiary); font-size:var(--fs-micro)}
+
+.ns-events{margin-top:var(--sp-3); max-height:150px; overflow:auto}
+.ns-event{display:flex; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
+.ns-event:last-child{border-bottom:none}
+.ns-event-kind{color:var(--text-tertiary); font-size:var(--fs-micro); flex:none; min-width:118px}
+.ns-event-text{color:var(--text-secondary); font-size:var(--fs-sm)}
+
+.ns-notice{margin-top:var(--sp-4)}
+.ns-cmds{
+  display:flex;
+  flex-direction:column;
+  gap:var(--sp-2);
+  margin-top:var(--sp-3);
+  padding:var(--pad-card);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  color:var(--text-body);
+  overflow-wrap:anywhere;
+}
+
+.ns-acts{display:flex; gap:var(--sp-2); margin-top:var(--sp-4); flex-wrap:wrap}
+.ns-dialog-acts{justify-content:flex-end; margin-top:var(--sp-5)}
+
+.ns-scrim{
+  position:fixed;
+  inset:0;
+  background:var(--scrim);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:var(--sp-6);
+  z-index:9;
+}
+.ns-dialog{
+  background:var(--surface-card);
+  border:1px solid var(--border-default);
+  border-radius:var(--r-xl);
+  padding:var(--pad-card-lg);
+  max-width:560px;
+  width:100%;
+  max-height:86vh;
+  overflow:auto;
+  box-shadow:var(--shadow-pop);
+}
+.ns-dialog h3{font-family:var(--font-display); font-size:var(--fs-h2); letter-spacing:var(--ls-h2); margin:0 0 var(--sp-2)}
+
+.ns-form{display:flex; flex-direction:column; gap:var(--sp-4); margin-top:var(--sp-4)}
+.ns-field{display:flex; flex-direction:column; gap:var(--sp-2)}
+.ns-field .note{margin:0}
+.ns-check{flex-direction:row; align-items:center; gap:var(--sp-3); color:var(--text-secondary); font-size:var(--fs-sm)}
+.ns-error{color:var(--status-crit); font-size:var(--fs-sm)}
+
+.ns-toast{
+  display:flex;
+  align-items:center;
+  gap:var(--sp-3);
+  margin-top:var(--sp-4);
+  padding:var(--pad-row);
+  border:1px solid var(--border-default);
+  border-radius:var(--r);
+  background:var(--surface-card);
+}
+.ns-toast .btn{margin-left:auto}
+
+@media (max-width:1040px){
+  .ns-grid{grid-template-columns:1fr}
+  .ns-panel{position:static}
+  .ns-addr{margin-left:0}
+  .ns-row{flex-wrap:wrap}
 }
