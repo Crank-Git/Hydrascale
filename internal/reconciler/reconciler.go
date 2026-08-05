@@ -406,6 +406,8 @@ func (r *Reconciler) Reconcile() error {
 
 	r.emit("reconcile_start", "", "")
 
+	r.checkHostFile()
+
 	desired, err := r.DesiredState()
 	if err != nil {
 		return err
@@ -426,6 +428,41 @@ func (r *Reconciler) Reconcile() error {
 	r.Apply(actions)
 	r.emit("reconcile_complete", "", fmt.Sprintf("applied %d actions", len(actions)))
 	return nil
+}
+
+// checkHostFile compares the checksum of the host resolv.conf file with the recorded
+// checksum and records dns.host_file_changed on a difference.
+// The check reports the change. The daemon does not write the host file, because a daemon
+// that rewrites the host file becomes the thing that it protects against. The event holds
+// the first line of each version only, because a resolv.conf file can contain a search
+// domain that names an internal host.
+func (r *Reconciler) checkHostFile() {
+	m := r.HostFileMonitor()
+	if m == nil {
+		return
+	}
+
+	changed, previous, current, err := m.Check()
+	if err != nil {
+		r.emit("dns.host_file_error", "", err.Error())
+		return
+	}
+	if !changed {
+		return
+	}
+
+	r.emit("dns.host_file_changed", "", fmt.Sprintf(
+		"%s: previous first line %q, current first line %q",
+		current.Path, describeHostFile(previous), describeHostFile(current)))
+}
+
+// describeHostFile returns the first line of the state, or "(missing)" when the file does
+// not exist.
+func describeHostFile(state dns.HostFileState) string {
+	if state.Missing {
+		return "(missing)"
+	}
+	return state.FirstLine
 }
 
 // Loop runs the reconciliation loop until the context is cancelled.

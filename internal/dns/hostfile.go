@@ -1,6 +1,12 @@
 package dns
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,8 +36,54 @@ type HostFileState struct {
 // the symbolic link also changes the checksum. A missing file gives an empty checksum and
 // Missing true. ReadHostFileState returns an error when it cannot read a file that exists.
 func ReadHostFileState(path string) (HostFileState, error) {
-	// TODO(#77): Implement the checksum reader.
-	return HostFileState{Path: path}, nil
+	state := HostFileState{Path: path}
+
+	info, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		state.Missing = true
+		return state, nil
+	case err != nil:
+		return state, fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		if err != nil {
+			return state, fmt.Errorf("read link %s: %w", path, err)
+		}
+		state.LinkTarget = target
+	}
+
+	content, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		// The symbolic link exists and the target does not exist.
+		state.Missing = true
+		return state, nil
+	case err != nil:
+		return state, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	sum := sha256.New()
+	// The link target path is part of the checksum, so a change to the symbolic link
+	// alone also reports as a change.
+	if state.LinkTarget != "" {
+		fmt.Fprintf(sum, "link:%s\n", state.LinkTarget)
+	}
+	sum.Write(content)
+	state.Checksum = hex.EncodeToString(sum.Sum(nil))
+	state.FirstLine = firstLine(content)
+	return state, nil
+}
+
+// firstLine returns the first line of content, without the line terminator.
+func firstLine(content []byte) string {
+	line := string(content)
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	return strings.TrimSuffix(line, "\r")
 }
 
 // HostFileMonitor reports a change to the host resolv.conf file.
@@ -56,8 +108,15 @@ func NewHostFileMonitor(path string) *HostFileMonitor {
 // Start records the first checksum of the file and returns the observed state.
 // Start returns an error when it cannot read a file that exists.
 func (m *HostFileMonitor) Start() (HostFileState, error) {
-	// TODO(#77): Implement the start observation.
-	return HostFileState{Path: m.path}, nil
+	current, err := ReadHostFileState(m.path)
+	if err != nil {
+		return current, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.started = true
+	m.state = current
+	return current, nil
 }
 
 // Check compares the current checksum with the recorded checksum.
@@ -66,8 +125,31 @@ func (m *HostFileMonitor) Start() (HostFileState, error) {
 // first call records the state and returns changed false. Check returns an error when it
 // cannot read a file that exists, and it keeps the recorded state on an error.
 func (m *HostFileMonitor) Check() (changed bool, previous, current HostFileState, err error) {
-	// TODO(#77): Implement the checksum comparison.
-	return false, HostFileState{Path: m.path}, HostFileState{Path: m.path}, nil
+	current, err = ReadHostFileState(m.path)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previous = m.state
+	if err != nil {
+		return false, previous, current, err
+	}
+
+	if !m.started {
+		m.started = true
+		m.state = current
+		return false, previous, current, nil
+	}
+
+	if previous.Checksum == current.Checksum &&
+		previous.LinkTarget == current.LinkTarget &&
+		previous.Missing == current.Missing {
+		return false, previous, current, nil
+	}
+
+	// The monitor stores the current state now, so one change gives one report.
+	m.state = current
+	m.lastChange = time.Now()
+	return true, previous, current, nil
 }
 
 // State returns the recorded state and the time of the last change.
