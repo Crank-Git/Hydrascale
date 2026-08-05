@@ -239,13 +239,16 @@ func TestShutdownRemovesTheChainsAndTheJumpRules(t *testing.T) {
 	}
 }
 
-func TestTheStartRemovesTheForwardAcceptRulesOfVersionZeroNine(t *testing.T) {
-	cfgPath := writeAccessConfig(t, "", "alpha")
+func TestTheModeEnforceRemovesTheForwardAcceptRulesOfVersionZeroNine(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "access:\n  mode: enforce\n", "alpha")
 	ns := newMockNS()
 	ns.legacy = 2
 	r := newTestReconciler(cfgPath, ns, newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{})
 
-	r.reapStaleRules()
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
 
 	found := false
 	for _, e := range r.Events() {
@@ -255,6 +258,27 @@ func TestTheStartRemovesTheForwardAcceptRulesOfVersionZeroNine(t *testing.T) {
 	}
 	if !found {
 		t.Error("the Reconciler recorded no event for the removed version 0.9 rules")
+	}
+}
+
+// TestTheModeObserveKeepsTheForwardAcceptRulesOfVersionZeroNine holds the rule that the
+// mode observe denies nothing. The version 0.9 rules are the only path that accepts the
+// traffic of a namespace until the chain holds the rules of the operator.
+func TestTheModeObserveKeepsTheForwardAcceptRulesOfVersionZeroNine(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "access:\n  mode: observe\n", "alpha")
+	ns := newMockNS()
+	ns.legacy = 2
+	r := newTestReconciler(cfgPath, ns, newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{})
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	for _, e := range r.Events() {
+		if e.Type == "rules.reaped" && strings.Contains(e.Message, "version 0.9") {
+			t.Error("the mode observe removed the version 0.9 rules")
+		}
 	}
 }
 

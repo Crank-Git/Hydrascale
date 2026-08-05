@@ -630,6 +630,11 @@ func (r *Reconciler) applyAccess() {
 		r.emit("access.written", "", fmt.Sprintf("mode %s, %d forward rules, %d out rules",
 			set.EffectiveMode(), len(compiled.Forward), len(compiled.Out)))
 	}
+	// The chain now holds the rules of the operator, therefore the version 0.9 rules are
+	// no longer the path that accepts the traffic of a namespace.
+	if set.EffectiveMode() == access.ModeEnforce {
+		r.removeLegacyRules()
+	}
 }
 
 // declaredRules returns the rules whose endpoints the configuration file still declares.
@@ -762,12 +767,24 @@ func (r *Reconciler) reapStaleRules() {
 	}
 	r.emit("rules.reaped", "", fmt.Sprintf("%d rules", count))
 
-	legacy, err := r.reaper.RemoveLegacyForwardRules()
+}
+
+// removeLegacyRules removes the two FORWARD rules that version 0.9 wrote for each host veth
+// device.
+// removeLegacyRules runs only after a write in the mode enforce, because those rules are the
+// only path that accepts the traffic of a namespace until HYDRASCALE-FWD holds the rules of
+// the operator. The mode observe writes a chain that accepts nothing and drops nothing,
+// therefore a removal in that mode stops every namespace.
+func (r *Reconciler) removeLegacyRules() {
+	if r.reaper == nil {
+		return
+	}
+	count, err := r.reaper.RemoveLegacyForwardRules()
 	if err != nil {
 		r.emit("teardown.failed", "", fmt.Sprintf("remove the version 0.9 forward rules: %v", err))
 	}
-	if legacy > 0 {
-		r.emit("rules.reaped", "", fmt.Sprintf("%d version 0.9 forward rules", legacy))
+	if count > 0 {
+		r.emit("rules.reaped", "", fmt.Sprintf("%d version 0.9 forward rules", count))
 	}
 }
 
