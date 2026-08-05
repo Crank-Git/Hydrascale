@@ -145,14 +145,22 @@ func TestReconcileClosesTheForwardChainWithALogInTheModeObserve(t *testing.T) {
 	}
 }
 
-func TestReconcileDropsARuleThatNamesATailnetTheConfigurationFileRemoved(t *testing.T) {
-	cfgPath := writeAccessConfig(t, "access:\n  rules:\n    - from: alpha\n      to: gone\n", "alpha")
+// TestTheReconcilerDropsARuleThatNamesATailnetTheConfigurationFileRemoved holds the edge
+// case "A tailnet is removed while a rule names it". The test calls the filter rather than
+// Reconcile, because config.LoadConfig rejects such a file before the Reconciler reads it.
+// The changelog of docs/specs/spec.md records that gap.
+func TestTheReconcilerDropsARuleThatNamesATailnetTheConfigurationFileRemoved(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
 	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
-	w := &fakeChainWriter{}
-	r.SetChainWriter(w)
 
-	if err := r.Reconcile(); err != nil {
-		t.Fatalf("Reconcile: %v", err)
+	devices := map[string]string{"alpha": device("alpha")}
+	kept := r.declaredRules([]access.Rule{
+		{From: "alpha", To: "gone"},
+		{From: "alpha", To: access.Internet},
+	}, devices)
+
+	if len(kept) != 1 || kept[0].To != access.Internet {
+		t.Errorf("the filter kept %v, want the rule to the internet alone", kept)
 	}
 
 	dropped := 0
@@ -163,9 +171,6 @@ func TestReconcileDropsARuleThatNamesATailnetTheConfigurationFileRemoved(t *test
 	}
 	if dropped != 1 {
 		t.Errorf("access.rule_dropped events = %d, want 1", dropped)
-	}
-	if len(w.applied) != 1 {
-		t.Errorf("the Reconciler wrote %d rule sets, want 1", len(w.applied))
 	}
 }
 
