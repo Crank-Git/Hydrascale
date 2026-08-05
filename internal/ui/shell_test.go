@@ -289,6 +289,7 @@ func TestTheConsoleStatesAnEmptyStateForEveryView(t *testing.T) {
 // for a view that no module claims, so this table grows as each view lands.
 var viewModules = map[string]string{
 	"overview": "overview.js",
+	"access":   "access.js",
 	"activity": "activity.js",
 	"settings": "settings.js",
 }

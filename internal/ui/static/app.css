@@ -418,7 +418,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-acts{display:flex; gap:var(--sp-2); margin-top:var(--sp-4); flex-wrap:wrap}
 .ns-dialog-acts{justify-content:flex-end; margin-top:var(--sp-5)}
 
-.ns-scrim{
+.ns-scrim,
+.ac-scrim{
   position:fixed;
   inset:0;
   background:var(--scrim);
@@ -428,7 +429,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   padding:var(--sp-6);
   z-index:9;
 }
-.ns-dialog{
+.ns-dialog,
+.ac-dialog{
   background:var(--surface-card);
   border:1px solid var(--border-default);
   border-radius:var(--r-xl);
@@ -439,7 +441,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   overflow:auto;
   box-shadow:var(--shadow-pop);
 }
-.ns-dialog h3{font-family:var(--font-display); font-size:var(--fs-h2); letter-spacing:var(--ls-h2); margin:0 0 var(--sp-2)}
+.ns-dialog h3,
+.ac-dialog h3{font-family:var(--font-display); font-size:var(--fs-h2); letter-spacing:var(--ls-h2); margin:0 0 var(--sp-2)}
 
 .ns-form{display:flex; flex-direction:column; gap:var(--sp-4); margin-top:var(--sp-4)}
 .ns-field{display:flex; flex-direction:column; gap:var(--sp-2)}
@@ -465,3 +468,34 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   .ns-addr{margin-left:0}
   .ns-row{flex-wrap:wrap}
 }
+
+/* The access view: the header, the observe statement, and the mode dialog. The apply
+   action is the one thing that takes the accent, through the .btn.primary rule above.
+   The mode and the staged count are states, so each one is a chip and no rule tints a
+   region with a state colour. Issue #149, issue #150 and issue #151 add the matrix, the
+   flow overview and the rule list. */
+
+.ac-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--sp-4);
+  flex-wrap:wrap;
+  margin-bottom:var(--sp-4);
+}
+.ac-states{display:flex; align-items:center; gap:var(--sp-2)}
+.ac-acts{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:var(--sp-2);
+  padding:3px 9px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--border-default);
+  background:var(--surface-raised);
+  color:var(--text-secondary);
+}
+
+.ac-observe .ns-cmds{margin-top:var(--sp-3)}
+.ac-observe + .card{margin-top:var(--sp-3)}
