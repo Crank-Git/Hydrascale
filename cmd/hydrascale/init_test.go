@@ -9,7 +9,7 @@ import (
 
 func TestPromptGUIAccess(t *testing.T) {
 	const (
-		consequence = "can send a command to the daemon, and the daemon runs as root"
+		consequence = "a member of this group can send a command to the daemon"
 		equivalence = "equivalent to root access on this host"
 		question    = "Enable non-root access via a unix group?"
 	)

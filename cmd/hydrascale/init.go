@@ -290,10 +290,15 @@ func promptTailnet(p *prompter) (tailnetAnswers, string) {
 // unix group. The Hydrascale desktop app (and any SSH-forwarded remote client)
 // connects as a non-root user, so this is required for the GUI to work.
 func promptGUIAccess(p *prompter, cfg *config.Config) {
-	fmt.Println("\nGUI / remote access:")
-	fmt.Println("  The daemon's control socket is root-only by default. The Hydrascale")
-	fmt.Println("  desktop app — and any non-root or SSH-forwarded client — needs group")
-	fmt.Println("  access to it. This is required for the GUI.")
+	fmt.Fprintln(p.out, "\nGUI / remote access:")
+	fmt.Fprintln(p.out, "  The daemon's control socket is root-only by default. The Hydrascale")
+	fmt.Fprintln(p.out, "  desktop app — and any non-root or SSH-forwarded client — needs group")
+	fmt.Fprintln(p.out, "  access to it. This is required for the GUI.")
+	fmt.Fprintln(p.out, "  Warning: a member of this group can send a command to the daemon.")
+	fmt.Fprintln(p.out, "  The daemon runs as root, so the member can create a namespace, write a")
+	fmt.Fprintln(p.out, "  host route, and run a command as root.")
+	fmt.Fprintln(p.out, "  Membership of this group is equivalent to root access on this host.")
+	fmt.Fprintln(p.out, "  Name a group that holds only trusted operators.")
 	if !p.yesNo("  Enable non-root access via a unix group?", true) {
 		return
 	}
