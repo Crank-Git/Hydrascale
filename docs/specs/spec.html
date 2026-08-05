@@ -454,7 +454,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
     <tbody>
       <tr><td>R1</td><td>The Tailscale OAuth scope for a policy <em>write</em> is unconfirmed. The OpenAPI schema names <code>policy_file:read</code> for the GET and names no scope for the POST.</td><td>Epic 8 confirms it from the Tailscale OAuth docs before writing the setup guide. Until then the spec states no write scope name.</td></tr>
       <tr><td>R2</td><td>Headscale <code>PUT /api/v1/policy</code> succeeds only when the control server runs <code>policy.mode: "db"</code>.</td><td>Epic 8 detects the mode from the error and shows the reason. The local-file fallback is out of scope.</td></tr>
-      <tr><td>R3</td><td>The DNS defect may not reproduce on the test host — the operator last saw it on a Jetson Orin with a Tegra kernel, and phobos is x86-64.</td><td>Epic 4 opens with a reproduction attempt. If it fails, Epic 4 delivers detection and reporting rather than a targeted fix, and says so in writing.</td></tr>
+      <tr><td>R3</td><td>The DNS defect may not reproduce on the test host — the operator last saw it on a Jetson Orin with a Tegra kernel, and phobos is x86-64. <strong>Worse: the phobos <code>/etc/resolv.conf</code> is immutable</strong> (a leftover workaround from the issue #28 investigation), so no process can rewrite it and a naive attempt returns a false negative.</td><td>Epic 4 clears the immutable attribute first, then attempts the reproduction, and records that it needed to. If the attempt still fails, Epic 4 delivers detection and reporting rather than a targeted fix, and says so in writing.</td></tr>
       <tr><td>R4</td><td>The Space Grotesk and Space Mono licences must permit embedding in a binary.</td><td>Epic 6 checks the SIL Open Font License terms; the fallback is <code>system-ui</code> and <code>ui-monospace</code>.</td></tr>
       <tr><td>R5</td><td>A local account can drive the root daemon through the console listener.</td><td>Accepted by the operator. Epic 2 records it as a finding so it is written down; the release note states it.</td></tr>
       <tr><td>R6</td><td>The default-deny migration may cut off a path the operator does not know about.</td><td>Epic 5 writes the preserving rule set on first start and records it. <code>access.mode: observe</code> lets the operator check before enforcement.</td></tr>
@@ -472,11 +472,9 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
     <li>No external user depends on the JSON shape of the <code>/api/*</code> routes.</li>
     <li><code>dist/</code> and the root <code>hydrascale</code> binary are build output, not
       deliberate artifacts.</li>
-    <li><strong>The vendored build is not what the documentation claims.</strong>
-      <code>.gitignore</code> line 24 ignores <code>/vendor/</code> and
-      <code>git ls-files vendor</code> returns nothing, so no clone carries the vendored
-      dependencies and no clone builds offline. Epic 0 makes the repository and the claim
-      agree.</li>
+    <li><code>vendor/</code> stays untracked on purpose. The maintainer rsyncs the vendored
+      tree to the test host and builds with <code>-mod=vendor</code> there; a clone needs
+      the network, which is normal for Go. Version 1.0 changes nothing here.</li>
     <li>Version 1.0 writes IPv4 local rules only. Epic 2 confirms whether an IPv6 gap exists; Epic 5
       logs the gap at start rather than hiding it.</li>
     <li><code>9443</code> is free on a typical host, and the configuration can change it.</li>

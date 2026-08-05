@@ -528,9 +528,11 @@ security and DNS work must not wait behind the console.
    accepted this in the compatibility decision.
 4. The `dist/` directory and the `hydrascale` binary at the repository root are build
    output rather than a deliberate artifact.
-4a. The vendored build is not what the documentation claims. `.gitignore` line 24 ignores
-   `/vendor/`, and `git ls-files vendor` returns nothing, so no clone carries the
-   vendored dependencies. Epic 0 makes the repository and the claim agree.
+4a. `vendor/` stays untracked. `.gitignore` line 24 ignores it deliberately. The
+   maintainer copies the vendored tree to the test host with `rsync` and builds there
+   with `-mod=vendor`, so the offline build serves that loop rather than a clone. A
+   clone needs network access, which is normal for a Go project. Version 1.0 changes
+   nothing here.
 5. Version 1.0 keeps IPv4 rules only for local rules. The survey found IPv6 route
    handling in `internal/hostaccess` but no IPv6 firewall rules. Epic 2 confirms whether
    an IPv6 gap exists.
@@ -542,7 +544,7 @@ security and DNS work must not wait behind the console.
 |---|---|---|---|
 | R1 | The Tailscale OAuth scope for a policy write is not confirmed. The OpenAPI schema names `policy_file:read` for `GET /tailnet/{tailnet}/acl` and names no scope for `POST`. | Epic 8 cannot document the credential setup without the scope name. | Epic 8 confirms it from the Tailscale OAuth documentation before it writes the setup guide. Until then the spec does not state a write scope name. |
 | R2 | A Headscale `PUT /api/v1/policy` succeeds only when the control server runs `policy.mode: "db"`. | An operator with a file-mode Headscale server cannot write the policy from the console. | Epic 8 detects the mode from the error and shows the reason. The local-file fallback is out of scope for version 1.0. |
-| R3 | The DNS defect may not reproduce on the test host. | Epic 4 could produce a fix that is never proven. | Epic 4 opens with a reproduction attempt. If it fails, Epic 4 delivers detection and reporting rather than a targeted fix, and it says so. |
+| R3 | The DNS defect may not reproduce on the test host. The test host `/etc/resolv.conf` also carries the immutable attribute, from the earlier investigation of issue #28, so no process can rewrite it. | Epic 4 could produce a fix that is never proven, or a false negative that looks like proof. | Epic 4 clears the immutable attribute first, then attempts the reproduction. If the attempt fails, Epic 4 delivers detection and reporting rather than a targeted fix, and it says so. |
 | R4 | The Space Grotesk and Space Mono licences must permit embedding in a binary. | The console must not fetch a font from Google. | Epic 6 checks the SIL Open Font License terms. If embedding is not permitted, the console falls back to `system-ui` and `ui-monospace`. |
 | R5 | A local account can drive the root daemon through the console listener. | This is the accepted risk. It is not mitigated, only reduced. | The operator accepted it. Epic 2 records it as a finding so that it is written down, and the release note states it. |
 | R6 | The default-deny migration may break an install that relies on a path the operator does not know about. | An upgrade could cut off a working tailnet. | Epic 5 writes the preserving rule set on first start and records it as an event. `access.mode: observe` lets the operator check before enforcement. |
@@ -555,4 +557,4 @@ security and DNS work must not wait behind the console.
 |---|---|---|
 | 2026-08-04 | 1 | First draft. Written from three interview rounds and a code survey. |
 | 2026-08-04 | 1 | Approved. The operator resolved risk R8: `docs/specs/`, `CLAUDE.md` and `.claude/` are all tracked. |
-| 2026-08-04 | 1 | Recorded assumption 4a: `vendor/` is ignored and untracked, so no clone builds offline. Epic 0 resolves the contradiction. |
+| 2026-08-04 | 1 | Corrected assumption 4a: `vendor/` is untracked on purpose and this is not a defect. Recorded that the test host `/etc/resolv.conf` is immutable, which blocks the Epic 4 reproduction until the attribute is cleared. |

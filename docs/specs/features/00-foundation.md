@@ -26,7 +26,7 @@ because every change in this release alters host behaviour.
 | Test harness | `go test ./...`, 11 packages, race detector in continuous integration. Keep. |
 | Continuous integration | `.github/workflows/ci.yml` runs build, vet, and test. Extend. |
 | Release | `.goreleaser.yaml` and `.github/workflows/release.yml`. Epic 1 changes it. |
-| Dependency management | 6 direct dependencies. `vendor/` exists on disk but `.gitignore:24` ignores it, so no clone has it. Decide. |
+| Dependency management | 6 direct dependencies. `vendor/` is untracked on purpose; the maintainer rsyncs it to the test host. Keep. |
 | Branch model | Only `main` exists. Add `dev`. |
 | Command runner | `internal/namespaces` and `internal/routing` call `exec.Command` directly. Replace. |
 | Test host procedure | None. Add. |
@@ -61,12 +61,6 @@ because every change in this release alters host behaviour.
   that a test ran.
 - **FR-foundation-10** — A test can assert the exact argument list of every command that
   the code under test ran.
-- **FR-foundation-11a** — The project states, in `README.md`, whether a clone builds
-  offline. `vendor/` is present on the maintainer's machine and `.gitignore` ignores it,
-  so no clone carries it and no clone builds offline today.
-- **FR-foundation-11b** — The project either tracks `vendor/` and removes the ignore
-  rule, or it removes `vendor/` from the working tree and drops the offline claim from
-  `README.md`. The two states must agree.
 - **FR-foundation-11** — The skill `.claude/skills/verify-on-phobos` builds the current
   branch for Linux, copies the binary to the test host, restarts the service, and prints
   the daemon status.
@@ -138,8 +132,6 @@ The existing behaviour uses `exec.CommandContext(ctx, name, args...).CombinedOut
 ## Acceptance criteria
 
 - [ ] The `dev` branch exists on the remote.
-- [ ] A fresh clone into an empty directory builds with the network disabled, or
-      `README.md` no longer claims that it does.
 - [ ] A pull request into `dev` triggers the continuous integration workflow.
 - [ ] The workflow fails when a source file is not formatted.
 - [ ] `go test ./...` passes after `internal/namespaces` uses the `Runner`.

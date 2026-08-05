@@ -24,6 +24,14 @@ detects a change to the host file whether or not the cause is ever found.
 The operator last saw the defect on a Jetson Orin host with a Tegra kernel. The test host
 is x86-64. The defect may not reproduce. The plan accounts for that.
 
+**The test host cannot reproduce the defect in its current state.** Its
+`/etc/resolv.conf` carries the immutable attribute, as a workaround from the earlier
+investigation of issue #28. No process can rewrite an immutable file, so the clobber
+cannot happen. Before the reproduction attempt, run `sudo chattr -i /etc/resolv.conf` on
+the test host and restore the systemd-resolved stub symbolic link. Record both steps in
+`docs/dns-investigation.md`. Restore the immutable attribute when the epic ends, because
+the test host needs working DNS for every other epic.
+
 ## What exists today
 
 | Item | Reference |
@@ -180,6 +188,8 @@ OverlayFS mount.
 | `/etc/resolv.conf` does not exist. | The daemon records an empty checksum and reports the file as missing rather than as changed. |
 | The overlay upper directory is on a filesystem that OverlayFS rejects as an upper layer. | The mount fails with `EINVAL`. The error text reaches the event, so the operator sees the real reason. |
 | The defect does not reproduce on the test host. | `docs/dns-investigation.md` records the negative result. The detection work still ships, because detection is what tells the operator when it happens next. |
+| The test host `/etc/resolv.conf` is immutable. | No process can rewrite it, so the clobber cannot happen and a reproduction attempt returns a false negative. Clear the attribute first, and record that the attempt needed it. |
+| Issue #28 was already root-caused and fixed by pull request #30. | The overlay mount is that fix. The remaining defect is therefore either the silent failure path at `nsdaemon.go:56`, a host on which the overlay mount cannot succeed, or a second cause. The reproduction attempt must distinguish these before a fix is written. |
 
 ## Acceptance criteria
 
@@ -195,7 +205,10 @@ OverlayFS mount.
 - [ ] `hydrascale init` exits non-zero when the host `tailscaled` process has
       `accept-dns` enabled.
 - [ ] `hydrascale init --force` continues with a warning in that case.
-- [ ] `docs/dns-investigation.md` records the reproduction attempt and its outcome.
+- [ ] `docs/dns-investigation.md` records the reproduction attempt and its outcome, and
+      it states whether the test host `/etc/resolv.conf` was immutable at the time.
+- [ ] `docs/dns-investigation.md` states which of the three candidate causes the
+      remaining defect matches, or states that none of them matched.
 - [ ] The test host runs the daemon with two tailnets and both report `protected: true`.
 
 ## Out of scope
