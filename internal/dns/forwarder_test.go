@@ -274,8 +274,8 @@ func TestDomainRouting(t *testing.T) {
 
 	// Simulate the domain matching logic from handleDNSRequest
 	testCases := []struct {
-		qname       string
-		wantDomain  bool
+		qname        string
+		wantDomain   bool
 		wantUpstream string
 	}{
 		{"foo.tail1234.ts.net", true, "100.100.100.100"},
@@ -326,8 +326,8 @@ func TestDomainRouting_NoMatch(t *testing.T) {
 	noMatchQueries := []string{
 		"google.com",
 		"example.org",
-		"foo.tail0000.ts.net",   // different tailnet
-		"notts.net",             // not a suffix match
+		"foo.tail0000.ts.net",      // different tailnet
+		"notts.net",                // not a suffix match
 		"tail9999.ts.net.evil.com", // domain contains but doesn't end with suffix
 	}
 
