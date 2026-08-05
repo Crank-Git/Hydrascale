@@ -110,7 +110,27 @@ writes the preserving rule set. The event log states what the daemon wrote.
 
 The migrated rule set carries each tailnet to the internet. It carries no traffic from one
 tailnet to another tailnet. A host that relies on such a path loses it under the mode
-`enforce`.
+`enforce`. An operator whose version 0.9 host forwarded traffic between two tailnets
+therefore writes a rule to restore that path.
+
+Measured on the test host on 2026-08-05, on a host with the two tailnets `jbones` and
+`havoc`:
+
+```
+sudo ip netns exec ns-jbones ping -c2 -W2 10.200.0.86   -> 2 transmitted, 0 received
+sudo ip netns exec ns-havoc  ping -c2 -W2 10.200.0.166  -> 2 transmitted, 0 received
+```
+
+The terminal `DROP` rule of `HYDRASCALE-FWD` counted 4 packets and 336 bytes after those
+two commands, which is the four packets that the two commands sent. Read the counter of
+the chain with:
+
+```bash
+sudo iptables -L HYDRASCALE-FWD -v -n
+```
+
+Step 16 of the upgrade procedure below writes such a rule. The example there carries
+`jbones` to `havoc`.
 
 The mode `observe` finds that path before the mode `enforce` denies it. The mode `observe`
 writes a kernel log line for a packet that no rule allows, and it drops nothing.
