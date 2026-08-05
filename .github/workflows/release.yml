@@ -4,9 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  # Manual trigger to test-build the GUI on all OSes without cutting a release
-  # (the daemon/goreleaser job and asset uploads only run on a tag).
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,7 +11,6 @@ permissions:
 jobs:
   # Daemon: goreleaser builds the Linux binaries and creates the GitHub Release.
   release:
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,89 +29,5 @@ jobs:
           distribution: goreleaser
           version: latest
           args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # GUI: build the Wails desktop app per-OS and attach it to the release.
-  gui:
-    # Runs after the release exists (on tag); on workflow_dispatch it builds
-    # without a release job to satisfy (the upload step is tag-gated below).
-    needs: [release]
-    if: always() && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            platform: darwin/universal
-          - os: windows-latest
-            platform: windows/amd64
-          - os: ubuntu-latest
-            platform: linux/amd64
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: gui
-        # bash on every runner (Windows included) so $REF/$PLATFORM resolve the
-        # same way — the Windows default is pwsh, where bash vars are empty.
-        shell: bash
-    # Pass workflow context through env, never inline into run: scripts — a
-    # crafted ref/tag name interpolated directly would be a command-injection.
-    env:
-      REF: ${{ github.ref_name }}
-      PLATFORM: ${{ matrix.platform }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Linux WebKit deps
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-
-      - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-
-      - name: Build (Linux — WebKit 4.1 tag)
-        if: matrix.os == 'ubuntu-latest'
-        run: wails build -platform "$PLATFORM" -tags webkit2_41 -ldflags "-X main.appVersion=$REF"
-
-      - name: Build (macOS / Windows)
-        if: matrix.os != 'ubuntu-latest'
-        run: wails build -platform "$PLATFORM" -ldflags "-X main.appVersion=$REF"
-
-      - name: Package (macOS)
-        if: matrix.os == 'macos-latest'
-        run: ditto -c -k --keepParent build/bin/Hydrascale.app "Hydrascale_${REF}_macos.zip"
-
-      - name: Package (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: tar czf "Hydrascale_${REF}_linux_amd64.tar.gz" -C build/bin Hydrascale
-
-      - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
-        run: cp build/bin/Hydrascale.exe "Hydrascale_${REF}_windows_amd64.exe"
-
-      # Always upload as a workflow artifact (lets workflow_dispatch verify builds).
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: gui-${{ matrix.os }}
-          path: gui/Hydrascale_*
-          if-no-files-found: error
-
-      # Attach to the GitHub Release only on a tag.
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
-        run: gh release upload "$REF" Hydrascale_* --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
