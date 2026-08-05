@@ -117,6 +117,10 @@ type Reconciler struct {
 	// A test replaces it.
 	access ChainWriter
 
+	// path writes the host rules of the forward path of a namespace that the host does
+	// not hold. New sets it when the namespace manager carries that ability.
+	path ForwardPathWriter
+
 	hostFile *dns.HostFileMonitor
 
 	eventLogPath string
@@ -134,6 +138,14 @@ type StaleRuleReaper interface {
 	RemoveLegacyForwardRules() (int, error)
 	// NamespaceForwarding returns the value of net.ipv4.ip_forward inside the namespace.
 	NamespaceForwarding(nsName string) (string, error)
+}
+
+// ForwardPathWriter writes the host rules of the forward path of one namespace.
+// namespaces.RealManager carries the ability. A test double does not have to.
+type ForwardPathWriter interface {
+	// EnsureForwardPath writes each host rule of the forward path of the namespace that
+	// the host does not hold, and it returns the rules that it wrote.
+	EnsureForwardPath(nsName string, index int, infraSubnet string) ([]string, error)
 }
 
 // ChainWriter writes the compiled local rule set into the chains that the daemon owns.
@@ -179,6 +191,9 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 	}
 	if reaper, ok := ns.(StaleRuleReaper); ok {
 		r.reaper = reaper
+	}
+	if path, ok := ns.(ForwardPathWriter); ok {
+		r.path = path
 	}
 	// Only a Reconciler that drives the live host writes the chains. A test that passes a
 	// namespace manager double gets no writer, and it sets one with SetChainWriter.
@@ -565,6 +580,7 @@ func (r *Reconciler) Reconcile() error {
 	// Runs after Apply, because a new namespace gets its rules on the same cycle that
 	// creates it.
 	r.applyAccess()
+	r.ensureForwardPath(desired, actual)
 	r.checkNamespaceForwarding(desired)
 
 	if len(actions) == 0 {
@@ -794,6 +810,36 @@ func (r *Reconciler) removeLegacyRules() {
 	}
 	if count > 0 {
 		r.emit("rules.reaped", "", fmt.Sprintf("%d version 0.9 forward rules", count))
+	}
+}
+
+// ensureForwardPath writes the host rules of the forward path that a namespace lost, and it
+// records access.path_repaired with the rules that it wrote.
+// desired holds the tailnets that the configuration file declares, and actual holds the
+// state of each namespace that the host carries.
+// The setup path writes those rules only when it creates the veth pair, therefore an
+// operator firewall that reloads breaks every namespace until the daemon creates the
+// namespace again. Risk R7 names this. ensureForwardPath runs on a namespace that already
+// exists, so the repair arrives on the next tick.
+func (r *Reconciler) ensureForwardPath(desired map[string]config.Tailnet, actual map[string]*TailnetState) {
+	if r.path == nil {
+		return
+	}
+	for id := range desired {
+		state, ok := actual[id]
+		if !ok || !state.NsExists {
+			continue
+		}
+		written, err := r.path.EnsureForwardPath(state.NsName, namespaces.VethIndex(state.NsName), r.infraSubnet)
+		if err != nil {
+			r.emit("access.write_failed", id, err.Error())
+			continue
+		}
+		if len(written) == 0 {
+			continue
+		}
+		r.emit("access.path_repaired", id, fmt.Sprintf("wrote %d rules: %s",
+			len(written), strings.Join(written, ", ")))
 	}
 }
 

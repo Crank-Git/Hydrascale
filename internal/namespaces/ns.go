@@ -315,15 +315,39 @@ func (m *RealManager) SetupVeth(nsName string, index int, infraSubnet string) er
 	// destination. That rule is the finding SA-8 and the finding SA-9. internal/access now
 	// owns every forward rule, in the chain HYDRASCALE-FWD.
 
-	// Add iptables masquerade so namespace traffic can reach the internet
-	if _, err := m.run("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err != nil {
-		if out, err := m.run("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err != nil {
-			return fmt.Errorf("failed to add masquerade rule for %s: %v (%s)", nsIP, err, out)
-		}
+	// The masquerade rule gives the namespace a path to the internet. The reconciler runs
+	// EnsureForwardPath on every tick, so a namespace that loses the rule gets it back.
+	if _, err := m.EnsureForwardPath(nsName, index, infraSubnet); err != nil {
+		return err
 	}
 
 	log.Printf("Set up veth pair for namespace %s with IPs from %s", nsName, infraSubnet)
 	return nil
+}
+
+// EnsureForwardPath writes each host rule of the forward path of the namespace that the
+// host does not hold, and it returns the rules that it wrote.
+// nsName is the name of the namespace, index is the veth index of the namespace, and
+// infraSubnet is the subnet that holds every veth pair.
+// The forward path of a namespace is the masquerade rule in the nat table. SetupVeth
+// writes that rule only when it creates the veth pair, therefore an operator firewall that
+// reloads removes the rule of a namespace that keeps running, and no setup path returns
+// it. The reconciler runs EnsureForwardPath on every tick, which costs one command for
+// each namespace.
+// EnsureForwardPath returns an error when the write fails.
+func (m *RealManager) EnsureForwardPath(nsName string, index int, infraSubnet string) ([]string, error) {
+	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := m.run("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err == nil {
+		return nil, nil
+	}
+	if out, err := m.run("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err != nil {
+		return nil, fmt.Errorf("add the masquerade rule of %s: %v (%s)", nsName, err, out)
+	}
+	return []string{"nat POSTROUTING -s " + nsIP + " -j MASQUERADE"}, nil
 }
 
 // TeardownVeth removes the veth pair for a namespace.
