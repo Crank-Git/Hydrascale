@@ -161,8 +161,16 @@ screens that drive it.
   write.
 - The migration runs once. The daemon detects it by the presence of the `access` key,
   not by a version marker, so a manually written empty `access` block suppresses it.
-- The `internet` destination means every address that is not the host, not a namespace,
-  and not a private range that another namespace uses.
+- The `internet` destination means a public address only. The daemon excludes every
+  namespace device and these five ranges:
+  - `10.0.0.0/8`
+  - `172.16.0.0/12`
+  - `192.168.0.0/16`
+  - `169.254.0.0/16`
+  - `127.0.0.0/8`
+- The host local network is inside one of the five ranges, therefore an `internet` rule
+  gives no path to it. To reach a host on the operator local network needs its own rule.
+  The operator decided this on 2026-08-05: "Exclude all RFC1918 + the host's subnets".
 
 ## Data touched
 
