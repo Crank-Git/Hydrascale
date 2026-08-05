@@ -213,6 +213,11 @@ func restoreFile(c Compiled, mark string) []byte {
 	for _, j := range jumps {
 		fmt.Fprintf(&b, "-A %s -m comment --comment %s%s\n", j.chain, markerPrefix, mark)
 	}
+	// A packet that touches no namespace device returns to FORWARD. The jump sits at
+	// position 1, therefore every forwarded packet of the host enters this chain, and the
+	// closing DROP rule would also stop the container traffic and the subnet route traffic
+	// of the operator. The daemon denies the paths of a namespace; it owns no other path.
+	fmt.Fprintf(&b, "-A %s ! -i %s+ ! -o %s+ -j RETURN\n", ChainForward, devicePrefix, devicePrefix)
 	for _, rules := range [][][]string{c.Forward, c.Out} {
 		for _, rule := range rules {
 			b.WriteString(ruleLine(rule))

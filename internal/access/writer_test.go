@@ -98,6 +98,7 @@ func TestApplyWritesTheCompiledRuleSetWithIptablesRestoreOnStandardInput(t *test
 		"-F HYDRASCALE-OUT\n" +
 		"-A HYDRASCALE-FWD -m comment --comment " + markerPrefix + fingerprint(testSet()) + "\n" +
 		"-A HYDRASCALE-OUT -m comment --comment " + markerPrefix + fingerprint(testSet()) + "\n" +
+		"-A HYDRASCALE-FWD ! -i vh+ ! -o vh+ -j RETURN\n" +
 		"-A HYDRASCALE-FWD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n" +
 		"-A HYDRASCALE-FWD -i vh0123456789ab -o vhba9876543210 -j ACCEPT\n" +
 		"-A HYDRASCALE-FWD -j DROP\n" +
@@ -303,6 +304,30 @@ func TestTheRuleFileQuotesAnArgumentThatHoldsASpace(t *testing.T) {
 	want := `-j LOG --log-prefix "hydrascale-would-deny: "`
 	if got != want {
 		t.Errorf("ruleLine = %q, want %q", got, want)
+	}
+}
+
+func TestTheForwardChainReturnsAPacketThatTouchesNoNamespaceDevice(t *testing.T) {
+	file := string(restoreFile(testSet(), "0123456789abcdef"))
+
+	want := "-A " + ChainForward + " ! -i vh+ ! -o vh+ -j RETURN"
+	if !strings.Contains(file, want+"\n") {
+		t.Errorf("the rule file holds no rule %q:\n%s", want, file)
+	}
+
+	// The return rule comes before every rule of the compiled set, so the operator keeps
+	// the container traffic and the subnet route traffic of the host.
+	drop := "-A " + ChainForward + " -j DROP"
+	if strings.Index(file, want) > strings.Index(file, drop) {
+		t.Error("the return rule comes after the closing DROP rule")
+	}
+}
+
+func TestTheOutChainHoldsNoReturnForAPacketThatTouchesNoNamespaceDevice(t *testing.T) {
+	file := string(restoreFile(testSet(), "0123456789abcdef"))
+
+	if strings.Contains(file, "-A "+ChainOut+" ! -i vh+") {
+		t.Error("the out chain holds the return rule of the forward chain")
 	}
 }
 
