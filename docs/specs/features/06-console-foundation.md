@@ -138,6 +138,57 @@ access view.
 - **FR-console-42** — The console renders every machine value in the mono typeface.
 - **FR-console-43** — The console honours `prefers-reduced-motion`.
 - **FR-console-44** — The console contains no emoji.
+- **FR-console-45** — The console loads `Space Grotesk` and `Space Mono` from
+  `internal/ui/static/brand/fonts/`.
+- **FR-console-46** — `internal/ui/static/brand/tokens/fonts.css` holds one `@font-face`
+  rule per font file, and each rule names a path under the console origin.
+- **FR-console-47** — `internal/ui/static/brand/fonts/OFL.txt` holds the SIL Open Font
+  License text.
+
+### The typefaces
+
+The operator decided on 2026-08-05: "Self-host the font files under
+`internal/ui/static/brand/fonts/`, with `OFL.txt`. Epic 6 work, not in the current
+backlog."
+
+Issue #90 records the decision and issue #59 removed the Google Fonts rule that the
+source held. `CLAUDE.md` states that the console makes no request to another host, so a
+rule that names Google Fonts is not an option. Two other options were rejected: a
+system-font stack as the final state, and a request to a font host.
+
+Epic 6 does this work:
+
+1. Add the `Space Grotesk` font files and the `Space Mono` font files under
+   `internal/ui/static/brand/fonts/`.
+2. Add `internal/ui/static/brand/fonts/OFL.txt`. The SIL Open Font License requires the
+   licence text beside the font files.
+3. Write the `@font-face` rules in `internal/ui/static/brand/tokens/fonts.css`. Each rule
+   loads a file from the daemon.
+4. Remove the `TODO(#90)` line from `internal/ui/static/brand/tokens/fonts.css`.
+
+Two constraints hold before a font file enters the repository:
+
+- The repository is public. The operator confirms the source of each font file and the
+  licence text before Epic 6 commits it. Read the licence text from the font project
+  itself.
+- `go:embed` places every file in `internal/ui/static` in the daemon binary, so each font
+  file adds to the binary size. Keep the file count and the byte count low, and state the
+  added bytes in the pull request.
+
+The size rule of `scripts/check-hygiene.sh` does not block a font file. The script sets
+`max_bytes=2097152` and `brand_prefix='internal/ui/static/brand/'`, and it skips a
+tracked file whose path starts with that prefix:
+
+```sh
+	case "$file" in
+	"$brand_prefix"*) continue ;;
+	esac
+```
+
+Until Epic 6 lands, the console renders `system-ui` for `--sans` and `ui-monospace` for
+`--mono`, which `internal/ui/static/brand/tokens/typography.css` names as the fallback
+families. The console is on brand for colour, spacing, radius, elevation, and motion. The
+console is not on brand for typography.
 
 ## User flows
 
@@ -269,6 +320,12 @@ The console is served at `/`. Every JSON route stays under `/api/`.
 - [ ] With the daemon stopped, the console shows the last known state marked stale.
 - [ ] With no tailnet configured, every view shows a written empty state.
 - [ ] The console JavaScript tests run under `go test ./internal/ui/...`.
+- [ ] The browser network log shows a request for each font file, and every request goes
+      to the console origin.
+- [ ] The heading of the overview renders in `Space Grotesk`, and a machine value renders
+      in `Space Mono`.
+- [ ] `internal/ui/static/brand/fonts/OFL.txt` is present.
+- [ ] `internal/ui/static/brand/tokens/fonts.css` holds no `TODO` marker.
 
 ## Out of scope
 
