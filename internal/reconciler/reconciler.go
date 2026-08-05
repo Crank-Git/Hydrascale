@@ -22,6 +22,7 @@ import (
 	"hydrascale/internal/dns"
 	"hydrascale/internal/hostaccess"
 	"hydrascale/internal/namespaces"
+	"hydrascale/internal/reach"
 	"hydrascale/internal/routing"
 )
 
@@ -66,6 +67,11 @@ type TailnetState struct {
 	NsExists      bool
 	DaemonHealthy bool
 	Routes        []routing.Route
+	// MeasuredReachability holds the last measurement that the daemon made of the
+	// reachability of the namespace. DaemonHealthy states that the tailscaled process
+	// runs; this field states what one packet did. The two answer different questions,
+	// therefore a namespace reports both.
+	MeasuredReachability *reach.Result `json:"measured_reachability"`
 }
 
 // Event represents a structured reconciler event for debugging and future API use.
@@ -121,6 +127,12 @@ type Reconciler struct {
 	// not hold. New sets it when the namespace manager carries that ability.
 	path ForwardPathWriter
 
+	// prober measures the reachability of a namespace with one packet. A test replaces
+	// it. reachability holds the last measurement of each tailnet, because the status
+	// route reads the state between two ticks and never sends a packet of its own.
+	prober       NamespaceProber
+	reachability map[string]reach.Result
+
 	hostFile *dns.HostFileMonitor
 
 	eventLogPath string
@@ -158,6 +170,31 @@ type ChainWriter interface {
 	Teardown(ctx context.Context) error
 }
 
+// NamespaceProber measures the reachability of one namespace with one packet.
+// reach.Prober carries the ability. A test double does not have to.
+type NamespaceProber interface {
+	// Probe sends one packet from nsName to target and reports what came back. An empty
+	// target makes the prober use the default gateway of the host.
+	Probe(ctx context.Context, nsName, target string) reach.Result
+}
+
+// SetProber replaces the prober that measures the reachability of a namespace. A test
+// uses it to give a measurement without a packet on the host.
+func (r *Reconciler) SetProber(p NamespaceProber) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.prober = p
+}
+
+// probeBudget bounds the whole measurement step of one tick. The reconciler probes every
+// namespace at the same time, therefore the step costs one budget for a host with one
+// namespace and for a host with eight.
+const probeBudget = 400 * time.Millisecond
+
+// probeReachability measures the reachability of each namespace and stores the result.
+func (r *Reconciler) probeReachability(desired map[string]config.Tailnet, actual map[string]*TailnetState) {
+}
+
 // SetChainWriter replaces the writer of the local rule set. A test uses it to observe the
 // compiled rule set without a command on the host.
 func (r *Reconciler) SetChainWriter(w ChainWriter) {
@@ -186,6 +223,7 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		unprotected:        make(map[string]string),
 		jumpPositions:      make(map[string]int),
 		hostAccessRules:    make(map[string]bool),
+		reachability:       make(map[string]reach.Result),
 		teardownHostAccess: namespaces.TeardownHostAccess,
 		hostFile:           dns.NewHostFileMonitor(dns.DefaultHostResolvConf),
 	}
