@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -221,8 +222,21 @@ func StartDaemon(tailnetID string, namespaceName string, allowUnprotected bool) 
 	return nil
 }
 
+// removePIDFile removes the PID file and returns the failure.
+// removePIDFile returns nil when the file is already gone. A PID file that stays holds a
+// number that the operating system can give to another process, and the next stop then
+// sends SIGTERM to that process. See issue #69.
+func removePIDFile(pidPath string) error {
+	if err := os.Remove(pidPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove the PID file %s: %w", pidPath, err)
+	}
+	return nil
+}
+
 // StopDaemon stops the tailscaled process for a specific tailnet.
 // It reads the PID file, validates the process, sends SIGTERM, and waits.
+// StopDaemon returns the failure of the PID file removal together with the failure of the
+// step that ran before it.
 func StopDaemon(namespaceName string, tailnetID string) error {
 	stateDir := filepath.Join(DefaultStateDir, tailnetID)
 	pidPath := filepath.Join(stateDir, "tailscaled.pid")
@@ -244,20 +258,23 @@ func StopDaemon(namespaceName string, tailnetID string) error {
 
 	// Validate PID is actually tailscaled
 	if !validatePID(pid) {
-		os.Remove(pidPath)
-		return fmt.Errorf("stale PID %d for %s (process is not tailscaled)", pid, tailnetID)
+		return errors.Join(
+			fmt.Errorf("stale PID %d for %s (process is not tailscaled)", pid, tailnetID),
+			removePIDFile(pidPath))
 	}
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		os.Remove(pidPath)
-		return fmt.Errorf("process %d not found for %s: %w", pid, tailnetID, err)
+		return errors.Join(
+			fmt.Errorf("process %d not found for %s: %w", pid, tailnetID, err),
+			removePIDFile(pidPath))
 	}
 
 	// Send SIGTERM for graceful shutdown
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		os.Remove(pidPath)
-		return fmt.Errorf("failed to send SIGTERM to %d: %w", pid, err)
+		return errors.Join(
+			fmt.Errorf("failed to send SIGTERM to %d: %w", pid, err),
+			removePIDFile(pidPath))
 	}
 
 	// Wait up to 5 seconds for graceful shutdown
@@ -269,17 +286,19 @@ func StopDaemon(namespaceName string, tailnetID string) error {
 		select {
 		case <-deadline:
 			// Force kill
-			proc.Signal(syscall.SIGKILL)
-			os.Remove(pidPath)
+			var errs []error
+			if err := proc.Signal(syscall.SIGKILL); err != nil {
+				errs = append(errs, fmt.Errorf("failed to send SIGKILL to %d: %w", pid, err))
+			}
+			errs = append(errs, removePIDFile(pidPath))
 			log.Printf("tailscaled for %s force-killed (PID %d)", tailnetID, pid)
-			return nil
+			return errors.Join(errs...)
 		case <-tick.C:
 			// Check if process is still running
 			if err := proc.Signal(syscall.Signal(0)); err != nil {
 				// Process is gone
-				os.Remove(pidPath)
 				log.Printf("tailscaled for %s stopped (PID %d)", tailnetID, pid)
-				return nil
+				return removePIDFile(pidPath)
 			}
 		}
 	}
