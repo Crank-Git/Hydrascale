@@ -592,12 +592,13 @@ security and DNS work must not wait behind the console.
 | 2026-08-05 | 1 | Issue #127. **The archive holds no record for any of the eight restarts that issue #104 measured.** The capture worked on 2026-07-31 and it works now, therefore those eight restarts were not kernel panics. This changelog line records the measurement alone. This issue does not investigate the daemon, which the issue boundaries state. |
 | 2026-08-05 | 1 | Issue #127. `kernel.sysrq` equals `176` on the test host, which `/etc/sysctl.d/10-magic-sysrq.conf` sets. That value omits the bit `0x8` that the crash function needs, so `echo c > /proc/sysrq-trigger` does nothing until `sysctl` raises the value. A restart restores `176`, therefore the deliberate crash leaves no change on the host. |
 | 2026-08-05 | 1 | Issue #122. `go mod tidy` moved `github.com/charmbracelet/bubbles` from the indirect block to the direct block, because `internal/tui/model.go` imports `bubbles/textinput`. The count of direct dependencies that `CLAUDE.md` states goes from six to seven. No dependency is added; the go.mod record was wrong. |
+| 2026-08-05 | 1 | **Epics 5 to 9 are on the tracker.** The decomposition produced 28 sub-issues: #134 to #139, #141 to #146, #148 to #152, #154 to #159, and #161 to #165. Every one of the 163 requirements in features 05 to 09 is cited by at least one sub-issue. Two sub-issues hold an open question and carry `status:needs-feedback`: #155 needs the Tailscale OAuth write scope, and #146 needs the operator to confirm the font source and the licence text before a commit. |
 
 ## Issue map
 
-Epics 0 to 4 are on the tracker. Epics 5 to 9 stay `planned` until the first milestones
-land, so that the console and policy epics can be re-decomposed if the security audit
-changes what they need.
+Every epic of version 1.0 is on the tracker. Epics 5 to 9 were filed on 2026-08-05, after
+the security audit closed, so that each decomposition carries the audit findings it must
+fix.
 
 | Epic | Issue | Sub-issues | Feature file |
 |---|---|---|---|
@@ -606,11 +607,11 @@ changes what they need.
 | Epic 2: Security audit | #62 | #63 #64 #65 #66 #67 | `features/02-security-audit.md` |
 | Epic 3: Security fixes | #68 | #69 #70 #71 #72 #73 | `features/03-security-fixes.md` |
 | Epic 4: DNS integrity | #74 | #75 #76 #77 #78 #79 | `features/04-dns-integrity.md` |
-| Epic 5: Local reachability model | not issued | — | `features/05-reachability-model.md` |
-| Epic 6: Console foundation | not issued | — | `features/06-console-foundation.md` |
-| Epic 7: Console access editor | not issued | — | `features/07-console-access-editor.md` |
-| Epic 8: Upstream policy control | not issued | — | `features/08-upstream-policy.md` |
-| Epic 9: Documentation and release | not issued | — | `features/09-docs-and-release.md` |
+| Epic 5: Local reachability model | #133 | #134 #135 #136 #137 #138 #139 | `features/05-reachability-model.md` |
+| Epic 6: Console foundation | #140 | #141 #142 #143 #144 #145 #146 | `features/06-console-foundation.md` |
+| Epic 7: Console access editor | #147 | #148 #149 #150 #151 #152 | `features/07-console-access-editor.md` |
+| Epic 8: Upstream policy control | #153 | #154 #155 #156 #157 #158 #159 | `features/08-upstream-policy.md` |
+| Epic 9: Documentation and release | #160 | #161 #162 #163 #164 #165 | `features/09-docs-and-release.md` |
 
 ### Requirement coverage
 
@@ -621,8 +622,18 @@ changes what they need.
 | security-audit | FR-audit-1 to 14 | #63 #64 #65 #66 #67 |
 | security-fixes | FR-fix-1 to 19 | #69 #70 #71 #72 #73 |
 | dns-integrity | FR-dns-1 to 16 | #75 #76 #77 #78 #79 |
+| reachability-model | FR-access-1 to 28 | #134 #135 #136 #137 #138 #139 |
+| console-foundation | FR-console-1 to 47 | #141 #142 #143 #144 #145 #146 |
+| console-access-editor | FR-editor-1 to 33 | #148 #149 #150 #151 #152 |
+| upstream-policy | FR-policy-1 to 28 | #154 #155 #156 #157 #158 #159 |
+| docs-and-release | FR-docs-1 to 27 | #161 #162 #163 #164 #165 |
 
-Every one of the 75 requirements in these five features is cited by at least one issue.
+Every one of the 238 requirements in these ten features is cited by at least one issue.
+
+**FR-access-2 is covered and reversed.** The requirement states that the daemon appends the
+jump rule into `FORWARD`. The operator decided on 2026-08-05 that the daemon keeps the
+insert at position 1. Issue #139 edits the requirement text, corrects `CLAUDE.md`, and adds
+the detection that the decision needs.
 
 ### Requirements already satisfied when the issues were created
 

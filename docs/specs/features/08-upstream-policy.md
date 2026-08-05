@@ -2,8 +2,8 @@
 id: upstream-policy
 feature: Upstream policy control
 epic: "Epic 8: Upstream policy control"
-status: planned
-issues: []
+status: issued
+issues: [154, 155, 156, 157, 158, 159]
 mockups: [mockups/04-upstream-policy.html]
 ---
 

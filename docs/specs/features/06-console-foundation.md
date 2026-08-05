@@ -2,8 +2,8 @@
 id: console-foundation
 feature: Console foundation
 epic: "Epic 6: Console foundation"
-status: planned
-issues: []
+status: issued
+issues: [141, 142, 143, 144, 145, 146]
 mockups: [mockups/01-overview.html, mockups/02-namespace-detail.html, mockups/05-dns-and-settings.html]
 ---
 
