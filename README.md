@@ -1,10 +1,23 @@
-# Hydrascale
-
 <p align="center">
-  <img src="internal/ui/static/brand/logo-lime.svg" alt="Hydrascale logo" width="120">
+  <img src="internal/ui/static/brand/logo-lime.svg" alt="The Hydrascale mark" width="96">
 </p>
 
+<h1 align="center">Hydrascale</h1>
+
 <p align="center">Run multiple Tailscale tailnets simultaneously on a single Linux machine.</p>
+
+<p align="center">
+  <a href="https://github.com/Crank-Git/Hydrascale/actions/workflows/ci.yml"><img src="https://github.com/Crank-Git/Hydrascale/actions/workflows/ci.yml/badge.svg?branch=dev" alt="The state of continuous integration"></a>
+  <img src="https://img.shields.io/badge/go-1.26-8d867d" alt="The Go version">
+  <img src="https://img.shields.io/badge/platform-linux-8d867d" alt="The platform">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8d867d" alt="The license"></a>
+</p>
+
+<p align="center">
+  <img src="docs/images/console-overview.png" alt="The Overview view of the console. Two tailnets report reachable, the reconciler reports converged, and a dotted curve joins each tailnet to the internet node." width="900">
+</p>
+
+<p align="center"><i>The Overview view. The tailnet names are placeholders.</i></p>
 
 Hydrascale lets one Linux host join several Tailscale tailnets at the same time. It is for
 the operator who administers a host that must reach a work tailnet, a home tailnet, and a
@@ -169,6 +182,12 @@ The daemon serves the console on the loopback address. The console is a static s
 application inside the binary, so it makes no request to another host and it needs no build
 step. It holds six views: Overview, Namespaces, Access, Policy, Activity, and Settings.
 
+<p align="center">
+  <img src="docs/images/console-namespaces.png" alt="The Namespaces view of the console. One row per tailnet states the health, the reachability, the peer count, the address, and the namespace name." width="900">
+</p>
+
+<p align="center"><i>The Namespaces view. One row per tailnet. The names and the addresses are placeholders.</i></p>
+
 The daemon serves the console when the configuration file holds no `console` key, so a
 version 0.9 file needs no edit. The default address is `127.0.0.1:9443`:
 
@@ -268,11 +287,23 @@ read the log for a day, then add the rules the log names.
 The Access view of the console shows the rule set, stages an edit, and applies it. The
 reconciler writes the changed rule set on the next tick.
 
+<p align="center">
+  <img src="docs/images/console-access.png" alt="The Access view of the console. A dotted curve joins each tailnet to the internet node, a reachability matrix marks the two allowed paths, and the rule list holds one row per rule." width="900">
+</p>
+
+<p align="center"><i>The Access view. A filled square and a drawn curve each mark an allowed path. A denied path has neither.</i></p>
+
 ## Upstream policy
 
 A policy is the huJSON access-control document that a control server holds for a tailnet.
 The Policy view of the console reads that document, validates it, and writes it back. This
 is the upstream half of reachability; the local rules are the half that this host enforces.
+
+<p align="center">
+  <img src="docs/images/console-policy.png" alt="The Policy view of the console. Each tailnet card reports no credential, and the panel asks the operator to select a tailnet." width="900">
+</p>
+
+<p align="center"><i>The Policy view before a credential is set. Each card states the exact keys that a policy read needs.</i></p>
 
 The daemon takes the control server kind from the control URL of the tailnet. A tailnet
 that declares no `control_url` is a Tailscale tailnet. Every other tailnet is a Headscale
@@ -488,6 +519,12 @@ dns:
 Set `allow_unprotected: true` only on a host where the overlay mount cannot work. The
 daemon records the event `dns.unprotected`, and the Overview view of the console shows the
 namespace as unprotected.
+
+<p align="center">
+  <img src="docs/images/console-settings.png" alt="The Settings view of the console. The Resolver card states the mode, the bind address, and the upstreams. The Namespace protection card reports each namespace as protected." width="900">
+</p>
+
+<p align="center"><i>The Settings view, which holds the resolver state and the protection state of each namespace.</i></p>
 
 ### Accepted subnet routes
 
@@ -896,6 +933,15 @@ sudo journalctl -u hydrascale -f
 ```
 
 ## Architecture
+
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="One Linux host. The config file, the reconciler, the console and the DNS forwarder sit on the host. A veth pair joins the host to one network namespace per tailnet, and each namespace runs its own tailscaled and its own tailscale0 interface." width="900">
+</p>
+
+The daemon runs one network namespace per tailnet. A veth pair joins each namespace to the
+host, and the reconciler, the console, and the DNS forwarder run on the host itself.
+
+The reconciler builds that state from three managers:
 
 ```
                       +-----------------------+
