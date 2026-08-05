@@ -191,8 +191,97 @@ func (r *Reconciler) SetProber(p NamespaceProber) {
 // namespace and for a host with eight.
 const probeBudget = 400 * time.Millisecond
 
-// probeReachability measures the reachability of each namespace and stores the result.
+// probeReachability measures the reachability of each namespace and stores the result, so
+// that the status route reports what one packet did and never what a rule says.
+//
+// The step sends one packet from each namespace at the same time, and probeBudget bounds
+// the whole step. A probe that gets no answer inside the budget reports unreachable, which
+// is the answer that the operator needs: a path that carries nothing inside 400 ms carries
+// nothing that the operator can use.
+//
+// The daemon sends no packet from the namespace of a tailnet that the operator stopped, and
+// none from a namespace that does not exist. Both report not_probed with the reason,
+// therefore an operator who stops a tailnet on purpose reads no fault.
 func (r *Reconciler) probeReachability(desired map[string]config.Tailnet, actual map[string]*TailnetState) {
+	r.mu.Lock()
+	prober := r.prober
+	r.mu.Unlock()
+	if prober == nil {
+		return
+	}
+
+	// A configuration file that the daemon cannot read leaves the target empty, which
+	// makes the prober measure against the default gateway of the host.
+	var target string
+	if cfg, err := config.LoadConfig(r.configPath); err == nil {
+		target = cfg.ProbeTarget
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), probeBudget)
+	defer cancel()
+
+	results := make(map[string]reach.Result, len(desired))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for id := range desired {
+		r.mu.Lock()
+		paused := r.pausedStates[id]
+		r.mu.Unlock()
+
+		state, ok := actual[id]
+		switch {
+		case paused:
+			results[id] = reach.Result{
+				State:     reach.StateNotProbed,
+				CheckedAt: time.Now(),
+				Detail:    "the operator stopped this tailnet",
+			}
+			continue
+		case !ok || !state.NsExists:
+			results[id] = reach.Result{
+				State:     reach.StateNotProbed,
+				CheckedAt: time.Now(),
+				Detail:    "the namespace does not exist",
+			}
+			continue
+		}
+
+		wg.Add(1)
+		go func(id, nsName string) {
+			defer wg.Done()
+			res := prober.Probe(ctx, nsName, target)
+			mu.Lock()
+			results[id] = res
+			mu.Unlock()
+		}(id, state.NsName)
+	}
+	wg.Wait()
+
+	// A failed measurement against the default gateway drops the gateway that the last
+	// lookup returned, so a host that changed its gateway measures the new one on the
+	// next tick.
+	if forgetter, ok := prober.(interface{ ForgetGateway() }); ok && target == "" {
+		for _, res := range results {
+			if res.State == reach.StateUnreachable {
+				forgetter.ForgetGateway()
+				break
+			}
+		}
+	}
+
+	r.mu.Lock()
+	for id, res := range results {
+		r.reachability[id] = res
+	}
+	r.mu.Unlock()
+
+	for id, res := range results {
+		if state, ok := actual[id]; ok {
+			value := res
+			state.MeasuredReachability = &value
+		}
+	}
 }
 
 // SetChainWriter replaces the writer of the local rule set. A test uses it to observe the
@@ -237,6 +326,9 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 	// namespace manager double gets no writer, and it sets one with SetChainWriter.
 	if _, ok := ns.(*namespaces.RealManager); ok {
 		r.access = access.NewWriter()
+		// Only a Reconciler that drives the live host sends a packet. A test that passes
+		// a namespace manager double gets no prober, and it sets one with SetProber.
+		r.prober = reach.New()
 	}
 	return r
 }
@@ -286,9 +378,10 @@ func (r *Reconciler) ActualState() (map[string]*TailnetState, error) {
 		}
 
 		state := &TailnetState{
-			ID:       tailnetID,
-			NsName:   nsName,
-			NsExists: true,
+			ID:                   tailnetID,
+			NsName:               nsName,
+			NsExists:             true,
+			MeasuredReachability: r.lastReachability(tailnetID),
 		}
 
 		// Check daemon health with timeout
@@ -308,6 +401,23 @@ func (r *Reconciler) ActualState() (map[string]*TailnetState, error) {
 	}
 
 	return actual, nil
+}
+
+// lastReachability returns the measurement that the last tick made for the tailnet.
+// The status route reads the state between two ticks, therefore it reads the stored
+// measurement and it sends no packet of its own. A tailnet with no measurement yet gets
+// not_probed with the reason, so the field is present for every namespace.
+func (r *Reconciler) lastReachability(tailnetID string) *reach.Result {
+	r.mu.Lock()
+	res, ok := r.reachability[tailnetID]
+	r.mu.Unlock()
+	if !ok {
+		return &reach.Result{
+			State:  reach.StateNotProbed,
+			Detail: "the daemon made no measurement since it started",
+		}
+	}
+	return &res
 }
 
 // Diff computes the actions needed to move from actual to desired state.
@@ -620,6 +730,11 @@ func (r *Reconciler) Reconcile() error {
 	r.applyAccess()
 	r.ensureForwardPath(desired, actual)
 	r.checkNamespaceForwarding(desired)
+
+	// Runs last, because the repair of the forward path above changes what a packet from
+	// the namespace does. The measurement therefore reports the host as this tick leaves
+	// it.
+	r.probeReachability(desired, actual)
 
 	if len(actions) == 0 {
 		r.emit("reconcile_complete", "", "no changes needed")
