@@ -13,12 +13,17 @@ import {
   MODE_ENFORCE,
   MODE_OBSERVE,
   OBSERVE_LOG_COMMAND,
+  SQUARE_SIDE,
+  SQUARE_SIDE_DENSE,
   createAccessState,
   emptyStatement,
   headerModel,
+  hoverMarks,
+  matrixModel,
   modeChange,
   observeStatement,
   sendModeChange,
+  toggleSquare,
 } from "../static/access.js";
 
 // accessBody is one answer of GET /api/access, as internal/api/types.go declares it.
@@ -280,6 +285,166 @@ test("the empty state names the tailnet as the first step on a host that holds n
 
 test("a rule set with one rule states no empty state", () => {
   assert.equal(emptyStatement(accessBody()), null);
+});
+
+// ---------------------------------------------------------------------------
+// The reachability matrix
+// ---------------------------------------------------------------------------
+
+// squareAt returns the square of one path from the matrix model.
+function squareAt(model, from, to) {
+  const row = model.rows.find((one) => one.source === from);
+  return row.squares.find((one) => one.to === to);
+}
+
+// denseBody is one answer of GET /api/access for a host that declares 12 tailnets.
+function denseBody() {
+  const tailnets = [];
+  for (let index = 0; index < 12; index += 1) {
+    tailnets.push({ id: `net${index}`, kind: "tailnet", peers: 1, veth: "10.99.0.2" });
+  }
+  return accessBody({
+    rules: [],
+    nodes: [...tailnets, { id: "host", kind: "host" }, { id: "internet", kind: "internet" }],
+  });
+}
+
+test("the matrix has one row per source and one column per destination", () => {
+  // FR-editor-7. A source is a tailnet or the host. A destination is a tailnet, the host,
+  // or the internet. features/05-reachability-model.md states both.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = matrixModel(state.base(), state.rules());
+
+  assert.deepEqual(model.sources, ["jbones", "homelab", "host"]);
+  assert.deepEqual(model.destinations, ["jbones", "homelab", "host", "internet"]);
+  assert.equal(model.rows.length, 3);
+  for (const row of model.rows) {
+    assert.equal(row.squares.length, 4);
+  }
+});
+
+test("a filled square means that at least one rule allows the path", () => {
+  // FR-editor-8.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = matrixModel(state.base(), state.rules());
+
+  assert.equal(squareAt(model, "jbones", "internet").allowed, true);
+  assert.equal(squareAt(model, "jbones", "host").allowed, true);
+});
+
+test("an empty square means that no rule allows the path", () => {
+  // FR-editor-9. The empty square is the denial, therefore the model marks no path as
+  // refused and it draws no second state.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = matrixModel(state.base(), state.rules());
+
+  assert.equal(squareAt(model, "jbones", "homelab").allowed, false);
+  assert.equal(squareAt(model, "homelab", "internet").allowed, false);
+});
+
+test("the diagonal square is inert and it accepts no click", () => {
+  // FR-editor-10. The daemon rejects a rule where from equals to, so the square carries
+  // the disabled attribute and the stage operation returns the rule set unchanged.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = matrixModel(state.base(), state.rules());
+
+  const diagonal = squareAt(model, "jbones", "jbones");
+  assert.equal(diagonal.inert, true);
+  assert.equal(diagonal.disabled, true);
+  assert.deepEqual(toggleSquare(state.rules(), "jbones", "jbones"), state.rules());
+});
+
+test("a click on an empty square stages a rule that allows every port", () => {
+  // FR-editor-11, and steps 4 to 7 of the flow "The operator allows one path".
+  const state = createAccessState();
+  state.setBase(accessBody());
+
+  state.setRules(toggleSquare(state.rules(), "jbones", "homelab"));
+
+  assert.deepEqual(state.difference().added, [{ from: "jbones", to: "homelab", ports: [] }]);
+  assert.equal(state.count(), 1);
+  assert.equal(squareAt(matrixModel(state.base(), state.rules()), "jbones", "homelab").allowed, true);
+});
+
+test("a click on a filled square stages the removal of every rule for that path", () => {
+  // FR-editor-12.
+  const state = createAccessState();
+  state.setBase(accessBody());
+
+  state.setRules(toggleSquare(state.rules(), "jbones", "host"));
+
+  assert.deepEqual(state.difference().removed.map((rule) => rule.to), ["host"]);
+  assert.equal(state.count(), 1);
+  assert.equal(squareAt(matrixModel(state.base(), state.rules()), "jbones", "host").allowed, false);
+});
+
+test("the hover marks the row label and the column label and no other crosshair", async () => {
+  // FR-editor-13. The mark names two labels, therefore the view draws no third element and
+  // it tints no row and no column.
+  const marks = hoverMarks("jbones", "homelab");
+  assert.deepEqual(marks, { row: "jbones", column: "homelab" });
+  assert.deepEqual(Object.keys(marks), ["row", "column"]);
+
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ac-mtx th\.hot\{color:var\(--accent\)\}/);
+  assert.doesNotMatch(style, /\.ac-square\.hot/);
+});
+
+test("the matrix holds no port value", () => {
+  // FR-editor-14. The ports live in the rule list of issue #151.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = matrixModel(state.base(), state.rules());
+
+  const text = JSON.stringify(model);
+  assert.doesNotMatch(text, /ports/);
+  assert.doesNotMatch(text, /tcp|udp/);
+});
+
+test("the square carries a 6 pixel corner radius", async () => {
+  // FR-editor-15. The radius token of the brand carries the value, and the square reads
+  // the token, therefore the grid reads as a grid.
+  const radius = await readFile(new URL("../static/brand/tokens/radius.css", import.meta.url), "utf8");
+  assert.match(radius, /--r-xs:6px;/);
+
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ac-square\{[^}]*border-radius:var\(--r-xs\)/);
+});
+
+test("a host with 12 tailnets draws the 28 pixel square rather than the 34 pixel square", () => {
+  const state = createAccessState();
+  state.setBase(accessBody());
+  assert.equal(matrixModel(state.base(), state.rules()).side, SQUARE_SIDE);
+  assert.equal(SQUARE_SIDE, 34);
+
+  const dense = createAccessState();
+  dense.setBase(denseBody());
+  assert.equal(matrixModel(dense.base(), dense.rules()).side, SQUARE_SIDE_DENSE);
+  assert.equal(SQUARE_SIDE_DENSE, 28);
+});
+
+test("every square reaches focus by keyboard and the keyboard stages the same edit", async () => {
+  // A button reaches focus with no tabindex attribute, and the browser gives it the space
+  // key and the enter key. The click handler and the keyboard both call toggleSquare,
+  // therefore one operation serves both.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = matrixModel(state.base(), state.rules());
+
+  for (const row of model.rows) {
+    for (const square of row.squares) {
+      assert.equal(square.kind, "button");
+      assert.ok(square.label.length > 0);
+      assert.equal(square.disabled, square.inert);
+    }
+  }
+
+  const source = await readFile(new URL("../static/access.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /tabindex/i);
 });
 
 // ---------------------------------------------------------------------------
