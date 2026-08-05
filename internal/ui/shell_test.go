@@ -120,6 +120,11 @@ func TestTheConsoleSourceHoldsNoEmoji(t *testing.T) {
 		if err != nil || d.IsDir() {
 			return err
 		}
+		// A WOFF2 file is compressed, so its bytes read as arbitrary code points and
+		// they are not console source. The glyph set of each face is not source either.
+		if strings.HasSuffix(name, ".woff2") {
+			return nil
+		}
 		for _, r := range readStatic(t, name) {
 			if inEmojiRange(r) {
 				t.Errorf("%s holds the emoji code point U+%04X", name, r)

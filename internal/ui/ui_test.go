@@ -100,7 +100,11 @@ func TestTheConsoleServesEveryFontFileAndTheLicence(t *testing.T) {
 // TestTheConsoleRequestsNoResourceFromAnotherHost reads every embedded file and refuses a
 // reference to another host. CLAUDE.md states that the console makes no request to
 // another host, and FR-console-6 holds it. The check skips the xmlns attribute of an SVG
-// file, because that value names an XML namespace and it is not a request.
+// file, because that value names an XML namespace and it is not a request. The check
+// skips brand/fonts/OFL.txt, because that file is the licence text of the two typefaces,
+// quoted from the font projects. It names the SIL licence page and each upstream project,
+// and the console loads no file from either. The console reads the font files from its own
+// origin, which TestTheConsoleDeclaresAFaceForEveryFontFile holds.
 func TestTheConsoleRequestsNoResourceFromAnotherHost(t *testing.T) {
 	markers := []string{"http://", "https://", "src=\"//", "href=\"//", "url(//"}
 
@@ -108,7 +112,7 @@ func TestTheConsoleRequestsNoResourceFromAnotherHost(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
+		if d.IsDir() || path == "brand/fonts/OFL.txt" {
 			return nil
 		}
 		data, err := fs.ReadFile(Files(), path)
