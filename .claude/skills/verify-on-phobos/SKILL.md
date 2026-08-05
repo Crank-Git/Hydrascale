@@ -210,6 +210,37 @@ service stays stopped. Start the service again by hand in that case.
 Stopping the service alone returns the host to a working state, because the daemon holds
 no lock that survives it. Restore the previous binary as well before you leave the host.
 
+### Restore the forward rules after a rollback to version 0.9
+
+Version 0.9 writes two `FORWARD` rules for each namespace, and it writes them only when it
+creates the veth pair. Epic 5 removes those rules, because the chain `HYDRASCALE-FWD`
+replaces them. A rollback keeps the namespaces, so the setup path does not run and the two
+rules never return. A restart of the service repairs nothing, for the same reason. The
+project manager measured this on 2026-08-05 and issue #172 records it.
+
+**Warning: a namespace with no `FORWARD` rule reaches nothing, and `hydrascale status`
+still reports `healthy` and `running`.** Run these steps after every rollback from a build
+that holds `HYDRASCALE-FWD` to a version 0.9 build.
+
+1. Read the chain and the name of each host veth device:
+   ```sh
+   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo iptables -S FORWARD; ip -brief addr show type veth'
+   ```
+
+2. Write the two rules for each host veth device that step 1 names:
+   ```sh
+   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo iptables -A FORWARD -o <veth> -m state --state RELATED,ESTABLISHED -j ACCEPT && sudo iptables -A FORWARD -i <veth> -j ACCEPT'
+   ```
+
+3. Confirm the path from inside each namespace:
+   ```sh
+   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo ip netns exec ns-<id> ping -c1 -W3 1.1.1.1'
+   ```
+
+A rollback to a build that holds `HYDRASCALE-FWD` needs no such step. That daemon writes
+the chain and the jump rule on its first tick, and it writes the masquerade rule of a
+namespace that lost it.
+
 ## Status only
 
 ```sh
