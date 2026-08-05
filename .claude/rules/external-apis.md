@@ -57,6 +57,25 @@ Headscale exposes its gRPC service over a grpc-gateway REST bridge, so this proj
 
 Authentication is a bearer token holding a Headscale API key.
 
+Confirmed again 2026-08-05 for issue #156, from
+`https://raw.githubusercontent.com/juanfont/headscale/v0.29.3/proto/headscale/v1/headscale.proto`
+lines 194-213 and
+`https://raw.githubusercontent.com/juanfont/headscale/v0.29.3/proto/headscale/v1/policy.proto`:
+
+- The three routes above are the `google.api.http` annotations of `GetPolicy`,
+  `SetPolicy`, and `CheckPolicy`. `SetPolicy` and `CheckPolicy` both carry `body: "*"`.
+- The request body of `SetPolicy` and of `CheckPolicy` is `{"policy": "<document>"}`.
+- The response body of `GetPolicy` and of `SetPolicy` is
+  `{"policy": "<document>", "updatedAt": "<timestamp>"}`. `CheckPolicyResponse` is empty.
+- `hscontrol/grpcv1.go:727` returns `types.ErrPolicyUpdateIsDisabled` when `policy.mode`
+  is not `db`. `hscontrol/types/policy.go:11` declares it as
+  `errors.New("update is disabled for modes other than 'database'")`. That error carries
+  the gRPC code `Unknown`, therefore **the REST bridge answers HTTP 500 and not HTTP
+  403**. A client detects the file policy mode from the `message` field of the answer,
+  not from the status.
+- An error answer of the REST bridge has the shape
+  `{"code": <number>, "message": "<text>", "details": []}`.
+
 ## Rules
 
 - A capability you could not confirm goes into `Risks & open questions` in the spec. It
