@@ -20,10 +20,17 @@ import (
 const DefaultStateDir = "/var/lib/hydrascale/state"
 
 // TailscaleStatus represents parsed tailscale status --json output.
+//
+// BackendState holds the state word that tailscaled reports, which is "Running" for a node
+// that is logged in and "NeedsLogin" for a node that is not. AuthURL holds the address
+// that authorizes the node, and tailscaled fills it for "NeedsLogin" only. The console
+// shows both, therefore the daemon reads both rather than inventing a state word.
 type TailscaleStatus struct {
 	Self           StatusNode            `json:"Self"`
 	Peer           map[string]StatusNode `json:"Peer"`
 	MagicDNSSuffix string                `json:"MagicDNSSuffix"`
+	BackendState   string                `json:"BackendState"`
+	AuthURL        string                `json:"AuthURL"`
 }
 
 // StatusNode represents a node in tailscale status.

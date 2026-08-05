@@ -157,6 +157,9 @@ type PeerInfo struct {
 // Config fields (ExitNode, HostAccess) and reconciler route state are NOT included
 // here — clients assemble those from GET /api/status and GET /api/config.
 // Error is set (with HTTP 200) when the live fetch fails; clients render it inline.
+// BackendState holds the state word of tailscaled, and LoginURL holds the address that
+// authorizes a node that is not logged in. The console shows a warning dot and the login
+// URL for that node, therefore it reads both from the daemon.
 type TailnetDetailResponse struct {
 	TailscaleIPs   []string   `json:"tailscale_ips"`
 	MagicDNSName   string     `json:"magic_dns_name,omitempty"`
@@ -164,6 +167,21 @@ type TailnetDetailResponse struct {
 	PeerCount      int        `json:"peer_count"`
 	OnlinePeers    int        `json:"online_peers"`
 	Peers          []PeerInfo `json:"peers,omitempty"`
+	BackendState   string     `json:"backend_state,omitempty"`
+	LoginURL       string     `json:"login_url,omitempty"`
 	FetchedAt      time.Time  `json:"fetched_at"`
 	Error          string     `json:"error,omitempty"`
+}
+
+// TailnetRemovalPlanResponse is the JSON response for GET /api/tailnet/{id}/removal-plan.
+// It states what the removal of one tailnet does on this host, so that the console dialog
+// of FR-console-29 names every command and repeats no rule of the daemon. The route reads
+// state and it runs no command.
+type TailnetRemovalPlanResponse struct {
+	ID        string   `json:"id"`
+	Namespace string   `json:"namespace"`
+	HostVeth  string   `json:"host_veth"`
+	StateDir  string   `json:"state_dir"`
+	RuleCount int      `json:"rule_count"`
+	Commands  []string `json:"commands"`
 }

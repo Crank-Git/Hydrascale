@@ -276,7 +276,15 @@ func TestTheConsoleNamesNoCredentialField(t *testing.T) {
 	// secret, and a Headscale API key never reach it. SA-1 was an auth key in the body of
 	// GET /api/status. The console reads no such field anywhere, so no later change to a
 	// route can put one on the screen.
+	//
+	// The add flow of namespaces.js is the one place that carries a credential, because an
+	// operator gives an auth key when a tailnet joins. It sends the field and it never
+	// renders it: internal/ui/jstest/namespaces.test.mjs holds "the add flow never holds an
+	// auth key after the operator submits it" and "the add flow keeps the auth key after a
+	// refused request, and it never states the key". The field name is therefore allowed in
+	// that file alone, and a literal key is allowed nowhere.
 	credentials := []string{"auth_key", "AuthKey", "tskey-", "client_secret", "api_key", "secrets"}
+	sendsTheAddFlow := map[string]bool{"auth_key": true, "AuthKey": true, "authKey": true}
 
 	err := fs.WalkDir(Files(), ".", func(name string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(name, ".js") {
@@ -284,6 +292,9 @@ func TestTheConsoleNamesNoCredentialField(t *testing.T) {
 		}
 		source := readStatic(t, name)
 		for _, word := range credentials {
+			if name == "namespaces.js" && sendsTheAddFlow[word] {
+				continue
+			}
 			if strings.Contains(source, word) {
 				t.Errorf("%s names the field %s, so the console can show a credential", name, word)
 			}
