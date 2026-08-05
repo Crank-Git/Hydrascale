@@ -48,12 +48,18 @@ git ls-files | grep -E '^\.(gstack|omc|sisyphus|openagent)/'
 ### A secret
 
 ```sh
-git grep -nE 'tskey-[a-zA-Z0-9]|AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY' \
-  -- ':!vendor' ':!scripts/check-hygiene.sh' ':!.claude/skills/check-hygiene'
+git grep -nE 'tskey-[a-z]+-[A-Za-z0-9]{22,}|AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY' \
+  -- ':!vendor' ':!scripts/check-hygiene.sh' ':!.claude/skills/check-hygiene' \
+     ':!docs/specs/features/01-desktop-client-removal.md'
 ```
 
-A match is a defect even in a test fixture. Use an obviously fake value that does not
-match the pattern.
+The patterns match the shape of a real credential, not the word. The repository holds
+about fifteen documented placeholders — `tskey-auth-xxxxx` in `README.md`,
+`tskey-auth-xxx` and `tskey-secret` in tests — and none of them match. A check that
+failed on those would fail every run, and a check that always fails gets removed.
+
+A match is a defect even in a test fixture. Add a new placeholder that is obviously fake
+and obviously short, so it cannot match.
 
 ### The build output
 

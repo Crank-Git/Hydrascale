@@ -104,10 +104,29 @@ The script fails when a tracked file matches any of these:
 | A file larger than 2 MB that is not under `internal/ui/static/brand/`. | A binary or a build artifact. |
 | `TODOS.md`, `HYPERPLAN.md`, `CLAUDE.md`, `AGENTS.md`. | A private development note. |
 | A path under `.claude/`, `.gstack/`, `.omc/`, `.sisyphus/`, `.openagent/`. | Tool state. |
-| A file that contains `tskey-`, `AKIA`, `BEGIN PRIVATE KEY`, or `BEGIN OPENSSH PRIVATE KEY`. | A secret. |
+| A file that holds a credential shaped like a real one. | A secret. The exact patterns are below. |
 | A file that contains `Claude Code`, `claude.ai`, or `Generated with Claude`. | A private tooling reference. |
 
 The last pattern excludes the script itself, because the script names the pattern.
+
+### The secret patterns must not match a placeholder
+
+The repository already holds about fifteen documented placeholders: `tskey-auth-xxxxx`
+in `README.md`, `tskey-auth-xxx` in `internal/config/config_test.go`, and `tskey-secret`
+in `internal/api/server_test.go`. A check that fails on those fails on every run, and a
+check that always fails gets removed. Match the shape of a real credential instead:
+
+| Pattern | Matches | Does not match |
+|---|---|---|
+| `tskey-[a-z]+-[A-Za-z0-9]{22,}` | A real Tailscale auth key. | `tskey-auth-xxxxx`, `tskey-secret`, `tskey-abc`. |
+| `AKIA[0-9A-Z]{16}` | An AWS access key id. | The word `AKIA` alone. |
+| `BEGIN (RSA \|OPENSSH \|EC )?PRIVATE KEY` | A private key block. | A sentence about private keys. |
+
+The script also skips a file that Git reports as binary, because a compiled binary
+contains the placeholder strings that the source compiled into it.
+
+A new placeholder must not match a pattern above. Use a value that is obviously fake and
+obviously short.
 
 ### The brand assets
 
@@ -151,8 +170,11 @@ None.
 - [ ] `internal/ui/static/brand/icons/` contains twelve SVG files.
 - [ ] `git check-ignore branding` reports that `branding` is ignored.
 - [ ] `scripts/check-hygiene.sh` exits zero on the cleaned repository.
-- [ ] `scripts/check-hygiene.sh` exits non-zero when a test adds a file containing
-      `tskey-abc123`.
+- [ ] `scripts/check-hygiene.sh` exits zero on the repository as it stands, with every
+      existing placeholder in `README.md`, `internal/config/config_test.go`, and
+      `internal/api/server_test.go` left unchanged.
+- [ ] `scripts/check-hygiene.sh` exits non-zero when a test adds a file holding a value
+      that matches `tskey-[a-z]+-[A-Za-z0-9]{22,}`.
 - [ ] The continuous integration workflow runs the hygiene script.
 
 ## Out of scope
