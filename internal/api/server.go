@@ -106,7 +106,12 @@ func (s *Server) Start() error {
 			ln.Close()
 			return fmt.Errorf("failed to apply socket group %q: %w", s.socketGroup, err)
 		}
-		log.Printf("api: socket group access enabled for %q", s.socketGroup)
+		info, err := os.Stat(s.socketPath)
+		if err != nil {
+			ln.Close()
+			return fmt.Errorf("failed to read the mode of socket %s: %w", s.socketPath, err)
+		}
+		log.Print(socketGroupLog(s.socketPath, s.socketGroup, info.Mode()))
 	}
 	s.listener = ln
 
@@ -198,6 +203,14 @@ func (s *Server) writeReconcileResponse(w http.ResponseWriter, err error) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// socketGroupLog returns the start log line for a group-accessible control socket.
+// The line names the socket path, the socket mode, and the group. It also states that a
+// member of the group holds root access on the host.
+func socketGroupLog(socketPath, group string, mode os.FileMode) string {
+	return fmt.Sprintf("api: socket %s has mode %04o and group %q; a member of that group sends a command to the daemon, which runs as root, so membership is equivalent to root access on this host",
+		socketPath, mode.Perm(), group)
+}
+
 // applySocketGroup makes the control socket reachable by members of group:
 // the parent dir gets root:<group> 0750 (group can traverse to the socket) and
 // the socket itself root:<group> 0660 (group can connect). The daemon still
@@ -210,6 +223,11 @@ func applySocketGroup(socketPath, group string) error {
 	gid, err := strconv.Atoi(g.Gid)
 	if err != nil {
 		return fmt.Errorf("parse gid for %q: %w", group, err)
+	}
+	// A member of the socket group controls a root daemon, so the root group adds no
+	// account and it hides that fact from the operator.
+	if gid == 0 {
+		return fmt.Errorf("group %q has group id 0: name a group other than the root group", group)
 	}
 	dir := filepath.Dir(socketPath)
 	if err := os.Chown(dir, 0, gid); err != nil {

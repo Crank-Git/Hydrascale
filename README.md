@@ -307,6 +307,8 @@ host_access: false
 # infra_subnet: "10.200.0.0/16"
 
 # Unix group granted access to the control socket (default: empty = root-only).
+# Warning: membership of this group is equivalent to root access on this host, because a
+# member sends a command to the daemon and the daemon runs as root.
 # Required for any non-root client, and for a client that reaches the socket over an
 # SSH forward. When set, the daemon makes /var/lib/hydrascale and api.sock
 # group-accessible; add your user to this group. See "Remote Access" below.
@@ -342,6 +344,12 @@ The daemon serves its control API on the control socket
 and `/var/lib/hydrascale` is not traversable by another user. A client that does not
 run as root needs group access to the socket. A client on another machine reaches the
 socket over an SSH forward, and the SSH user needs the same group access.
+
+> **Warning — `socket_group` membership is equivalent to root access.** A member of the
+> group sends a command to the daemon, and the daemon runs as root. The member creates a
+> namespace, writes a host route, and runs a command as root. Name a group that holds
+> only trusted operators. The daemon refuses to start when `socket_group` names the root
+> group.
 
 Create the group and add your user to it:
 
