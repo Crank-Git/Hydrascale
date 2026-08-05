@@ -41,6 +41,31 @@ type Compiled struct {
 	Out     [][]string
 }
 
+// privateRanges holds the address ranges that the internet destination excludes.
+// The list holds the three RFC 1918 ranges, the link-local range, and the loopback range.
+// The operator decided on 2026-08-05: "Exclude all RFC1918 + the host's subnets".
+// The host local network is inside one of these ranges, therefore the compiler needs no
+// host command to find it and it stays a pure function.
+var privateRanges = []string{
+	"10.0.0.0-10.255.255.255",
+	"172.16.0.0-172.31.255.255",
+	"192.168.0.0-192.168.255.255",
+	"169.254.0.0-169.254.255.255",
+	"127.0.0.0-127.255.255.255",
+}
+
+// excludePrivate returns the matches that keep a rule off every private range.
+// One iptables rule holds one -d option, therefore the compiler uses the iprange match,
+// which a rule holds more than once. Every match must fail for the rule to accept the
+// packet, so the exclusions combine as the operator expects.
+func excludePrivate() []string {
+	args := make([]string, 0, len(privateRanges)*4)
+	for _, r := range privateRanges {
+		args = append(args, "-m", "iprange", "!", "--dst-range", r)
+	}
+	return args
+}
+
 // establishedMatch allows return traffic for a connection that a rule already allowed.
 var establishedMatch = []string{"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"}
 
@@ -136,8 +161,12 @@ func compileRule(rule Rule, topo Topology) (string, []string, error) {
 	case Host:
 		return ChainOut, []string{"-i", source}, nil
 	case Internet:
-		// The internet destination is every address that no namespace device serves.
-		return ChainForward, []string{"-i", source, "!", "-o", devicePrefix + "+"}, nil
+		// The internet destination is a public address only. The match excludes every
+		// namespace device, the three RFC 1918 ranges, the link-local range, and the
+		// loopback range. Without the range exclusion a namespace reaches the host local
+		// network, which is the finding SA-9.
+		match := []string{"-i", source, "!", "-o", devicePrefix + "+"}
+		return ChainForward, append(match, excludePrivate()...), nil
 	default:
 		destination, ok := topo.Devices[rule.To]
 		if !ok {
