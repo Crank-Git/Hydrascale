@@ -21,6 +21,7 @@ import (
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
+	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 )
 
@@ -77,6 +78,7 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	// Method-qualified pattern (Go 1.22+) — restricts to GET only and supports {id} wildcard.
 	// Registered after the exact-match tailnet routes above, which take priority.
 	mux.HandleFunc("GET /api/tailnet/{id}/detail", s.handleTailnetDetail)
+	mux.HandleFunc("GET /api/tailnet/{id}/removal-plan", s.handleTailnetRemovalPlan)
 
 	s.mux = mux
 	s.httpServer = &http.Server{Handler: mux}
@@ -668,6 +670,8 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	resp.TailscaleIPs = status.Self.TailscaleIPs
 	resp.MagicDNSName = strings.TrimSuffix(status.Self.DNSName, ".")
 	resp.MagicDNSSuffix = status.MagicDNSSuffix
+	resp.BackendState = status.BackendState
+	resp.LoginURL = status.AuthURL
 	resp.PeerCount = len(status.Peer)
 	resp.Peers = make([]PeerInfo, 0, len(status.Peer))
 	for _, peer := range status.Peer {
@@ -693,4 +697,46 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
 		log.Printf("handleTailnetDetail: encode success response: %v", encErr)
 	}
+}
+
+// handleTailnetRemovalPlan serves GET /api/tailnet/{id}/removal-plan.
+//
+// The route states the namespace, the veth device, the state directory, the count of
+// iptables rules, and every command that the removal runs. The console dialog of
+// FR-console-29 names them before the operator confirms, and it repeats no rule of the
+// daemon. The route reads state and it runs no command.
+//
+// The route returns HTTP 404 for a tailnet that the configuration file does not declare,
+// and HTTP 400 for an identifier that the daemon refuses.
+func (s *Server) handleTailnetRemovalPlan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := validateTailnetID(id); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
+	cfg, err := config.LoadConfig(s.reconciler.ConfigPath())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if !hasTailnet(cfg, id) {
+		http.Error(w, fmt.Sprintf("tailnet %s not found", id), http.StatusNotFound)
+		return
+	}
+
+	plan, err := namespaces.PlanRemoval(id, s.reconciler.InfraSubnet(), daemon.DefaultStateDir)
+	if err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
+	writeJSON(w, TailnetRemovalPlanResponse{
+		ID:        id,
+		Namespace: plan.Namespace,
+		HostVeth:  plan.HostVeth,
+		StateDir:  plan.StateDir,
+		RuleCount: plan.RuleCount,
+		Commands:  plan.Commands,
+	})
 }
