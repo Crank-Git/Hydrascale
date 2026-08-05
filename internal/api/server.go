@@ -21,6 +21,7 @@ import (
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
+	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 )
 
@@ -33,6 +34,15 @@ type Server struct {
 	socketGroup string
 	version     string
 	forwarder   *dns.Forwarder
+
+	// mux holds the JSON routes. The control socket serves it, and the console listener
+	// serves it under /api/, so one route set answers on both. See FR-console-4.
+	mux *http.ServeMux
+
+	// consoleServer serves the console listener. It is nil when console.enabled is false,
+	// and consoleAddress is then the empty string.
+	consoleServer  *http.Server
+	consoleAddress string
 }
 
 // SetSocketGroup configures a unix group that may reach the control socket.
@@ -68,7 +78,9 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	// Method-qualified pattern (Go 1.22+) — restricts to GET only and supports {id} wildcard.
 	// Registered after the exact-match tailnet routes above, which take priority.
 	mux.HandleFunc("GET /api/tailnet/{id}/detail", s.handleTailnetDetail)
+	mux.HandleFunc("GET /api/tailnet/{id}/removal-plan", s.handleTailnetRemovalPlan)
 
+	s.mux = mux
 	s.httpServer = &http.Server{Handler: mux}
 	return s
 }
@@ -127,18 +139,25 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Shutdown gracefully stops the HTTP server.
+// Shutdown gracefully stops the control socket server and the console server.
+// Shutdown stops both servers even when the first stop fails, and it returns every error
+// together.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.httpServer == nil {
-		return nil
+	var errs []error
+	if s.consoleServer != nil {
+		if err := s.consoleServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("console shutdown error: %w", err))
+		}
 	}
-	if err := s.httpServer.Shutdown(ctx); err != nil {
-		return fmt.Errorf("api shutdown error: %w", err)
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("api shutdown error: %w", err))
+		}
+		if s.socketPath != "" {
+			os.Remove(s.socketPath)
+		}
 	}
-	if s.socketPath != "" {
-		os.Remove(s.socketPath)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +186,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		FailureCounts: s.reconciler.FailureCounts(),
 		LastErrors:    s.reconciler.LastErrors(),
 		ServerVersion: s.version,
+
+		ConfigPath:     s.reconciler.ConfigPath(),
+		SocketPath:     s.socketPath,
+		ConsoleAddress: s.consoleAddress,
 	}
 
 	// The access field carries the mode and the count of rules, which the terminal
@@ -570,7 +593,8 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		upstreams = s.forwarder.Upstreams()
 	}
 
-	hostFile, changedAt := s.reconciler.HostFileMonitor().State()
+	monitor := s.reconciler.HostFileMonitor()
+	hostFile, changedAt := monitor.State()
 	changedAtText := ""
 	if !changedAt.IsZero() {
 		changedAtText = changedAt.UTC().Format(time.RFC3339)
@@ -597,6 +621,8 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		BindAddress:         bindAddress,
 		Mode:                cfg.Resolver.Mode,
 		Upstreams:           upstreams,
+		AllowUnprotected:    cfg.DNS.AllowUnprotected,
+		HostResolvPath:      monitor.Path(),
 		HostResolvSHA256:    hostFile.Checksum,
 		HostResolvChangedAt: changedAtText,
 		Namespaces:          namespaceStates,
@@ -651,6 +677,8 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	resp.TailscaleIPs = status.Self.TailscaleIPs
 	resp.MagicDNSName = strings.TrimSuffix(status.Self.DNSName, ".")
 	resp.MagicDNSSuffix = status.MagicDNSSuffix
+	resp.BackendState = status.BackendState
+	resp.LoginURL = status.AuthURL
 	resp.PeerCount = len(status.Peer)
 	resp.Peers = make([]PeerInfo, 0, len(status.Peer))
 	for _, peer := range status.Peer {
@@ -676,4 +704,46 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
 		log.Printf("handleTailnetDetail: encode success response: %v", encErr)
 	}
+}
+
+// handleTailnetRemovalPlan serves GET /api/tailnet/{id}/removal-plan.
+//
+// The route states the namespace, the veth device, the state directory, the count of
+// iptables rules, and every command that the removal runs. The console dialog of
+// FR-console-29 names them before the operator confirms, and it repeats no rule of the
+// daemon. The route reads state and it runs no command.
+//
+// The route returns HTTP 404 for a tailnet that the configuration file does not declare,
+// and HTTP 400 for an identifier that the daemon refuses.
+func (s *Server) handleTailnetRemovalPlan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := validateTailnetID(id); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
+	cfg, err := config.LoadConfig(s.reconciler.ConfigPath())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if !hasTailnet(cfg, id) {
+		http.Error(w, fmt.Sprintf("tailnet %s not found", id), http.StatusNotFound)
+		return
+	}
+
+	plan, err := namespaces.PlanRemoval(id, s.reconciler.InfraSubnet(), daemon.DefaultStateDir)
+	if err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
+	writeJSON(w, TailnetRemovalPlanResponse{
+		ID:        id,
+		Namespace: plan.Namespace,
+		HostVeth:  plan.HostVeth,
+		StateDir:  plan.StateDir,
+		RuleCount: plan.RuleCount,
+		Commands:  plan.Commands,
+	})
 }

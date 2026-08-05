@@ -22,6 +22,13 @@ type StatusResponse struct {
 	LastErrors    map[string]string                   `json:"last_errors"`
 	ServerVersion string                              `json:"server_version,omitempty"`
 	Access        *AccessStatus                       `json:"access,omitempty"`
+
+	// The settings view of the console shows these three values, and the console shows no
+	// invented data, so the daemon reports the paths that it holds. ConsoleAddress is an
+	// empty string for a daemon that opened no console listener.
+	ConfigPath     string `json:"config_path,omitempty"`
+	SocketPath     string `json:"socket_path,omitempty"`
+	ConsoleAddress string `json:"console_address,omitempty"`
 }
 
 // AccessStatus is the access field of GET /api/status. It holds the mode that the daemon
@@ -120,10 +127,15 @@ type DNSNamespaceState struct {
 // Every field is explicit, because an embedded configuration struct returns the auth key
 // of a tailnet to the client. HostResolvChangedAt holds an RFC 3339 time, and it holds an
 // empty string when the daemon observes no change to the host resolv.conf file.
+// AllowUnprotected holds the configuration key dns.allow_unprotected. An unprotected
+// namespace is an error state only when the key is false, therefore a reader cannot state
+// the state from Protected alone.
 type DNSResponse struct {
 	BindAddress         string              `json:"bind_address"`
 	Mode                string              `json:"mode"`
 	Upstreams           []string            `json:"upstreams"`
+	AllowUnprotected    bool                `json:"allow_unprotected"`
+	HostResolvPath      string              `json:"host_resolv_path"`
 	HostResolvSHA256    string              `json:"host_resolv_sha256"`
 	HostResolvChangedAt string              `json:"host_resolv_changed_at"`
 	Namespaces          []DNSNamespaceState `json:"namespaces"`
@@ -145,6 +157,9 @@ type PeerInfo struct {
 // Config fields (ExitNode, HostAccess) and reconciler route state are NOT included
 // here — clients assemble those from GET /api/status and GET /api/config.
 // Error is set (with HTTP 200) when the live fetch fails; clients render it inline.
+// BackendState holds the state word of tailscaled, and LoginURL holds the address that
+// authorizes a node that is not logged in. The console shows a warning dot and the login
+// URL for that node, therefore it reads both from the daemon.
 type TailnetDetailResponse struct {
 	TailscaleIPs   []string   `json:"tailscale_ips"`
 	MagicDNSName   string     `json:"magic_dns_name,omitempty"`
@@ -152,6 +167,21 @@ type TailnetDetailResponse struct {
 	PeerCount      int        `json:"peer_count"`
 	OnlinePeers    int        `json:"online_peers"`
 	Peers          []PeerInfo `json:"peers,omitempty"`
+	BackendState   string     `json:"backend_state,omitempty"`
+	LoginURL       string     `json:"login_url,omitempty"`
 	FetchedAt      time.Time  `json:"fetched_at"`
 	Error          string     `json:"error,omitempty"`
+}
+
+// TailnetRemovalPlanResponse is the JSON response for GET /api/tailnet/{id}/removal-plan.
+// It states what the removal of one tailnet does on this host, so that the console dialog
+// of FR-console-29 names every command and repeats no rule of the daemon. The route reads
+// state and it runs no command.
+type TailnetRemovalPlanResponse struct {
+	ID        string   `json:"id"`
+	Namespace string   `json:"namespace"`
+	HostVeth  string   `json:"host_veth"`
+	StateDir  string   `json:"state_dir"`
+	RuleCount int      `json:"rule_count"`
+	Commands  []string `json:"commands"`
 }

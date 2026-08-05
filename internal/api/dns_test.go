@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
 	"hydrascale/internal/reconciler"
@@ -194,6 +195,39 @@ func TestDNSEndpoint_returns_a_valid_body_when_no_namespace_runs(t *testing.T) {
 	}
 	if body.HostResolvChangedAt != "" {
 		t.Errorf("host_resolv_changed_at = %q, want an empty string", body.HostResolvChangedAt)
+	}
+}
+
+func TestTheDNSRouteReportsTheHostFilePathAndTheAllowUnprotectedKey(t *testing.T) {
+	// The DNS view states the path that the daemon watches, and it states whether the
+	// operator opted out of protection. Issue #76 settled that an unprotected namespace is
+	// an error state only when dns.allow_unprotected is false, so the view cannot read the
+	// protection state alone.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig()
+	cfg.DNS.AllowUnprotected = true
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	r := newTestReconciler(cfgPath)
+	hostPath := writeHostFile(t, "nameserver 127.0.0.53\n")
+	monitor := dns.NewHostFileMonitor(hostPath)
+	if _, err := monitor.Start(); err != nil {
+		t.Fatalf("Start the host file monitor: %v", err)
+	}
+	r.SetHostFileMonitor(monitor)
+
+	srv, _, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	body := getDNS(t, srv)
+	if !body.AllowUnprotected {
+		t.Error("allow_unprotected = false, want true")
+	}
+	if body.HostResolvPath != hostPath {
+		t.Errorf("host_resolv_path = %q, want %q", body.HostResolvPath, hostPath)
 	}
 }
 

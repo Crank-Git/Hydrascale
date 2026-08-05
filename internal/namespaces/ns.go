@@ -363,22 +363,10 @@ func TeardownVeth(nsName string, infraSubnet string) error {
 // operator did not declare.
 func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
 	hostVeth, _ := VethNames(nsName)
-	var errs []error
 
-	index := VethIndex(nsName)
-	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("veth IPs for %s: %w", nsName, err))
-	} else {
-		// The two FORWARD deletes stay, because a host that ran version 0.9 still holds
-		// the rules that this version does not write. RemoveLegacyForwardRules removes
-		// them for a namespace that keeps running.
-		errs = append(errs,
-			m.deleteRule("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"),
-			m.deleteRule("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"),
-			m.deleteRule("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"),
-		)
-	}
+	// PlanRemoval names the same rules, so the console dialog and this teardown never
+	// disagree about what the removal deletes.
+	errs := m.teardownVethRules(nsName, infraSubnet)
 
 	// Delete the veth pair (deleting one end removes both)
 	if out, err := m.run("ip", "link", "del", hostVeth); err != nil {

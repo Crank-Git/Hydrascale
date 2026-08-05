@@ -1243,6 +1243,14 @@ func (r *Reconciler) Shutdown() error {
 	return nil
 }
 
+// RecordEvent adds one event to the event log.
+// The control API calls it, because the console shows the event list and the daemon
+// records an event for every mutating console request. See FR-console-10.
+// The message reaches the log file and the API response, so it must hold no secret.
+func (r *Reconciler) RecordEvent(eventType, tailnetID, message string) {
+	r.emit(eventType, tailnetID, message)
+}
+
 func (r *Reconciler) emit(eventType, tailnetID, message string) {
 	event := Event{
 		Time:      time.Now(),

@@ -37,7 +37,14 @@ jobs:
         run: go vet ./...
 
       - name: Test with race detector
-        run: go test -race -v ./...
+        # The runner image ubuntu-latest provides node, and TestTheConsoleJavaScriptTestsPass
+        # in internal/ui runs the 70 console JavaScript tests of internal/ui/jstest with it.
+        # A later image that drops node fails this step rather than skipping those tests,
+        # because GitHub Actions sets CI. See issue 181. The console has no build step and
+        # internal/ui/package.json names no dependency, so the workflow installs nothing.
+        run: |
+          node --version
+          go test -race -v ./...
 
       - name: Vulnerability check
         run: |

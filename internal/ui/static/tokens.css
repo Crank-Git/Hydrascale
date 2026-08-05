@@ -1,0 +1,15 @@
+/* tokens.css holds nothing that the brand does not already declare. It restates the
+   three brand values that brand/tokens/colors.css and brand/tokens/elevation.css build
+   with the color-mix function, because a browser that reads no color-mix function drops
+   the value where the console reads it and the element loses its background or its ring.
+   A custom property accepts any token sequence, so a second declaration in the same rule
+   does not act as a fallback. The @supports rule is the one construction that works.
+
+   The values match the brand: 14% lime on transparent, 72% of #060605, and 45% lime. */
+@supports not (color: color-mix(in srgb, #ffffff 50%, transparent)){
+  :root{
+    --lime-soft:rgba(200,255,46,.14);
+    --scrim:rgba(6,6,5,.72);
+    --ring-focus:0 0 0 2px rgba(200,255,46,.45);
+  }
+}
