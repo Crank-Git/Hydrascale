@@ -328,10 +328,16 @@ function esc(value) {
  * or null. When the operator selects a node, the paths of that node take the accent and
  * every other path goes quiet. See FR-console-23.
  *
+ * options.bySource narrows the accent to the paths that start at the selected node. The
+ * overview marks every path of a node, because it answers what one namespace touches. The
+ * access view selects a source, therefore it marks the paths that start there. See
+ * FR-editor-5.
+ *
  * The element carries no arrow, no icon on a node, and no text on a curve. Every text
  * element sits inside a node group. See FR-console-22.
  */
-export function topologySVGMarkup(model, selected) {
+export function topologySVGMarkup(model, selected, options = {}) {
+  const bySource = options.bySource === true;
   const parts = [];
   parts.push(
     `<svg class="flow" viewBox="0 0 ${model.width} ${model.height}" role="img"` +
@@ -342,7 +348,8 @@ export function topologySVGMarkup(model, selected) {
   for (const path of model.paths) {
     let className = "edge";
     if (selected !== null && selected !== undefined) {
-      className = path.from === selected || path.to === selected ? "edge sel" : "edge muted";
+      const own = bySource ? path.from === selected : path.from === selected || path.to === selected;
+      className = own ? "edge sel" : "edge muted";
     }
     parts.push(`<path class="${className}" d="${path.d}"></path>`);
   }
