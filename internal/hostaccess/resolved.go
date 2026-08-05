@@ -45,10 +45,16 @@ func (rm *ResolvedManager) RegisterDomains(domains []string) error {
 	return nil
 }
 
-func (rm *ResolvedManager) DeregisterAll() {
+// DeregisterAll removes every domain that RegisterDomains gave to systemd-resolved.
+// DeregisterAll returns the failure of the revert command, because a domain that stays
+// registered sends a query to a resolver that no longer answers it.
+func (rm *ResolvedManager) DeregisterAll() error {
 	if len(rm.registered) == 0 {
-		return
+		return nil
 	}
-	exec.Command("resolvectl", "revert", "lo").Run()
+	if out, err := exec.Command("resolvectl", "revert", "lo").CombinedOutput(); err != nil {
+		return fmt.Errorf("resolvectl revert lo: %w (%s)", err, out)
+	}
 	rm.registered = nil
+	return nil
 }

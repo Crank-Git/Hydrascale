@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"hydrascale/internal/execx"
@@ -49,6 +51,27 @@ func (m *RealManager) runner() execx.Runner {
 // run returns an error when the command fails to start or exits non-zero.
 func (m *RealManager) run(name string, args ...string) ([]byte, error) {
 	return m.runner().Run(context.Background(), name, args...)
+}
+
+// ruleAbsent reports whether the output of an iptables delete states that the rule is not
+// present. iptables exits non-zero for that state, and a teardown treats it as success,
+// because an operator who already removed the rule reached the wanted result.
+func ruleAbsent(output []byte) bool {
+	text := string(output)
+	return strings.Contains(text, "does a matching rule exist") ||
+		strings.Contains(text, "No chain/target/match by that name")
+}
+
+// deleteRule runs one iptables delete and returns the failure.
+// deleteRule returns nil when the command succeeds and when the rule is absent. Any other
+// failure carries the command line and the output, because the operator needs the rule
+// that stays on the host.
+func (m *RealManager) deleteRule(name string, args ...string) error {
+	out, err := m.run(name, args...)
+	if err == nil || ruleAbsent(out) {
+		return nil
+	}
+	return fmt.Errorf("%s %s: %v (%s)", name, strings.Join(args, " "), err, out)
 }
 
 // GetName returns the namespace name for a given tailnet ID.
@@ -104,23 +127,43 @@ func DeleteNamespace(namespaceName string, infraSubnet string) error {
 
 // Delete deletes the network namespace with the given name.
 // Delete tears down the veth pair before it deletes the namespace.
+// A step that fails does not stop the remaining steps. Delete collects every failure and
+// returns the failures together.
 func (m *RealManager) Delete(namespaceName string, infraSubnet string) error {
-	// Tear down veth pair first (best effort - namespace deletion will clean up anyway)
+	var errs []error
+
 	if err := m.TeardownVeth(namespaceName, infraSubnet); err != nil {
-		log.Printf("Warning: veth teardown for %s: %v", namespaceName, err)
+		errs = append(errs, fmt.Errorf("tear down the veth pair of %s: %w", namespaceName, err))
 	}
 
-	output, err := m.run("ip", "netns", "del", namespaceName)
-	if err != nil {
-		return fmt.Errorf("failed to delete namespace %q: %s", namespaceName, output)
+	if output, err := m.run("ip", "netns", "del", namespaceName); err != nil {
+		errs = append(errs, fmt.Errorf("failed to delete namespace %q: %s", namespaceName, output))
 	}
 
 	// Clean up /etc/netns/<ns>/ (resolv.conf override and the directory itself).
 	netnsDir := filepath.Join("/etc/netns", namespaceName)
-	_ = os.Remove(filepath.Join(netnsDir, "resolv.conf"))
-	_ = os.Remove(netnsDir)
+	if err := removeIfPresent(filepath.Join(netnsDir, "resolv.conf")); err != nil {
+		errs = append(errs, err)
+	}
+	if err := removeIfPresent(netnsDir); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
 
 	log.Printf("Deleted namespace: %s", namespaceName)
+	return nil
+}
+
+// removeIfPresent removes path and returns the failure.
+// removeIfPresent returns nil when the path does not exist, because a teardown that runs
+// twice reaches the wanted result on the second run.
+func removeIfPresent(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
 	return nil
 }
 
@@ -299,21 +342,32 @@ func TeardownVeth(nsName string, infraSubnet string) error {
 
 // TeardownVeth removes the veth pair for a namespace.
 // Deleting the host side automatically removes the peer.
+// A step that fails does not stop the remaining steps. TeardownVeth collects every failure
+// and returns the failures together. A rule that survives its namespace is a path that the
+// operator did not declare.
 func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
 	hostVeth, _ := VethNames(nsName)
+	var errs []error
 
-	// Remove iptables rules (best effort)
 	index := VethIndex(nsName)
 	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
-	if err == nil {
-		_, _ = m.run("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
-		_, _ = m.run("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-		_, _ = m.run("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	if err != nil {
+		errs = append(errs, fmt.Errorf("veth IPs for %s: %w", nsName, err))
+	} else {
+		errs = append(errs,
+			m.deleteRule("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"),
+			m.deleteRule("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"),
+			m.deleteRule("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"),
+		)
 	}
 
 	// Delete the veth pair (deleting one end removes both)
 	if out, err := m.run("ip", "link", "del", hostVeth); err != nil {
-		return fmt.Errorf("failed to delete veth %s: %v (%s)", hostVeth, err, out)
+		errs = append(errs, fmt.Errorf("failed to delete veth %s: %v (%s)", hostVeth, err, out))
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		return err
 	}
 
 	log.Printf("Tore down veth pair for namespace %s", nsName)
@@ -442,25 +496,109 @@ func resolveHostUpstreams() []string {
 	return []string{"1.1.1.1"}
 }
 
-// TeardownHostAccess removes namespace-side host access iptables rules and resolv.conf.
-func TeardownHostAccess(nsName string, index int, infraSubnet string) {
-	NewRealManager().TeardownHostAccess(nsName, index, infraSubnet)
+// TeardownHostAccess removes the three namespace-side host access iptables rules.
+// TeardownHostAccess returns the failed deletes together, and it treats a rule that is
+// already absent as success.
+//
+// TeardownHostAccess keeps /etc/netns/<ns>/resolv.conf. Every namespace needs that file,
+// host access does not create it, and Delete removes it with the namespace. See issue #22.
+func TeardownHostAccess(nsName string, index int, infraSubnet string) error {
+	return NewRealManager().TeardownHostAccess(nsName, index, infraSubnet)
 }
 
-// TeardownHostAccess removes namespace-side host access iptables rules and resolv.conf.
-func (m *RealManager) TeardownHostAccess(nsName string, index int, infraSubnet string) {
+// TeardownHostAccess removes the three namespace-side host access iptables rules.
+// TeardownHostAccess returns the failed deletes together, and it treats a rule that is
+// already absent as success.
+func (m *RealManager) TeardownHostAccess(nsName string, index int, infraSubnet string) error {
 	_, nsVeth := VethNames(nsName)
 	_, nsIPRange, _, _, err := VethIPs(infraSubnet, index)
 	if err != nil {
-		log.Printf("host-access: failed to get veth IPs for teardown: %v", err)
-		return
+		return fmt.Errorf("host-access: veth IPs for %s: %w", nsName, err)
 	}
 
-	_, _ = m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE")
-	_, _ = m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53")
-	_, _ = m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53")
+	return errors.Join(
+		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE"),
+		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
+		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
+	)
+}
 
-	resolvPath := filepath.Join("/etc/netns", nsName, "resolv.conf")
-	os.Remove(resolvPath)
-	os.Remove(filepath.Join("/etc/netns", nsName))
+// hostVethPattern matches a host-side veth device name that VethNames returns.
+// ReapStaleRules removes a rule that names such a device only, so an operator rule on
+// another interface keeps its place.
+var hostVethPattern = regexp.MustCompile(`^vh[0-9a-f]{12}$`)
+
+// ReapStaleRules removes each FORWARD rule that names a host veth device that is gone, and
+// it returns the number of rules that it removed.
+// ReapStaleRules returns the failed deletes together. The daemon runs it at start, because
+// a rule that outlives its namespace lets traffic through a device name that a later
+// namespace can take.
+func (m *RealManager) ReapStaleRules() (int, error) {
+	live, err := m.liveDevices()
+	if err != nil {
+		return 0, err
+	}
+
+	out, err := m.run("iptables", "-S", "FORWARD")
+	if err != nil {
+		return 0, fmt.Errorf("iptables -S FORWARD: %v (%s)", err, out)
+	}
+
+	var errs []error
+	removed := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "-A" || fields[1] != "FORWARD" {
+			continue
+		}
+		if !namesAMissingDevice(fields, live) {
+			continue
+		}
+		args := append([]string{"-D", "FORWARD"}, fields[2:]...)
+		if err := m.deleteRule("iptables", args...); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed++
+	}
+	return removed, errors.Join(errs...)
+}
+
+// namesAMissingDevice reports whether the rule matches an input interface or an output
+// interface that is a host veth device that live does not hold.
+func namesAMissingDevice(fields []string, live map[string]bool) bool {
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] != "-i" && fields[i] != "-o" {
+			continue
+		}
+		device := fields[i+1]
+		if hostVethPattern.MatchString(device) && !live[device] {
+			return true
+		}
+	}
+	return false
+}
+
+// liveDevices returns the name of each network device that the host holds.
+// A line of `ip -o link show` reads "7: vh0123@if6: <BROADCAST> mtu 1500 ...", so the
+// device name is the second field without the trailing colon and without the peer suffix.
+func (m *RealManager) liveDevices() (map[string]bool, error) {
+	out, err := m.run("ip", "-o", "link", "show")
+	if err != nil {
+		return nil, fmt.Errorf("ip -o link show: %v (%s)", err, out)
+	}
+
+	live := make(map[string]bool)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimSuffix(fields[1], ":")
+		if at := strings.Index(name, "@"); at >= 0 {
+			name = name[:at]
+		}
+		live[name] = true
+	}
+	return live, nil
 }

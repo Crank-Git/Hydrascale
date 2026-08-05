@@ -429,22 +429,32 @@ func mergeRoutes(a, b []string) []string {
 }
 
 // RemoveAllHostRoutes removes all host routes on vethDev (excluding MagicDNS and infra).
-func RemoveAllHostRoutes(vethDev string, infraSubnet string) {
+// A step that fails does not stop the remaining steps. RemoveAllHostRoutes collects every
+// failure and returns the failures together.
+func RemoveAllHostRoutes(vethDev string, infraSubnet string) error {
+	var errs []error
+
 	v4Out, err := exec.Command("ip", "route", "show").Output()
-	if err == nil {
+	if err != nil {
+		errs = append(errs, fmt.Errorf("ip route show: %w", err))
+	} else {
 		for _, ip := range parseHostRoutes(string(v4Out), vethDev, infraSubnet) {
 			if out, e := exec.Command("ip", "route", "del", ip).CombinedOutput(); e != nil {
-				log.Printf("hostaccess: remove route %s: %v (%s)", ip, e, out)
+				errs = append(errs, fmt.Errorf("ip route del %s: %w (%s)", ip, e, out))
 			}
 		}
 	}
 
 	v6Out, err := exec.Command("ip", "-6", "route", "show").Output()
-	if err == nil {
+	if err != nil {
+		errs = append(errs, fmt.Errorf("ip -6 route show: %w", err))
+	} else {
 		for _, ip := range parseHostRoutesV6(string(v6Out), vethDev) {
 			if out, e := exec.Command("ip", "-6", "route", "del", ip).CombinedOutput(); e != nil {
-				log.Printf("hostaccess: remove v6 route %s: %v (%s)", ip, e, out)
+				errs = append(errs, fmt.Errorf("ip -6 route del %s: %w (%s)", ip, e, out))
 			}
 		}
 	}
+
+	return errors.Join(errs...)
 }

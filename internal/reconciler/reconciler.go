@@ -28,14 +28,15 @@ import (
 type ActionType string
 
 const (
-	ActionCreateNS       ActionType = "create_namespace"
-	ActionDeleteNS       ActionType = "delete_namespace"
-	ActionStartDaemon    ActionType = "start_daemon"
-	ActionStopDaemon     ActionType = "stop_daemon"
-	ActionSyncRoutes     ActionType = "sync_routes"
-	ActionSyncHostAccess ActionType = "sync_host_access"
-	ActionAuthDaemon     ActionType = "auth_daemon"
-	ActionRefreshDNS     ActionType = "refresh_dns"
+	ActionCreateNS           ActionType = "create_namespace"
+	ActionDeleteNS           ActionType = "delete_namespace"
+	ActionStartDaemon        ActionType = "start_daemon"
+	ActionStopDaemon         ActionType = "stop_daemon"
+	ActionSyncRoutes         ActionType = "sync_routes"
+	ActionSyncHostAccess     ActionType = "sync_host_access"
+	ActionTeardownHostAccess ActionType = "teardown_host_access"
+	ActionAuthDaemon         ActionType = "auth_daemon"
+	ActionRefreshDNS         ActionType = "refresh_dns"
 )
 
 // MaxFailures is the number of consecutive failures before a tailnet enters error state.
@@ -92,10 +93,29 @@ type Reconciler struct {
 	unprotected   map[string]string // tailnetID -> the reported overlay mount error
 	events        []Event
 
+	// hostAccessRules holds true for a tailnet whose namespace carries the host access
+	// rules, and false for a tailnet whose rules the reconciler removed. A tailnet with no
+	// entry is a tailnet the reconciler has not seen since it started, so the first cycle
+	// tears the rules down once when the operator set host_access to false.
+	hostAccessRules map[string]bool
+
+	// teardownHostAccess removes the namespace-side host access rules. A test replaces it.
+	teardownHostAccess func(nsName string, index int, infraSubnet string) error
+
+	// reaper removes each host rule that names a veth device that is gone. New sets it
+	// when the namespace manager carries that ability.
+	reaper StaleRuleReaper
+
 	hostFile *dns.HostFileMonitor
 
 	eventLogPath string
 	eventFile    *os.File
+}
+
+// StaleRuleReaper removes each host rule that names a veth device that no longer exists.
+// namespaces.RealManager carries the ability. A test double does not have to.
+type StaleRuleReaper interface {
+	ReapStaleRules() (int, error)
 }
 
 // New creates a new Reconciler with the given dependencies.
@@ -103,21 +123,27 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 	if infraSubnet == "" {
 		infraSubnet = "10.200.0.0/16"
 	}
-	return &Reconciler{
-		configPath:    configPath,
-		ns:            ns,
-		dm:            dm,
-		rt:            rt,
-		ha:            ha,
-		interval:      interval,
-		infraSubnet:   infraSubnet,
-		failureCounts: make(map[string]int),
-		errorStates:   make(map[string]bool),
-		pausedStates:  make(map[string]bool),
-		lastErrors:    make(map[string]string),
-		unprotected:   make(map[string]string),
-		hostFile:      dns.NewHostFileMonitor(dns.DefaultHostResolvConf),
+	r := &Reconciler{
+		configPath:         configPath,
+		ns:                 ns,
+		dm:                 dm,
+		rt:                 rt,
+		ha:                 ha,
+		interval:           interval,
+		infraSubnet:        infraSubnet,
+		failureCounts:      make(map[string]int),
+		errorStates:        make(map[string]bool),
+		pausedStates:       make(map[string]bool),
+		lastErrors:         make(map[string]string),
+		unprotected:        make(map[string]string),
+		hostAccessRules:    make(map[string]bool),
+		teardownHostAccess: namespaces.TeardownHostAccess,
+		hostFile:           dns.NewHostFileMonitor(dns.DefaultHostResolvConf),
 	}
+	if reaper, ok := ns.(StaleRuleReaper); ok {
+		r.reaper = reaper
+	}
+	return r
 }
 
 // SetHostFileMonitor replaces the monitor of the host resolv.conf file.
@@ -243,6 +269,11 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 			// Sync host access if enabled for this tailnet
 			if cfgErr == nil && cfg.TailnetHostAccess(id) {
 				actions = append(actions, Action{Type: ActionSyncHostAccess, TailnetID: id, NsName: ns})
+			} else if cfgErr == nil && r.hostAccessRulesPresent(id) {
+				// The operator set host_access to false, so remove the rules that the
+				// earlier value wrote. Without this action the namespace keeps the
+				// masquerade rule and the two DNS rules, and reachability does not change.
+				actions = append(actions, Action{Type: ActionTeardownHostAccess, TailnetID: id, NsName: ns})
 			}
 		}
 	}
@@ -310,6 +341,35 @@ func safeStateDir(tailnetID string) (string, bool) {
 	return dir, true
 }
 
+// hostAccessRulesPresent reports whether the namespace of the tailnet can still carry the
+// host access rules. A tailnet with no record is a tailnet that the reconciler has not
+// seen since it started, so the answer is true and the first cycle removes the rules once.
+func (r *Reconciler) hostAccessRulesPresent(tailnetID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	present, seen := r.hostAccessRules[tailnetID]
+	return !seen || present
+}
+
+// setHostAccessRules records whether the namespace of the tailnet carries the host access
+// rules.
+func (r *Reconciler) setHostAccessRules(tailnetID string, present bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hostAccessRules[tailnetID] = present
+}
+
+// reportTeardown records teardown.failed with the text of each failed step and returns the
+// failures together. reportTeardown returns nil when every step succeeded.
+func (r *Reconciler) reportTeardown(tailnetID string, errs []error) error {
+	err := errors.Join(errs...)
+	if err == nil {
+		return nil
+	}
+	r.emit("teardown.failed", tailnetID, err.Error())
+	return err
+}
+
 func (r *Reconciler) executeAction(action Action) error {
 	switch action.Type {
 	case ActionCreateNS:
@@ -329,26 +389,49 @@ func (r *Reconciler) executeAction(action Action) error {
 			index := namespaces.VethIndex(nsName)
 			if err := namespaces.SetupHostAccess(nsName, index, r.infraSubnet); err != nil {
 				log.Printf("host-access: setup failed for %s: %v", nsName, err)
+			} else {
+				r.setHostAccessRules(action.TailnetID, true)
 			}
 		}
 		return nil
 	case ActionDeleteNS:
+		// A step that fails does not stop the remaining steps. Every failure reaches the
+		// caller together, and teardown.failed names each one.
+		var errs []error
 		if err := r.ns.Delete(action.NsName, r.infraSubnet); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("delete the namespace %s: %w", action.NsName, err))
+		}
+		r.setHostAccessRules(action.TailnetID, false)
+		// The host access manager keeps the names of the tailnet in the /etc/hosts block
+		// until it removes the tailnet, so the host resolves a name on a tailnet that it
+		// no longer joins. See issue #69.
+		if r.ha != nil {
+			if err := r.ha.Teardown(action.TailnetID); err != nil {
+				errs = append(errs, fmt.Errorf("remove the host access state of %s: %w", action.TailnetID, err))
+			}
 		}
 		// Remove the tailnet's state dir (tailscaled state/socket + the #28
 		// overlay upper/work dirs) so `remove` leaves nothing behind — otherwise
-		// stale per-tailnet dirs accumulate under /var/lib/hydrascale/state.
-		// Best-effort; a failure here doesn't fail the teardown. See issue #32.
+		// stale per-tailnet dirs accumulate under /var/lib/hydrascale/state. The
+		// directory holds the node private key, so a failure reaches the operator.
 		//
 		// The id is derived from a live namespace name (not the IsValidID-
 		// validated config), so validate the path before this root-level
 		// RemoveAll — never let a crafted id (e.g. "..") traverse out.
 		if stateDir, ok := safeStateDir(action.TailnetID); ok {
 			if err := os.RemoveAll(stateDir); err != nil {
-				log.Printf("reconciler: failed to remove state dir %s: %v", stateDir, err)
+				errs = append(errs, fmt.Errorf("remove the state directory %s: %w", stateDir, err))
 			}
 		}
+		return r.reportTeardown(action.TailnetID, errs)
+	case ActionTeardownHostAccess:
+		nsName := r.ns.GetName(action.TailnetID)
+		index := namespaces.VethIndex(nsName)
+		if err := r.teardownHostAccess(nsName, index, r.infraSubnet); err != nil {
+			return r.reportTeardown(action.TailnetID, []error{
+				fmt.Errorf("remove the host access rules of %s: %w", nsName, err)})
+		}
+		r.setHostAccessRules(action.TailnetID, false)
 		return nil
 	case ActionStartDaemon:
 		// Belt-and-braces: ensure the namespace's resolv.conf bind-mount
@@ -383,7 +466,10 @@ func (r *Reconciler) executeAction(action Action) error {
 		nsName := r.ns.GetName(action.TailnetID)
 		index := namespaces.VethIndex(nsName)
 		// Ensure namespace-side iptables are set up (idempotent — safe every cycle)
-		namespaces.SetupHostAccess(nsName, index, r.infraSubnet)
+		if err := namespaces.SetupHostAccess(nsName, index, r.infraSubnet); err != nil {
+			return fmt.Errorf("host-access: setup failed for %s: %w", nsName, err)
+		}
+		r.setHostAccessRules(action.TailnetID, true)
 		status, err := r.dm.GetStatus(context.Background(), nsName, action.TailnetID)
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
@@ -508,6 +594,8 @@ func describeHostFile(state dns.HostFileState) string {
 
 // Loop runs the reconciliation loop until the context is cancelled.
 func (r *Reconciler) Loop(ctx context.Context) error {
+	r.reapStaleRules()
+
 	// Run once immediately
 	if err := r.Reconcile(); err != nil {
 		log.Printf("reconcile error: %v", err)
@@ -527,6 +615,21 @@ func (r *Reconciler) Loop(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// reapStaleRules removes each host rule that names a veth device that is gone, and it
+// records rules.reaped with the count. A rule that outlives its namespace lets traffic
+// through a device name that a later namespace can take, and no cycle removes it, because
+// the reconciler drives the tailnets that the configuration file declares.
+func (r *Reconciler) reapStaleRules() {
+	if r.reaper == nil {
+		return
+	}
+	count, err := r.reaper.ReapStaleRules()
+	if err != nil {
+		r.emit("teardown.failed", "", fmt.Sprintf("reap the stale rules: %v", err))
+	}
+	r.emit("rules.reaped", "", fmt.Sprintf("%d rules", count))
 }
 
 // ConfigPath returns the path to the config file used by this reconciler.
@@ -668,15 +771,18 @@ func (r *Reconciler) clearFailure(tailnetID string) {
 }
 
 // SetEventLog opens a JSON event log file for append writing.
+// The record holds the error text of a failed action, and that text names the control
+// server, the namespace, and the addresses. The directory mode 0750 and the file mode 0640
+// therefore agree with the two install paths, and no other local user reads the file.
 func (r *Reconciler) SetEventLog(path string) error {
 	dir := path
 	if idx := strings.LastIndex(dir, "/"); idx >= 0 {
 		dir = dir[:idx]
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("failed to create event log directory: %w", err)
 		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
 	if err != nil {
 		return fmt.Errorf("failed to open event log: %w", err)
 	}
@@ -743,7 +849,9 @@ func (r *Reconciler) Shutdown() error {
 	}
 
 	if r.ha != nil {
-		r.ha.TeardownAll()
+		if err := r.ha.TeardownAll(); err != nil {
+			return r.reportTeardown("", []error{fmt.Errorf("remove the host access state: %w", err)})
+		}
 	}
 
 	return nil
