@@ -499,3 +499,10 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
 .ac-observe .ns-cmds{margin-top:var(--sp-3)}
 .ac-observe + .card{margin-top:var(--sp-3)}
+
+/* The flow overview. The picture reuses the .node rules and the .edge rules of the
+   overview topology above, therefore this block states the card alone. The accent reaches
+   the picture through .edge.sel, which marks the paths of the selected source. */
+
+.ac-flow-cap{display:flex; align-items:baseline; gap:var(--sp-2)}
+.ac-flow .flow-wrap{margin-bottom:var(--sp-3)}
