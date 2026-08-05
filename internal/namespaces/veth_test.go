@@ -29,10 +29,6 @@ func setupVethFixture(t *testing.T, nsName, infraSubnet string, index int) (*exe
 		{Name: "ip", Args: []string{"netns", "exec", nsName, "ip", "link", "set", nsVeth, "up"}},
 		{Name: "ip", Args: []string{"netns", "exec", nsName, "ip", "route", "add", "default", "via", hostGW, "dev", nsVeth}},
 		{Name: "sysctl", Args: []string{"-w", "net.ipv4.conf." + hostVeth + ".forwarding=1"}},
-		{Name: "iptables", Args: []string{"-C", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"}},
-		{Name: "iptables", Args: []string{"-I", "FORWARD", "1", "-i", hostVeth, "-j", "ACCEPT"}},
-		{Name: "iptables", Args: []string{"-C", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"}},
-		{Name: "iptables", Args: []string{"-I", "FORWARD", "1", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"}},
 		{Name: "iptables", Args: []string{"-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
 		{Name: "iptables", Args: []string{"-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
 	}
@@ -116,6 +112,27 @@ func TestSetupVethKeepsAnIptablesRuleThatAlreadyExists(t *testing.T) {
 		}
 		if c.Args[0] == "-I" || (len(c.Args) > 2 && c.Args[2] == "-A") {
 			t.Errorf("SetupVeth wrote a rule that is already present: %s", c)
+		}
+	}
+}
+
+func TestSetupVethWritesNoAcceptRuleIntoForward(t *testing.T) {
+	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
+	const index = 1
+
+	rec, m, _ := setupVethFixture(t, nsName, infraSubnet, index)
+	if err := m.SetupVeth(nsName, index, infraSubnet); err != nil {
+		t.Fatalf("SetupVeth: %v", err)
+	}
+
+	for _, c := range rec.Calls() {
+		if c.Name != "iptables" {
+			continue
+		}
+		for _, arg := range c.Args {
+			if arg == "FORWARD" {
+				t.Errorf("SetupVeth wrote into FORWARD: %s", c)
+			}
 		}
 	}
 }

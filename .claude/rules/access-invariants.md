@@ -16,10 +16,16 @@ These rules exist because version 1.0 fixes a defect that broke each of them. Re
 The daemon writes rules into `HYDRASCALE-FWD` and `HYDRASCALE-OUT`. It writes one jump
 rule into `FORWARD` and one into `INPUT`. It writes no other rule anywhere.
 
-**Append the jump rule. Never insert it at position 1.** Version 0.9 ran
-`iptables -I FORWARD 1 …`, which placed the daemon's rule above every rule the operator's
-own firewall had written. An operator who wants Hydrascale to run first can move the jump
-themselves.
+**Insert the jump rule at position 1, and report a displacement.** The operator decided
+this on 2026-08-05: "I guess 1, but we need to make sure we catch if this is an issue."
+The position is not stable, because `ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` each
+take position 1 after the daemon starts. The reconciler reads the position on each tick
+and records `access.jump_displaced` when the position changes. It moves no rule of the
+operator.
+
+The jump at position 1 sends every forwarded packet of the host into `HYDRASCALE-FWD`,
+therefore the chain opens with `! -i vh+ ! -o vh+ -j RETURN`. The daemon filters a packet
+that involves a namespace device, and it returns every other forwarded packet.
 
 ## Deny is the default
 

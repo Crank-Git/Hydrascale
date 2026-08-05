@@ -41,8 +41,10 @@ default is deny.
   an upgrade does not cut off a tailnet I depend on.
 - As the operator, I want the upgrade to keep my current reachability, so that nothing
   breaks the day I install version 1.0.
-- As the operator, I want the daemon's rules to live in their own chain, so that they do
-  not sit above my own firewall rules.
+- As the operator, I want the daemon's rules to live in their own chain, so that the
+  daemon writes no rule into a chain that I own.
+- As the operator, I want to read an event when another rule displaces the jump rule of
+  the daemon, so that I see a change to the order of `FORWARD` that I did not make.
 
 ## Functional requirements
 
@@ -51,7 +53,14 @@ default is deny.
 - **FR-access-1** — The daemon creates the iptables chain `HYDRASCALE-FWD` in the
   `filter` table.
 - **FR-access-2** — The daemon inserts exactly one rule into `FORWARD`, which jumps to
-  `HYDRASCALE-FWD`, and it appends that rule rather than inserting it at position 1.
+  `HYDRASCALE-FWD`, and it inserts that rule at position 1.
+- **FR-access-2a** — The daemon reads the position of its jump rule in `FORWARD` on each
+  tick, and it writes the jump rule again when `FORWARD` holds none.
+- **FR-access-2b** — The daemon records the event `access.jump_displaced` when the
+  position of its jump rule changes to a position other than 1. The event names the
+  position and the target of each rule above the jump rule.
+- **FR-access-2c** — `GET /api/status` carries the position of the jump rule in the field
+  `access.jump_position`.
 - **FR-access-3** — The daemon owns every rule in `HYDRASCALE-FWD` and no rule outside
   it, other than the single jump.
 - **FR-access-4** — The last rule in `HYDRASCALE-FWD` returns to `FORWARD` when
@@ -130,7 +139,8 @@ default is deny.
 1. The operator sets `access.mode: observe` and restarts the service.
 2. The daemon writes the chain with a `LOG` rule and no drop.
 3. The operator uses the host normally for a day.
-4. The operator reads `journalctl -u hydrascale | grep hydrascale-would-deny`.
+4. The operator reads `journalctl -k | grep hydrascale-would-deny`. The `LOG` target
+   writes to the kernel log, therefore the unit journal holds no such line.
 5. The operator adds a rule for each path that the log shows and that the operator wants.
 6. The operator sets `access.mode: enforce` and restarts the service.
 
@@ -155,22 +165,39 @@ screens that drive it.
   both is a rule set with an order that the operator must reason about.
 - The daemon never writes a rule outside its own chains. An operator firewall rule stays
   where the operator put it.
-- The daemon appends the jump rule rather than inserting it at position 1. An operator
-  who wants Hydrascale to run first can move the jump.
+- The daemon inserts the jump rule at position 1. The operator decided this on
+  2026-08-05: "I guess 1, but we need to make sure we catch if this is an issue." The
+  position is not stable, because `ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` each
+  take position 1 after the daemon starts. The daemon therefore reads the position on
+  each tick and records `access.jump_displaced` when the position changes.
+- The daemon filters a forwarded packet that involves a namespace device, and it returns
+  every other forwarded packet to `FORWARD`. The jump rule sits at position 1, so every
+  forwarded packet of the host enters `HYDRASCALE-FWD`. The rule
+  `-A HYDRASCALE-FWD ! -i vh+ ! -o vh+ -j RETURN` keeps the container traffic and the
+  subnet route traffic of the operator, so the deny default applies to namespace traffic
+  alone. The operator confirmed this on 2026-08-05: "Keep the RETURN guard".
 - A rule set that fails validation is not partially applied. Validate everything, then
   write.
 - The migration runs once. The daemon detects it by the presence of the `access` key,
   not by a version marker, so a manually written empty `access` block suppresses it.
-- The `internet` destination means every address that is not the host, not a namespace,
-  and not a private range that another namespace uses.
+- The `internet` destination means a public address only. The daemon excludes every
+  namespace device and these five ranges:
+  - `10.0.0.0/8`
+  - `172.16.0.0/12`
+  - `192.168.0.0/16`
+  - `169.254.0.0/16`
+  - `127.0.0.0/8`
+- The host local network is inside one of the five ranges, therefore an `internet` rule
+  gives no path to it. To reach a host on the operator local network needs its own rule.
+  The operator decided this on 2026-08-05: "Exclude all RFC1918 + the host's subnets".
 
 ## Data touched
 
 | Entity | Change |
 |---|---|
 | Configuration | New `access` block with `mode` and `rules`. |
-| Event | New kinds `access.applied`, `access.migrated`, and `access.write_failed`. |
-| Status | New field `access` with the mode and the rule count. |
+| Event | New kinds `access.applied`, `access.migrated`, `access.write_failed`, and `access.jump_displaced`. |
+| Status | New field `access` with the mode, the rule count, and the jump rule position. |
 
 ## Interfaces
 
@@ -224,7 +251,8 @@ chains that the file does not name. The behaviour is documented in
 |---|---|
 | The chain write fails halfway. | It cannot. `iptables-restore` applies the file as one transaction. A failure leaves the previous chain in place and records `access.write_failed`. |
 | The host runs `nftables` through the `iptables-nft` compatibility layer. | The commands work, because the compatibility layer implements them. Epic 5 verifies this on the test host and records the kernel and the backend. |
-| An operator firewall reloads and removes the jump rule. | The reconciler detects the missing jump on the next tick and re-adds it. It records an event so that the operator sees the conflict. |
+| An operator firewall reloads and removes the jump rule. | The reconciler detects the missing jump on the next tick and re-adds it. It records `access.jump_displaced` so that the operator sees the conflict. |
+| Another service takes position 1 of `FORWARD`. | The reconciler reads the position on each tick and records `access.jump_displaced`. It names the position and the target of each rule above the jump rule. It moves no rule of the operator. |
 | A tailnet is removed while a rule names it. | The daemon drops the rules that name the removed tailnet and records an event. It does not refuse to start. |
 | Two tailnets use overlapping peer address ranges. | The rules match on the veth device rather than on the address, so overlap does not matter. This is why the compiler uses interfaces. |
 | The operator sets `access.mode: observe` on a busy host. | The `LOG` rule can fill the journal. The compiler adds `-m limit --limit 60/minute` to the `LOG` rule. |
@@ -236,7 +264,9 @@ chains that the file does not name. The behaviour is documented in
       rule set.
 - [ ] A test asserts that the compiler rejects `tcp/0`, `tcp/65536`, and `tcp/22-21`.
 - [ ] A test asserts that the compiler rejects a rule where `from` equals `to`.
-- [ ] A test asserts that the daemon inserts one jump rule into `FORWARD` and appends it.
+- [ ] A test asserts that the daemon inserts one jump rule into `FORWARD` at position 1.
+- [ ] A test asserts that the daemon records `access.jump_displaced` for a jump rule at
+      position 4, and that it records no event for a jump rule at position 1.
 - [ ] A test asserts that a rule set with no `access` block produces the preserving rule
       set with one rule per tailnet to `internet`.
 - [ ] A test asserts that the daemon writes `<config>.pre-v1.backup` before it changes
@@ -248,9 +278,11 @@ chains that the file does not name. The behaviour is documented in
 - [ ] On the test host, after a rule from `a` to `b` is added, the same command succeeds.
 - [ ] On the test host, `ip netns exec ns-a curl -sS https://example.com` succeeds with
       the `internet` rule and fails without it.
-- [ ] On the test host, `observe` mode writes `hydrascale-would-deny` lines to the
-      journal and drops nothing.
+- [ ] On the test host, `observe` mode writes `hydrascale-would-deny` lines to the kernel
+      log and drops nothing. `journalctl -k | grep hydrascale-would-deny` reads them.
 - [ ] On the test host, the daemon re-adds the jump rule after `iptables -F FORWARD`.
+- [ ] On the test host, `iptables -I FORWARD 1 -j ACCEPT` displaces the jump rule, and
+      the daemon records `access.jump_displaced` within one tick.
 
 ## Out of scope
 

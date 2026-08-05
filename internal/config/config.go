@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"hydrascale/internal/access"
 )
 
 // validIDPattern restricts tailnet IDs to safe characters.
@@ -89,6 +91,19 @@ type Config struct {
 	// SecretsFile names the root-only credential store. LoadConfig applies
 	// DefaultSecretsPath when the key is absent.
 	SecretsFile string `yaml:"secrets_file,omitempty"`
+	// Access holds the local rule set. The field is a pointer, because a nil value means
+	// that the file holds no access key, which is what the version 0.9 migration detects.
+	Access *access.RuleSet `yaml:"access,omitempty"`
+}
+
+// AccessMode returns the mode that the daemon applies the local rule set in.
+// AccessMode returns access.ModeEnforce when the file holds no access key, and when the
+// access block holds no mode key.
+func (c *Config) AccessMode() string {
+	if c.Access == nil {
+		return access.ModeEnforce
+	}
+	return c.Access.EffectiveMode()
 }
 
 // TailnetHostAccess returns whether host access is enabled for a specific tailnet,
@@ -148,6 +163,17 @@ func LoadConfig(path string) (*Config, error) {
 
 		if err := ValidateControlURL(tn.ControlURL); err != nil {
 			return nil, fmt.Errorf("tailnet %q: %w", tn.ID, err)
+		}
+	}
+
+	// Validate the local rule set against the tailnets that this file declares.
+	if cfg.Access != nil {
+		ids := make([]string, 0, len(cfg.Tailnets))
+		for _, tn := range cfg.Tailnets {
+			ids = append(ids, tn.ID)
+		}
+		if err := cfg.Access.Validate(ids); err != nil {
+			return nil, fmt.Errorf("invalid access block: %w", err)
 		}
 	}
 
