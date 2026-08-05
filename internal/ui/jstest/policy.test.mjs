@@ -12,8 +12,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CONFLICT_STATUS,
   EVERY_DEVICE_STATEMENT,
   POLICY_ROUTE,
+  PUSH_STATEMENT,
+  actionsMarkup,
+  actionsModel,
   createPolicyState,
   editorMarkup,
   editorModel,
@@ -21,8 +25,28 @@ import {
   policyDocumentRoute,
   policyListMarkup,
   policyRows,
+  policyValidateRoute,
   readFailure,
+  resultMarkup,
+  resultModel,
+  validateErrors,
 } from "../static/policy.js";
+
+// refusal returns the error that requestJSON rejects with: the message of the daemon word
+// for word, and the status that the daemon returned. See internal/ui/static/app.js.
+function refusal(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+// loaded returns a state that holds the list and one document, ready for an edit.
+function loaded(request, overrides = {}) {
+  const state = createPolicyState({ request });
+  state.setList(listBody());
+  state.setDocument("jbones", documentBody(overrides));
+  return state;
+}
 
 // listBody is one answer of GET /api/policy, as internal/api/types.go declares it.
 function listBody(overrides = {}) {
@@ -405,4 +429,472 @@ test("the state drops the selection when the list no longer holds the tailnet", 
 
   state.setList(listBody({ tailnets: [{ id: "jbones", kind: "tailscale", credential_present: true, write_available: true }] }));
   assert.equal(state.selected(), null);
+});
+
+// ---------------------------------------------------------------------------
+// The actions: validate, push, re-read, and discard
+// ---------------------------------------------------------------------------
+
+// idsOf returns the identifier of every control of the actions row.
+function idsOf(controls) {
+  return controls.map((one) => one.id);
+}
+
+// controlOf returns one control of the actions row by its identifier.
+function controlOf(controls, id) {
+  return controls.find((one) => one.id === id);
+}
+
+test("the route of the validate action encodes the identifier", () => {
+  assert.equal(policyValidateRoute("jbones"), "/api/policy/jbones/validate");
+  assert.equal(policyValidateRoute("lab hs/1"), "/api/policy/lab%20hs%2F1/validate");
+});
+
+test("the view offers the validate action, the discard action, and the push action", () => {
+  const state = loaded(async () => documentBody());
+
+  assert.deepEqual(idsOf(actionsModel(entryOf(state, "jbones"))), ["validate", "discard", "push"]);
+});
+
+test("the accent marks the push action alone", () => {
+  // CLAUDE.md gives the accent to one thing per view. This view now draws an affirmative
+  // action, therefore the push takes the accent and the selected row keeps none.
+  const state = loaded(async () => documentBody());
+
+  const accented = actionsModel(entryOf(state, "jbones")).filter((one) => one.accent);
+  assert.equal(accented.length, 1);
+  assert.equal(accented[0].id, "push");
+  assert.match(actionsMarkup(actionsModel(entryOf(state, "jbones"))), /class="btn primary" data-act="push"/);
+});
+
+test("the push states that it changes what every device in the tailnet reaches", () => {
+  // The destructive copy names the exact effect and it states what survives. It comes
+  // before the action, which .claude/rules/ste.md requires of a warning.
+  const state = loaded(async () => documentBody());
+
+  assert.match(PUSH_STATEMENT.effect, /every device in the tailnet/);
+  assert.match(PUSH_STATEMENT.survives, /local rule/);
+
+  const markup = editorMarkup(entryOf(state, "jbones"));
+  assert.ok(markup.includes(PUSH_STATEMENT.effect), markup);
+  assert.ok(markup.includes(PUSH_STATEMENT.survives), markup);
+  assert.ok(markup.indexOf(PUSH_STATEMENT.effect) < markup.indexOf('data-act="push"'), markup);
+});
+
+test("a read-only tailnet offers no validate action and no push action", () => {
+  const state = createPolicyState({ request: async () => documentBody() });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", write_available: false }));
+
+  const controls = actionsModel(entryOf(state, "homelab"));
+  assert.equal(controlOf(controls, "validate").disabled, true);
+  assert.equal(controlOf(controls, "push").disabled, true);
+});
+
+test("the discard action returns the editor to the document that the console read", () => {
+  const state = loaded(async () => documentBody());
+  state.setText("jbones", "the text of the operator");
+  assert.equal(entryOf(state, "jbones").edited, true);
+
+  state.discard("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.text, documentBody().document);
+  assert.equal(model.edited, false);
+  assert.equal(model.stage, "read");
+});
+
+// ---------------------------------------------------------------------------
+// The validate
+// ---------------------------------------------------------------------------
+
+test("push is disabled until the control server accepts the document", async () => {
+  const state = loaded(async () => ({ passed: true }));
+
+  assert.equal(controlOf(actionsModel(entryOf(state, "jbones")), "push").disabled, true);
+
+  state.setText("jbones", '{\n  "grants": [{}],\n}');
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+});
+
+test("an edit after a successful validate disables push again", async () => {
+  const state = loaded(async () => ({ passed: true }));
+  await state.validate("jbones");
+  assert.equal(controlOf(actionsModel(entryOf(state, "jbones")), "push").disabled, false);
+
+  state.setText("jbones", '{\n  "grants": [{}],\n}');
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "read");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+  assert.equal(resultModel(model), null);
+});
+
+test("a validate that returns after an edit leaves push disabled", async () => {
+  // The operator edits while the request runs. The result covers text that the editor no
+  // longer holds, therefore the state keeps push disabled.
+  let release = () => {};
+  const state = loaded(() => new Promise((resolve) => {
+    release = () => resolve({ passed: true });
+  }));
+
+  const running = state.validate("jbones");
+  state.setText("jbones", "the text of the operator");
+  release();
+  await running;
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "read");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+});
+
+test("the validate sends the text of the operator to the validate route", async () => {
+  const sent = [];
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    return { passed: true };
+  });
+  state.setText("jbones", "the text of the operator");
+
+  await state.validate("jbones");
+
+  assert.deepEqual(sent, [{
+    route: "/api/policy/jbones/validate",
+    method: "POST",
+    body: { document: "the text of the operator" },
+  }]);
+});
+
+test("a successful validate states the result and enables push", async () => {
+  const state = loaded(async () => ({ passed: true }));
+
+  await state.validate("jbones");
+
+  const result = resultModel(entryOf(state, "jbones"));
+  assert.equal(result.tone, "ok");
+  assert.equal(result.word, "validated");
+  assert.match(result.sentence, /accepted the document/);
+  assert.match(resultMarkup(result), /<span class="dot ok"><\/span>/);
+});
+
+test("a validate failure states each error with its line number", async () => {
+  const body = '{"message":"line 12: unknown group \\"group:ops\\"\\nline 40: invalid port range"}';
+  const state = loaded(async () => ({ passed: false, result: body }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validate-failed");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+
+  const result = resultModel(model);
+  assert.equal(result.errors.length, 2);
+  assert.equal(result.errors[0].line, 12);
+  assert.equal(result.errors[0].message, 'line 12: unknown group "group:ops"');
+  assert.equal(result.errors[1].line, 40);
+
+  const markup = resultMarkup(result);
+  assert.match(markup, /<span class="pol-err-line mono">line 12<\/span>/);
+  assert.match(markup, /unknown group &quot;group:ops&quot;/);
+});
+
+test("a validate error that names a line and a character reads the line number", () => {
+  const errors = validateErrors('{"message":"parse error: policy.hujson:7:3: unexpected token"}');
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].line, 7);
+});
+
+test("a validate error that names no line number states the message alone", () => {
+  const errors = validateErrors("the control server rejected the document");
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].line, null);
+  assert.equal(errors[0].message, "the control server rejected the document");
+  assert.ok(!resultMarkup({ tone: "crit", word: "validate failed", sentence: "s", errors, message: "", reread: false }).includes("pol-err-line"));
+});
+
+test("the validate result of the control server reaches the screen verbatim", async () => {
+  // The Headscale check route states its reason as text, therefore the result holds no
+  // JSON and the console shows the whole text.
+  const body = 'the policy check failed with HTTP 500: policy: unknown host "nas"';
+  const state = loaded(async () => ({ passed: false, result: body }));
+
+  await state.validate("jbones");
+
+  const markup = resultMarkup(resultModel(entryOf(state, "jbones")));
+  assert.match(markup, /the policy check failed with HTTP 500: policy: unknown host &quot;nas&quot;/);
+});
+
+test("the validate result markup escapes the message of the control server", async () => {
+  const state = loaded(async () => ({ passed: false, result: "</span><script>alert(1)</script>" }));
+
+  await state.validate("jbones");
+
+  const markup = resultMarkup(resultModel(entryOf(state, "jbones")));
+  assert.ok(!markup.includes("<script>"), markup);
+  assert.match(markup, /&lt;script&gt;/);
+});
+
+test("a validate that the daemon refuses states the message of the daemon", async () => {
+  const state = loaded(async () => {
+    throw refusal(502, "the policy validate failed: the policy validate failed with HTTP 500");
+  });
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validate-failed");
+  assert.equal(resultModel(model).errors[0].message, "the policy validate failed: the policy validate failed with HTTP 500");
+});
+
+// ---------------------------------------------------------------------------
+// The push
+// ---------------------------------------------------------------------------
+
+test("the push sends the text of the operator and the etag of the read", async () => {
+  const sent = [];
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    return route === policyValidateRoute("jbones") ? { passed: true } : documentBody({ etag: "e0b2816b419" });
+  });
+  state.setText("jbones", "the text of the operator");
+
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  assert.deepEqual(sent[1], {
+    route: "/api/policy/jbones",
+    method: "PUT",
+    body: { document: "the text of the operator", etag: "e0b2816b418" },
+  });
+});
+
+test("the push sends no etag for a tailnet whose control server holds none", async () => {
+  const sent = [];
+  const state = createPolicyState({
+    request: async (route, method, body) => {
+      sent.push({ route, method, body });
+      return route.endsWith("/validate") ? { passed: true } : documentBody({ id: "homelab", etag: "" });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", kind: "headscale", etag: "" }));
+
+  await state.validate("homelab");
+  await state.push("homelab");
+
+  assert.deepEqual(sent[1].body, { document: documentBody().document });
+});
+
+test("the console sends no push while the control server has not accepted the document", async () => {
+  let requests = 0;
+  const state = loaded(async () => {
+    requests += 1;
+    return documentBody();
+  });
+
+  await state.push("jbones");
+
+  assert.equal(requests, 0);
+  assert.equal(entryOf(state, "jbones").stage, "read");
+});
+
+test("a successful push takes the document that the control server returned", async () => {
+  const written = '{\n  "grants": [{"src": ["*"]}],\n}';
+  const state = loaded(async (route) =>
+    route.endsWith("/validate") ? { passed: true } : documentBody({ document: written, etag: "e0b2816b419" }));
+  state.setText("jbones", written);
+
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "pushed");
+  assert.equal(model.text, written);
+  assert.equal(model.edited, false);
+  assert.equal(model.etag, "e0b2816b419");
+  assert.match(resultModel(model).sentence, /accepted the document/);
+});
+
+test("the editor takes no edit while the push runs", async () => {
+  let release = () => {};
+  const state = loaded((route) =>
+    route.endsWith("/validate")
+      ? Promise.resolve({ passed: true })
+      : new Promise((resolve) => {
+        release = () => resolve(documentBody());
+      }));
+
+  await state.validate("jbones");
+  const running = state.push("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "pushing");
+  assert.equal(model.readOnly, true);
+  assert.match(editorMarkup(model), /<textarea class="pol-doc mono" readonly/);
+
+  release();
+  await running;
+});
+
+// ---------------------------------------------------------------------------
+// The conflict
+// ---------------------------------------------------------------------------
+
+test("a push conflict states that the policy changed and it offers the re-read action", async () => {
+  const message = "the policy changed since the read: read the policy again and apply the change to the new document";
+  const state = loaded(async (route) => {
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    throw refusal(CONFLICT_STATUS, message);
+  });
+  state.setText("jbones", "the text of the operator");
+
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(CONFLICT_STATUS, 409);
+  assert.equal(model.stage, "conflict");
+
+  const result = resultModel(model);
+  assert.equal(result.reread, true);
+  assert.match(result.sentence, /changed the policy document/);
+  assert.equal(result.message, message);
+  assert.match(resultMarkup(result), /data-act="reread"/);
+  assert.deepEqual(idsOf(actionsModel(model)), ["validate", "discard", "push"]);
+});
+
+test("the console reads the status and never the message to detect a conflict", async () => {
+  // The daemon returns HTTP 409 for a conflict. A message that holds the same words with
+  // another status is not a conflict, therefore the view offers no re-read.
+  const state = loaded(async (route) => {
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    throw refusal(502, "the policy write failed: the policy changed since the read");
+  });
+
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "push-failed");
+  assert.equal(resultModel(model).reread, false);
+  assert.equal(resultModel(model).message, "the policy write failed: the policy changed since the read");
+});
+
+test("the conflict markup escapes the message of the control server", async () => {
+  const state = loaded(async (route) => {
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    throw refusal(CONFLICT_STATUS, "</p><script>alert(1)</script>");
+  });
+
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  const markup = resultMarkup(resultModel(entryOf(state, "jbones")));
+  assert.ok(!markup.includes("<script>"), markup);
+  assert.match(markup, /&lt;script&gt;/);
+});
+
+test("the re-read keeps the edited text of the operator", async () => {
+  // held is the document that another person wrote while the operator edited.
+  const held = '{\n  "grants": [{"src": ["tag:ops"]}],\n}';
+  const routes = [];
+  const state = loaded(async (route, method) => {
+    routes.push(route);
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    if (method === "PUT") {
+      throw refusal(CONFLICT_STATUS, "the policy changed since the read");
+    }
+    return documentBody({ document: held, etag: "e0b2816b420" });
+  });
+  state.setText("jbones", "the text of the operator");
+
+  await state.validate("jbones");
+  await state.push("jbones");
+  assert.equal(entryOf(state, "jbones").stage, "conflict");
+
+  await state.reread("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.text, "the text of the operator");
+  assert.equal(model.edited, true);
+  assert.equal(model.etag, "e0b2816b420");
+  assert.equal(model.stage, "read");
+  assert.equal(state.entry("jbones").base, held);
+  assert.equal(routes[2], "/api/policy/jbones");
+});
+
+test("a re-read that fails keeps the conflict and it keeps the text of the operator", async () => {
+  const state = loaded(async (route, method) => {
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    if (method === "PUT") {
+      throw refusal(CONFLICT_STATUS, "the policy changed since the read");
+    }
+    throw refusal(502, "the policy read failed: dial tcp 10.0.0.9:443: connect: connection refused");
+  });
+  state.setText("jbones", "the text of the operator");
+
+  await state.validate("jbones");
+  await state.push("jbones");
+  assert.equal(entryOf(state, "jbones").stage, "conflict");
+
+  await state.reread("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "conflict");
+  assert.equal(model.text, "the text of the operator");
+  assert.match(resultModel(model).message, /connection refused/);
+});
+
+// ---------------------------------------------------------------------------
+// The rate limit
+// ---------------------------------------------------------------------------
+
+test("the console sends one request when the control server rate-limits the validate", async () => {
+  // An automatic retry against a rate limit makes the limit worse, and the console applies
+  // no action that the operator did not ask for.
+  let requests = 0;
+  const state = loaded(async () => {
+    requests += 1;
+    throw refusal(502, "the policy validate failed: the policy validate failed with HTTP 429: rate limit exceeded");
+  });
+
+  await state.validate("jbones");
+
+  assert.equal(requests, 1);
+  assert.equal(entryOf(state, "jbones").stage, "validate-failed");
+  assert.match(resultModel(entryOf(state, "jbones")).errors[0].message, /rate limit exceeded/);
+});
+
+test("the console sends one request when the control server rate-limits the push", async () => {
+  let writes = 0;
+  const state = loaded(async (route) => {
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    writes += 1;
+    throw refusal(502, "the policy write failed: the policy write failed with HTTP 429: rate limit exceeded");
+  });
+
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  assert.equal(writes, 1);
+  assert.equal(entryOf(state, "jbones").stage, "push-failed");
+  assert.match(resultModel(entryOf(state, "jbones")).message, /rate limit exceeded/);
 });

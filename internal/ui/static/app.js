@@ -118,6 +118,9 @@ export function consoleRequestInit(method, body) {
  * requestJSON sends one request to the console origin and reads the JSON reply.
  * It rejects with the message that the daemon returned, because every route states the
  * reason in the error field.
+ * The rejected error carries the status in the field status. A caller that classifies a
+ * failure reads that status, because a message is text for a person and the status is the
+ * value that the daemon owns.
  */
 export async function requestJSON(route, method = "GET", body) {
   const reply = await fetch(route, consoleRequestInit(method, body));
@@ -132,7 +135,9 @@ export async function requestJSON(route, method = "GET", body) {
   }
   if (!reply.ok) {
     const stated = parsed && parsed.error ? parsed.error : `${reply.status} ${reply.statusText}`;
-    throw new Error(stated);
+    const failure = new Error(stated);
+    failure.status = reply.status;
+    throw failure;
   }
   return parsed;
 }
