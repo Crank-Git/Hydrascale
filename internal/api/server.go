@@ -186,6 +186,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		FailureCounts: s.reconciler.FailureCounts(),
 		LastErrors:    s.reconciler.LastErrors(),
 		ServerVersion: s.version,
+
+		ConfigPath:     s.reconciler.ConfigPath(),
+		SocketPath:     s.socketPath,
+		ConsoleAddress: s.consoleAddress,
 	}
 
 	// The access field carries the mode and the count of rules, which the terminal
@@ -589,7 +593,8 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		upstreams = s.forwarder.Upstreams()
 	}
 
-	hostFile, changedAt := s.reconciler.HostFileMonitor().State()
+	monitor := s.reconciler.HostFileMonitor()
+	hostFile, changedAt := monitor.State()
 	changedAtText := ""
 	if !changedAt.IsZero() {
 		changedAtText = changedAt.UTC().Format(time.RFC3339)
@@ -616,6 +621,8 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		BindAddress:         bindAddress,
 		Mode:                cfg.Resolver.Mode,
 		Upstreams:           upstreams,
+		AllowUnprotected:    cfg.DNS.AllowUnprotected,
+		HostResolvPath:      monitor.Path(),
 		HostResolvSHA256:    hostFile.Checksum,
 		HostResolvChangedAt: changedAtText,
 		Namespaces:          namespaceStates,

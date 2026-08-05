@@ -22,6 +22,13 @@ type StatusResponse struct {
 	LastErrors    map[string]string                   `json:"last_errors"`
 	ServerVersion string                              `json:"server_version,omitempty"`
 	Access        *AccessStatus                       `json:"access,omitempty"`
+
+	// The settings view of the console shows these three values, and the console shows no
+	// invented data, so the daemon reports the paths that it holds. ConsoleAddress is an
+	// empty string for a daemon that opened no console listener.
+	ConfigPath     string `json:"config_path,omitempty"`
+	SocketPath     string `json:"socket_path,omitempty"`
+	ConsoleAddress string `json:"console_address,omitempty"`
 }
 
 // AccessStatus is the access field of GET /api/status. It holds the mode that the daemon
@@ -120,10 +127,15 @@ type DNSNamespaceState struct {
 // Every field is explicit, because an embedded configuration struct returns the auth key
 // of a tailnet to the client. HostResolvChangedAt holds an RFC 3339 time, and it holds an
 // empty string when the daemon observes no change to the host resolv.conf file.
+// AllowUnprotected holds the configuration key dns.allow_unprotected. An unprotected
+// namespace is an error state only when the key is false, therefore a reader cannot state
+// the state from Protected alone.
 type DNSResponse struct {
 	BindAddress         string              `json:"bind_address"`
 	Mode                string              `json:"mode"`
 	Upstreams           []string            `json:"upstreams"`
+	AllowUnprotected    bool                `json:"allow_unprotected"`
+	HostResolvPath      string              `json:"host_resolv_path"`
 	HostResolvSHA256    string              `json:"host_resolv_sha256"`
 	HostResolvChangedAt string              `json:"host_resolv_changed_at"`
 	Namespaces          []DNSNamespaceState `json:"namespaces"`

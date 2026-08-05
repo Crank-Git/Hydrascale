@@ -240,7 +240,11 @@ func TestTheConsoleStatesAnEmptyStateForEveryView(t *testing.T) {
 
 // viewModules names the view that each module file draws. The shell draws a placeholder
 // for a view that no module claims, so this table grows as each view lands.
-var viewModules = map[string]string{"overview": "overview.js"}
+var viewModules = map[string]string{
+	"overview": "overview.js",
+	"activity": "activity.js",
+	"settings": "settings.js",
+}
 
 func TestEveryViewModuleReachesTheBrowserAndRegistersItself(t *testing.T) {
 	// A module file has to be embedded, has to be loaded from the console origin, and has
@@ -260,6 +264,119 @@ func TestEveryViewModuleReachesTheBrowserAndRegistersItself(t *testing.T) {
 		if !strings.Contains(source, `registerView("`+view+`"`) {
 			t.Errorf("%s registers no draw function for the %s view", module, view)
 		}
+	}
+}
+
+// panelViewSources are the files of the DNS view, the activity view, and the settings
+// view. panels.js holds the model and the serializer of all three.
+var panelViewSources = []string{"panels.js", "activity.js", "settings.js"}
+
+func TestTheConsoleNamesNoCredentialField(t *testing.T) {
+	// The settings view shows the daemon configuration, and an auth key, an OAuth client
+	// secret, and a Headscale API key never reach it. SA-1 was an auth key in the body of
+	// GET /api/status. The console reads no such field anywhere, so no later change to a
+	// route can put one on the screen.
+	//
+	// The add flow of namespaces.js is the one place that carries a credential, because an
+	// operator gives an auth key when a tailnet joins. It sends the field and it never
+	// renders it: internal/ui/jstest/namespaces.test.mjs holds "the add flow never holds an
+	// auth key after the operator submits it" and "the add flow keeps the auth key after a
+	// refused request, and it never states the key". The field name is therefore allowed in
+	// that file alone, and a literal key is allowed nowhere.
+	credentials := []string{"auth_key", "AuthKey", "tskey-", "client_secret", "api_key", "secrets"}
+	sendsTheAddFlow := map[string]bool{"auth_key": true, "AuthKey": true, "authKey": true}
+
+	err := fs.WalkDir(Files(), ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(name, ".js") {
+			return err
+		}
+		source := readStatic(t, name)
+		for _, word := range credentials {
+			if name == "namespaces.js" && sendsTheAddFlow[word] {
+				continue
+			}
+			if strings.Contains(source, word) {
+				t.Errorf("%s names the field %s, so the console can show a credential", name, word)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WalkDir: %v", err)
+	}
+}
+
+func TestTheProtectionStateIsAColouredDotAndALowercaseWord(t *testing.T) {
+	// FR-console-41. The DNS view states the protected state of every namespace, and it
+	// states it the way every other state in this console reads.
+	source := readStatic(t, "panels.js")
+	for _, word := range []string{"protected", "unprotected"} {
+		if !strings.Contains(source, `word: "`+word+`"`) {
+			t.Errorf("panels.js states no protection word %q", word)
+		}
+	}
+	// Every state word of this console is lowercase, so no state reads as a title.
+	for _, match := range regexp.MustCompile(`word: "([^"]*)"`).FindAllStringSubmatch(source, -1) {
+		if match[1] != strings.ToLower(match[1]) {
+			t.Errorf("panels.js states the state word %q in a capital letter", match[1])
+		}
+	}
+	for _, tone := range []string{"ok", "crit", "warn"} {
+		if !strings.Contains(source, `tone: "`+tone+`"`) {
+			t.Errorf("panels.js states no state of the tone %s", tone)
+		}
+	}
+	if !strings.Contains(source, `class="dot ${`) {
+		t.Error("panels.js draws no dot from the tone of a state")
+	}
+
+	style := readStatic(t, "app.css")
+	for _, rule := range []string{".nsrow", ".kv", ".alert"} {
+		if !strings.Contains(style, rule) {
+			t.Errorf("app.css holds no rule %s, so the DNS view and the settings view have no row", rule)
+		}
+	}
+}
+
+func TestTheThreeViewsRenderEveryValueInTheMonoTypeface(t *testing.T) {
+	// FR-console-42. A machine value is never in the sans typeface, and a sentence is
+	// never in the mono typeface. Every value of a description list carries the mono
+	// class, and the one exception states in words that the daemon reported no value.
+	source := readStatic(t, "panels.js")
+
+	values := regexp.MustCompile(`<dd[^>]*>`).FindAllString(source, -1)
+	if len(values) == 0 {
+		t.Fatal("panels.js writes no description list, so this test guards nothing")
+	}
+	for _, value := range values {
+		if strings.Contains(value, `class="mono"`) || strings.Contains(value, `class="unset"`) {
+			continue
+		}
+		t.Errorf("panels.js writes the value %s outside the mono typeface", value)
+	}
+}
+
+func TestTheThreeViewsBuildEveryPartOfTheirMarkupFromOneEscapeFunction(t *testing.T) {
+	// The console has no authentication, so an unescaped value that the daemon reports is
+	// script injection. panels.js is the one file that builds markup from a daemon value,
+	// and the two document modules write no markup of their own.
+	if !strings.Contains(readStatic(t, "panels.js"), "function esc(") {
+		t.Error("panels.js holds no escape function")
+	}
+
+	assignment := regexp.MustCompile(`innerHTML\s*=\s*([^;]+);`)
+	fromSerializer := regexp.MustCompile(`^[a-zA-Z]+Markup\(`)
+	found := 0
+	for _, name := range panelViewSources {
+		for _, match := range assignment.FindAllStringSubmatch(readStatic(t, name), -1) {
+			found++
+			if !fromSerializer.MatchString(strings.TrimSpace(match[1])) {
+				t.Errorf("%s writes the markup %s, which the serializer of panels.js did not escape", name, match[1])
+			}
+		}
+	}
+	if found == 0 {
+		t.Error("no view module writes markup, so this test guards nothing")
 	}
 }
 

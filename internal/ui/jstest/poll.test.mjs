@@ -13,6 +13,7 @@ import {
   MINIMUM_POLL_INTERVAL_MS,
   RETRY_AFTER_MS,
   ACCESS_ROUTE,
+  DNS_ROUTE,
   EVENTS_ROUTE,
   STATUS_ROUTE,
   VIEWS,
@@ -293,15 +294,17 @@ test("the shell names five views and each one holds a heading and an empty state
   }
 });
 
-test("one poll reads the status route, the access route, and the event route", async () => {
+test("one poll reads the status route, the access route, the event route, and the DNS route", async () => {
   assert.equal(ACCESS_ROUTE, "/api/access");
   assert.equal(EVENTS_ROUTE, "/api/events");
+  assert.equal(DNS_ROUTE, "/api/dns");
 
   const asked = [];
   const bodies = {
     "/api/status": { server_version: "1.0.0", desired: { jbones: {} } },
     "/api/access": { mode: "enforce", rules: [], nodes: [] },
     "/api/events": { events: [{ Time: "2026-08-05T14:02:19Z", Type: "reconcile_complete" }] },
+    "/api/dns": { mode: "unified", namespaces: [], upstreams: [] },
   };
 
   const body = await fetchConsoleState((route) => {
@@ -309,11 +312,17 @@ test("one poll reads the status route, the access route, and the event route", a
     return Promise.resolve(bodies[route]);
   });
 
-  assert.deepEqual(asked.slice().sort(), ["/api/access", "/api/events", "/api/status"]);
+  assert.deepEqual(asked.slice().sort(), [
+    "/api/access",
+    "/api/dns",
+    "/api/events",
+    "/api/status",
+  ]);
   assert.equal(body.server_version, "1.0.0");
   assert.deepEqual(body.desired, { jbones: {} });
   assert.deepEqual(body.access_model, bodies["/api/access"]);
   assert.equal(body.events.length, 1);
+  assert.deepEqual(body.dns, bodies["/api/dns"]);
 });
 
 test("a poll that reads one route with an error fails the whole poll", async () => {

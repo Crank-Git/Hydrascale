@@ -64,10 +64,12 @@
 
 </div>
 <!-- The content security policy allows no inline script, so app.js binds every handler.
-     A view module loads after the shell, and each one calls registerView. Issue #144 and
-     issue #145 add the remaining modules. -->
+     A view module loads after the shell, and each one calls registerView. Issue #144 adds
+     the namespace module. -->
 <script type="module" src="/app.js"></script>
 <script type="module" src="/overview.js"></script>
 <script type="module" src="/namespaces.js"></script>
+<script type="module" src="/activity.js"></script>
+<script type="module" src="/settings.js"></script>
 </body>
 </html>

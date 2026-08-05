@@ -152,6 +152,11 @@ func (m *HostFileMonitor) Check() (changed bool, previous, current HostFileState
 	return true, previous, current, nil
 }
 
+// Path returns the file that the monitor watches.
+// The DNS view of the console shows the path, so the operator repairs the file that the
+// daemon reports on.
+func (m *HostFileMonitor) Path() string { return m.path }
+
 // State returns the recorded state and the time of the last change.
 // The time is the zero time when the monitor reports no change.
 func (m *HostFileMonitor) State() (HostFileState, time.Time) {
