@@ -18,6 +18,9 @@ type TestReporter interface {
 type Call struct {
 	Name string
 	Args []string
+	// Stdin holds the bytes that the code under test sent to the standard input of the
+	// command. Stdin is nil for a command that Run received.
+	Stdin []byte
 }
 
 // String returns the command as one line, for a failure message.
@@ -71,6 +74,27 @@ func (r *Recorder) Script(res Result, name string, args ...string) {
 func (r *Recorder) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	r.mu.Lock()
 	call := Call{Name: name, Args: slices.Clone(args)}
+	r.calls = append(r.calls, call)
+	_, hasDeadline := ctx.Deadline()
+	r.deadlines = append(r.deadlines, hasDeadline)
+	res, scripted := r.scripts[key(name, args)]
+	r.mu.Unlock()
+
+	if !scripted {
+		r.t.Helper()
+		r.t.Errorf("execx: the test did not script the command: %s", call)
+		return nil, fmt.Errorf("execx: unscripted command: %s", call)
+	}
+	return res.Output, res.Err
+}
+
+// RunInput records the command together with stdin, and returns the scripted Result. The
+// Recorder matches the name and the argument list, in the manner of Run; it does not match
+// stdin, because a test reads the recorded stdin and asserts it.
+// For an unscripted command, RunInput reports a failure to the test and returns an error.
+func (r *Recorder) RunInput(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	call := Call{Name: name, Args: slices.Clone(args), Stdin: slices.Clone(stdin)}
 	r.calls = append(r.calls, call)
 	_, hasDeadline := ctx.Deadline()
 	r.deadlines = append(r.deadlines, hasDeadline)
@@ -154,7 +178,7 @@ func (r *Recorder) Calls() []Call {
 
 	out := make([]Call, len(r.calls))
 	for i, c := range r.calls {
-		out[i] = Call{Name: c.Name, Args: slices.Clone(c.Args)}
+		out[i] = Call{Name: c.Name, Args: slices.Clone(c.Args), Stdin: slices.Clone(c.Stdin)}
 	}
 	return out
 }

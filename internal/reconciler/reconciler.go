@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"hydrascale/internal/access"
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
@@ -106,16 +107,44 @@ type Reconciler struct {
 	// when the namespace manager carries that ability.
 	reaper StaleRuleReaper
 
+	// access writes the compiled local rule set into the chains that the daemon owns.
+	// A test replaces it.
+	access ChainWriter
+
 	hostFile *dns.HostFileMonitor
 
 	eventLogPath string
 	eventFile    *os.File
 }
 
-// StaleRuleReaper removes each host rule that names a veth device that no longer exists.
+// StaleRuleReaper removes the host rules that no version of the daemon writes any more.
 // namespaces.RealManager carries the ability. A test double does not have to.
 type StaleRuleReaper interface {
+	// ReapStaleRules removes each host rule that names a veth device that no longer
+	// exists.
 	ReapStaleRules() (int, error)
+	// RemoveLegacyForwardRules removes each FORWARD rule that version 0.9 wrote for a
+	// host veth device.
+	RemoveLegacyForwardRules() (int, error)
+	// NamespaceForwarding returns the value of net.ipv4.ip_forward inside the namespace.
+	NamespaceForwarding(nsName string) (string, error)
+}
+
+// ChainWriter writes the compiled local rule set into the chains that the daemon owns.
+// access.Writer carries the ability.
+type ChainWriter interface {
+	// Apply makes the chains hold the compiled rule set and reports whether it wrote.
+	Apply(ctx context.Context, c access.Compiled) (bool, error)
+	// Teardown removes both chains and both jump rules.
+	Teardown(ctx context.Context) error
+}
+
+// SetChainWriter replaces the writer of the local rule set. A test uses it to observe the
+// compiled rule set without a command on the host.
+func (r *Reconciler) SetChainWriter(w ChainWriter) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.access = w
 }
 
 // New creates a new Reconciler with the given dependencies.
@@ -142,6 +171,11 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 	}
 	if reaper, ok := ns.(StaleRuleReaper); ok {
 		r.reaper = reaper
+	}
+	// Only a Reconciler that drives the live host writes the chains. A test that passes a
+	// namespace manager double gets no writer, and it sets one with SetChainWriter.
+	if _, ok := ns.(*namespaces.RealManager); ok {
+		r.access = access.NewWriter()
 	}
 	return r
 }
@@ -520,12 +554,109 @@ func (r *Reconciler) Reconcile() error {
 	// all succeeded, and an unprotected namespace must keep its error.
 	r.checkDNSProtection(desired)
 
+	// Runs after Apply, because a new namespace gets its rules on the same cycle that
+	// creates it.
+	r.applyAccess()
+	r.checkNamespaceForwarding(desired)
+
 	if len(actions) == 0 {
 		r.emit("reconcile_complete", "", "no changes needed")
 		return nil
 	}
 	r.emit("reconcile_complete", "", fmt.Sprintf("applied %d actions", len(actions)))
 	return nil
+}
+
+// accessTimeout bounds every command that one chain write runs. The specification states
+// that the reconciler tick does not grow longer than 1 second because of the rule engine.
+const accessTimeout = time.Second
+
+// applyAccess compiles the local rule set of the configuration file and writes it into the
+// chains that the daemon owns.
+// applyAccess records access.written when it wrote the chains, and access.write_failed when
+// a command failed. It records one event and it returns; a failed write leaves the previous
+// chains in place, therefore the host keeps the rules of the last cycle.
+func (r *Reconciler) applyAccess() {
+	r.mu.Lock()
+	writer := r.access
+	r.mu.Unlock()
+	if writer == nil {
+		return
+	}
+
+	cfg, err := config.LoadConfig(r.configPath)
+	if err != nil {
+		r.emit("access.write_failed", "", fmt.Sprintf("load the configuration file: %v", err))
+		return
+	}
+
+	devices := make(map[string]string, len(cfg.Tailnets))
+	for _, tn := range cfg.Tailnets {
+		hostVeth, _ := namespaces.VethNames(namespaces.GetNamespaceName(tn.ID))
+		devices[tn.ID] = hostVeth
+	}
+
+	bindAddress := cfg.Resolver.BindAddress
+	if bindAddress == "" {
+		bindAddress = dns.DefaultBindAddress
+	}
+
+	set := access.RuleSet{Mode: cfg.AccessMode()}
+	if cfg.Access != nil {
+		set.Rules = r.declaredRules(cfg.Access.Rules, devices)
+	}
+
+	tail, err := access.TailForMode(set.EffectiveMode())
+	if err != nil {
+		r.emit("access.write_failed", "", err.Error())
+		return
+	}
+
+	compiled, err := access.Compile(set, access.Topology{Devices: devices, DNSAddress: bindAddress}, tail)
+	if err != nil {
+		r.emit("access.write_failed", "", fmt.Sprintf("compile the local rule set: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), accessTimeout)
+	defer cancel()
+
+	wrote, err := writer.Apply(ctx, compiled)
+	if err != nil {
+		r.emit("access.write_failed", "", err.Error())
+		return
+	}
+	if wrote {
+		r.emit("access.written", "", fmt.Sprintf("mode %s, %d forward rules, %d out rules",
+			set.EffectiveMode(), len(compiled.Forward), len(compiled.Out)))
+	}
+}
+
+// declaredRules returns the rules whose endpoints the configuration file still declares.
+// devices holds one entry for each declared tailnet.
+// declaredRules records access.rule_dropped for each rule that names a tailnet that the
+// configuration file no longer declares, because the daemon does not refuse to start for
+// a tailnet that the operator removed.
+func (r *Reconciler) declaredRules(rules []access.Rule, devices map[string]string) []access.Rule {
+	kept := make([]access.Rule, 0, len(rules))
+	for _, rule := range rules {
+		if !endpointDeclared(rule.From, devices) || !endpointDeclared(rule.To, devices) {
+			r.emit("access.rule_dropped", "", fmt.Sprintf("%s: the configuration file declares no such tailnet", rule))
+			continue
+		}
+		kept = append(kept, rule)
+	}
+	return kept
+}
+
+// endpointDeclared reports whether the endpoint is the host, the internet, or a tailnet
+// that the configuration file declares.
+func endpointDeclared(endpoint string, devices map[string]string) bool {
+	if endpoint == access.Host || endpoint == access.Internet {
+		return true
+	}
+	_, ok := devices[endpoint]
+	return ok
 }
 
 // checkDNSProtection records the event dns.unprotected for each tailnet whose overlay
@@ -630,6 +761,34 @@ func (r *Reconciler) reapStaleRules() {
 		r.emit("teardown.failed", "", fmt.Sprintf("reap the stale rules: %v", err))
 	}
 	r.emit("rules.reaped", "", fmt.Sprintf("%d rules", count))
+
+	legacy, err := r.reaper.RemoveLegacyForwardRules()
+	if err != nil {
+		r.emit("teardown.failed", "", fmt.Sprintf("remove the version 0.9 forward rules: %v", err))
+	}
+	if legacy > 0 {
+		r.emit("rules.reaped", "", fmt.Sprintf("%d version 0.9 forward rules", legacy))
+	}
+}
+
+// checkNamespaceForwarding records access.namespace_forwarding for each namespace whose
+// net.ipv4.ip_forward is not 0. The finding SA-48 states that the containment of a packet
+// inside the second namespace is a kernel default. A namespace that forwards turns the
+// finding SA-8 into a path between two tailnets, therefore the operator sees an event.
+func (r *Reconciler) checkNamespaceForwarding(desired map[string]config.Tailnet) {
+	if r.reaper == nil {
+		return
+	}
+	for id := range desired {
+		nsName := r.ns.GetName(id)
+		value, err := r.reaper.NamespaceForwarding(nsName)
+		if err != nil {
+			continue
+		}
+		if value != "0" {
+			r.emit("access.namespace_forwarding", id, fmt.Sprintf("net.ipv4.ip_forward is %s in %s", value, nsName))
+		}
+	}
 }
 
 // ConfigPath returns the path to the config file used by this reconciler.
@@ -846,6 +1005,15 @@ func (r *Reconciler) Shutdown() error {
 		r.emit("shutdown_complete", "", "all daemons stopped")
 	case <-ctx.Done():
 		r.emit("shutdown_timeout", "", "30s deadline exceeded")
+	}
+
+	r.mu.Lock()
+	writer := r.access
+	r.mu.Unlock()
+	if writer != nil {
+		if err := writer.Teardown(ctx); err != nil {
+			return r.reportTeardown("", []error{fmt.Errorf("remove the local rule chains: %w", err)})
+		}
 	}
 
 	if r.ha != nil {

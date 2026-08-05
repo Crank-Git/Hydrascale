@@ -310,18 +310,10 @@ func (m *RealManager) SetupVeth(nsName string, index int, infraSubnet string) er
 		return fmt.Errorf("failed to enable forwarding on %s: %v (%s)", hostVeth, err, out)
 	}
 
-	// Add iptables FORWARD rules so namespace traffic isn't dropped (e.g. by Docker's DROP policy)
-	// Use -C (check) before -I (insert) to avoid duplicates and errors on retry.
-	if _, err := m.run("iptables", "-C", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"); err != nil {
-		if out, err := m.run("iptables", "-I", "FORWARD", "1", "-i", hostVeth, "-j", "ACCEPT"); err != nil {
-			return fmt.Errorf("failed to add FORWARD rule for %s: %v (%s)", hostVeth, err, out)
-		}
-	}
-	if _, err := m.run("iptables", "-C", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"); err != nil {
-		if out, err := m.run("iptables", "-I", "FORWARD", "1", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"); err != nil {
-			return fmt.Errorf("failed to add FORWARD return rule for %s: %v (%s)", hostVeth, err, out)
-		}
-	}
+	// SetupVeth writes no FORWARD rule. Version 0.9 wrote `-i vh<hash> -j ACCEPT`, which
+	// tested the input interface alone and therefore accepted a packet to every
+	// destination. That rule is the finding SA-8 and the finding SA-9. internal/access now
+	// owns every forward rule, in the chain HYDRASCALE-FWD.
 
 	// Add iptables masquerade so namespace traffic can reach the internet
 	if _, err := m.run("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err != nil {
@@ -354,6 +346,9 @@ func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
 	if err != nil {
 		errs = append(errs, fmt.Errorf("veth IPs for %s: %w", nsName, err))
 	} else {
+		// The two FORWARD deletes stay, because a host that ran version 0.9 still holds
+		// the rules that this version does not write. RemoveLegacyForwardRules removes
+		// them for a namespace that keeps running.
 		errs = append(errs,
 			m.deleteRule("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"),
 			m.deleteRule("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"),
@@ -562,6 +557,84 @@ func (m *RealManager) ReapStaleRules() (int, error) {
 		removed++
 	}
 	return removed, errors.Join(errs...)
+}
+
+// legacyRuleForms holds the two FORWARD rules that version 0.9 wrote for each host veth
+// device. The first element of each form is the position of the device name.
+// RemoveLegacyForwardRules matches the whole form, so an operator rule that names the same
+// device but carries another match keeps its place.
+var legacyRuleForms = [][]string{
+	{"-i", "", "-j", "ACCEPT"},
+	{"-o", "", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+}
+
+// RemoveLegacyForwardRules removes each FORWARD rule that version 0.9 wrote for a host veth
+// device, and it returns the number of rules that it removed.
+// RemoveLegacyForwardRules returns the failed deletes together. The daemon runs it at
+// start, because a host that upgrades keeps the rules of the version that it ran, and the
+// rule `-i vh<hash> -j ACCEPT` is the finding SA-8 and the finding SA-9.
+func (m *RealManager) RemoveLegacyForwardRules() (int, error) {
+	out, err := m.run("iptables", "-S", "FORWARD")
+	if err != nil {
+		return 0, fmt.Errorf("iptables -S FORWARD: %v (%s)", err, out)
+	}
+
+	var errs []error
+	removed := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "-A" || fields[1] != "FORWARD" {
+			continue
+		}
+		if !isLegacyForwardRule(fields[2:]) {
+			continue
+		}
+		args := append([]string{"-D", "FORWARD"}, fields[2:]...)
+		if err := m.deleteRule("iptables", args...); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed++
+	}
+	return removed, errors.Join(errs...)
+}
+
+// isLegacyForwardRule reports whether the rule arguments equal one form that version 0.9
+// wrote, with a host veth device name in the position of the device.
+func isLegacyForwardRule(args []string) bool {
+	for _, form := range legacyRuleForms {
+		if len(args) != len(form) {
+			continue
+		}
+		match := true
+		for i := range form {
+			if i == 1 {
+				match = match && hostVethPattern.MatchString(args[i])
+				continue
+			}
+			if args[i] != form[i] {
+				match = false
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// NamespaceForwarding returns the value of net.ipv4.ip_forward inside the namespace.
+// nsName is the name of the namespace.
+// The finding SA-48 states that the containment of a packet inside the second namespace is
+// a kernel default, not a rule. The daemon reads the value, so that a change of the default
+// becomes an event that the operator sees.
+// NamespaceForwarding returns an error when the command fails.
+func (m *RealManager) NamespaceForwarding(nsName string) (string, error) {
+	out, err := m.run("ip", "netns", "exec", nsName, "sysctl", "-n", "net.ipv4.ip_forward")
+	if err != nil {
+		return "", fmt.Errorf("read net.ipv4.ip_forward in %s: %v (%s)", nsName, err, out)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // namesAMissingDevice reports whether the rule matches an input interface or an output
