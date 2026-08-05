@@ -57,7 +57,8 @@ and `internal/ui/package.json` names no dependency, so `node` alone is enough.
 
 A developer machine that holds no `node` skips these tests. A gate that holds no `node`
 fails, because a silent loss of the 70 tests reads exactly like success. The environment
-variable `CI` marks a gate.
+variable `CI` marks a gate, and GitHub Actions sets it. The test host gate exports
+`HYDRASCALE_GATE`, which marks a gate the same way.
 
 Run the daemon on the test host rather than on a developer machine. Use the
 `verify-on-phobos` skill; it builds, deploys, and rolls back.
