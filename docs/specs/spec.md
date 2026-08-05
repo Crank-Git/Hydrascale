@@ -558,3 +558,42 @@ security and DNS work must not wait behind the console.
 | 2026-08-04 | 1 | First draft. Written from three interview rounds and a code survey. |
 | 2026-08-04 | 1 | Approved. The operator resolved risk R8: `docs/specs/`, `CLAUDE.md` and `.claude/` are all tracked. |
 | 2026-08-04 | 1 | Corrected assumption 4a: `vendor/` is untracked on purpose and this is not a defect. Recorded that the test host `/etc/resolv.conf` is immutable, which blocks the Epic 4 reproduction until the attribute is cleared. |
+
+## Issue map
+
+Epics 0 to 4 are on the tracker. Epics 5 to 9 stay `planned` until the first milestones
+land, so that the console and policy epics can be re-decomposed if the security audit
+changes what they need.
+
+| Epic | Issue | Sub-issues | Feature file |
+|---|---|---|---|
+| Epic 0: Foundation | #48 | #49 #50 #51 #52 #53 #54 | `features/00-foundation.md` |
+| Epic 1: Desktop client removal and repository hygiene | #55 | #56 #57 #58 #59 #60 #61 | `features/01-desktop-client-removal.md` |
+| Epic 2: Security audit | #62 | #63 #64 #65 #66 #67 | `features/02-security-audit.md` |
+| Epic 3: Security fixes | #68 | #69 #70 #71 #72 #73 | `features/03-security-fixes.md` |
+| Epic 4: DNS integrity | #74 | #75 #76 #77 #78 #79 | `features/04-dns-integrity.md` |
+| Epic 5: Local reachability model | not issued | — | `features/05-reachability-model.md` |
+| Epic 6: Console foundation | not issued | — | `features/06-console-foundation.md` |
+| Epic 7: Console access editor | not issued | — | `features/07-console-access-editor.md` |
+| Epic 8: Upstream policy control | not issued | — | `features/08-upstream-policy.md` |
+| Epic 9: Documentation and release | not issued | — | `features/09-docs-and-release.md` |
+
+### Requirement coverage
+
+| Feature | Requirements | Issues that cover them |
+|---|---|---|
+| foundation | FR-foundation-1 to 12 | #49 #50 #51 #52 #53 #54 |
+| desktop-client-removal | FR-removal-1 to 14 | #56 #57 #58 #59 #60 #61 |
+| security-audit | FR-audit-1 to 14 | #63 #64 #65 #66 #67 |
+| security-fixes | FR-fix-1 to 19 | #69 #70 #71 #72 #73 |
+| dns-integrity | FR-dns-1 to 16 | #75 #76 #77 #78 #79 |
+
+Every one of the 75 requirements in these five features is cited by at least one issue.
+
+### Requirements already satisfied when the issues were created
+
+| Requirement | State |
+|---|---|
+| FR-foundation-1 | The `dev` branch exists at `89745a9`. The maintainer cut it by hand. |
+| FR-foundation-11, FR-foundation-12 | Written as `.claude/skills/verify-on-phobos/SKILL.md`. Issue #54 proves them on the test host. |
+| FR-removal-5, FR-removal-11 | `.gitignore` already ignores `/hydrascale` and `branding/`. The files are still tracked, so the removal work remains. |

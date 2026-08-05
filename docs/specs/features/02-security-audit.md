@@ -2,8 +2,8 @@
 id: security-audit
 feature: Security audit
 epic: "Epic 2: Security audit"
-status: planned
-issues: []
+status: issued
+issues: [62, 63, 64, 65, 66, 67]
 mockups: []
 ---
 

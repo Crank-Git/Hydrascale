@@ -2,8 +2,8 @@
 id: desktop-client-removal
 feature: Desktop client removal and repository hygiene
 epic: "Epic 1: Desktop client removal and repository hygiene"
-status: planned
-issues: []
+status: issued
+issues: [55, 56, 57, 58, 59, 60, 61]
 mockups: []
 ---
 

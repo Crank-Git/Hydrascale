@@ -2,8 +2,8 @@
 id: dns-integrity
 feature: DNS integrity
 epic: "Epic 4: DNS integrity"
-status: planned
-issues: []
+status: issued
+issues: [74, 75, 76, 77, 78, 79]
 mockups: []
 ---
 

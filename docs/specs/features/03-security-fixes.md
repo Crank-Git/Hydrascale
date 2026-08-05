@@ -2,8 +2,8 @@
 id: security-fixes
 feature: Security fixes
 epic: "Epic 3: Security fixes"
-status: planned
-issues: []
+status: issued
+issues: [68, 69, 70, 71, 72, 73]
 mockups: []
 ---
 
