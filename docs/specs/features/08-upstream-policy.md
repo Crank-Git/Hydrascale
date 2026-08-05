@@ -27,7 +27,7 @@ rather than hiding it.
 |---|---|---|
 | Tailscale API v2 policy endpoints | The Tailscale OpenAPI schema at `https://api.tailscale.com/api/v2?outputOpenapiSchema=true`, `openapi: 3.1.0`, server `https://api.tailscale.com/api/v2` | 2026-08-04 |
 | Headscale policy endpoints | `https://github.com/juanfont/headscale/blob/v0.29.3/proto/headscale/v1/headscale.proto` lines 194-213, and `gen/openapiv2/headscale/v1/headscale.swagger.json` at the same tag | 2026-08-04 |
-| Headscale policy modes | `https://github.com/juanfont/headscale/blob/v0.29.3/docs/ref/policy.md` and `cmd/headscale/cli/policy.go:114` | 2026-08-04 |
+| Headscale policy modes | `https://github.com/juanfont/headscale/blob/v0.29.3/docs/ref/policy.md` and `hscontrol/types/config.go:54` at tag `v0.29.3` | 2026-08-05 |
 
 ## User stories
 
@@ -132,7 +132,7 @@ rather than hiding it.
 3. The daemon returns the document and it marks the write as unavailable.
 4. The console shows the document read-only.
 5. The console states that the control server runs the file policy mode, and that a write
-   needs `policy.mode: "db"`.
+   needs `policy.mode: "database"`.
 
 ### The policy changed since the read
 
@@ -223,7 +223,7 @@ holds a Headscale API key. Verified against `headscale.proto` at tag `v0.29.3`, 
 | Method and path | Purpose | Notes |
 |---|---|---|
 | `GET /api/v1/policy` | Read the policy. | Works in both policy modes. |
-| `PUT /api/v1/policy` | Write the policy. | Succeeds only when the control server runs `policy.mode: "db"`. `cmd/headscale/cli/policy.go:114` states the constraint. |
+| `PUT /api/v1/policy` | Write the policy. | Succeeds only when the control server runs `policy.mode: "database"`. `hscontrol/types/config.go:54` at tag `v0.29.3` declares the value. |
 | `POST /api/v1/policy/check` | Check the policy for errors. | Used as the validate step. |
 
 Headscale exposes these over a grpc-gateway REST bridge, so the daemon uses `net/http`

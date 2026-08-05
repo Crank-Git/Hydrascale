@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,6 +117,56 @@ func TestStatusNode_ParsesPeerFields(t *testing.T) {
 	if !p.LastSeen.Equal(want) {
 		t.Errorf("LastSeen: got %v, want %v", p.LastSeen, want)
 	}
+}
+
+// unreachablePID is above the largest value that pid_max accepts on Linux, so
+// /proc holds no entry for it. It stands for a process that exited.
+const unreachablePID = 1 << 30
+
+func TestStopReportsNoFailureWhenTheTailscaledProcessAlreadyExited(t *testing.T) {
+	base := t.TempDir()
+	pidPath := writePIDFile(t, base, "corp", unreachablePID)
+
+	m := &RealManager{StateDir: base}
+	if err := m.Stop("ns-corp", "corp"); err != nil {
+		t.Errorf("Stop reported a failure for an exited process: %v", err)
+	}
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Errorf("the PID file stayed behind at %s", pidPath)
+	}
+}
+
+func TestStopReportsAStalePIDWhenThePIDNamesAnotherProcess(t *testing.T) {
+	base := t.TempDir()
+	// The test binary is not tailscaled, so its own PID names another process.
+	pidPath := writePIDFile(t, base, "corp", os.Getpid())
+
+	m := &RealManager{StateDir: base}
+	err := m.Stop("ns-corp", "corp")
+	if err == nil {
+		t.Fatal("Stop reported no failure for a PID that names another process")
+	}
+	if !strings.Contains(err.Error(), "process is not tailscaled") {
+		t.Errorf("Stop returned %q, want the stale PID message", err)
+	}
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Errorf("the PID file stayed behind at %s", pidPath)
+	}
+}
+
+// writePIDFile writes pid into the PID file of a tailnet under base, and returns the path.
+func writePIDFile(t *testing.T, base, tailnetID string, pid int) string {
+	t.Helper()
+
+	stateDir := filepath.Join(base, tailnetID)
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		t.Fatalf("create the state directory: %v", err)
+	}
+	pidPath := filepath.Join(stateDir, "tailscaled.pid")
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0600); err != nil {
+		t.Fatalf("write the PID file: %v", err)
+	}
+	return pidPath
 }
 
 func TestStopDaemon_StalePID(t *testing.T) {

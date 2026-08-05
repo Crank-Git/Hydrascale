@@ -21,6 +21,7 @@ holds the documents that go further than the README.
 | Document | Holds |
 |---|---|
 | [DESIGN.md](DESIGN.md) | The brand of the console: the tokens, the palette, the typography, the marks, and the drawing rules. |
+| [UPGRADING.md](UPGRADING.md) | The upgrade to version 1.0 for an operator who runs version 0.9 or version 0.10. |
 | [dns-investigation.md](dns-investigation.md) | The measurement of the host `resolv.conf` defect, and the reason for the overlay mount on `/etc`. |
 | [security-audit.md](security-audit.md) | The audit of the daemon, with one entry per finding and the state of each fix. |
 | [specs/](specs/) | The specification of version 1.0. |
