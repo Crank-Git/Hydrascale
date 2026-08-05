@@ -44,6 +44,8 @@ type mockNS struct {
 	createErr  error
 	deleteErr  error
 	listErr    error
+	reapCount  int   // the count that ReapStaleRules returns
+	reapErr    error // the error that ReapStaleRules returns
 }
 
 func newMockNS() *mockNS {
@@ -91,6 +93,10 @@ func (m *mockNS) SetupVeth(nsName string, index int, infraSubnet string) error {
 
 func (m *mockNS) TeardownVeth(nsName string, infraSubnet string) error {
 	return nil
+}
+
+func (m *mockNS) ReapStaleRules() (int, error) {
+	return m.reapCount, m.reapErr
 }
 
 type mockDaemon struct {
