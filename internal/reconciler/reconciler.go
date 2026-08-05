@@ -337,7 +337,11 @@ func (r *Reconciler) executeAction(action Action) error {
 		if err := namespaces.WriteNamespaceResolvConf(action.NsName); err != nil {
 			log.Printf("namespace: failed to write resolv.conf for %s: %v", action.NsName, err)
 		}
-		return r.dm.Start(action.TailnetID, action.NsName)
+		allowUnprotected := false
+		if cfg, err := config.LoadConfig(r.configPath); err == nil {
+			allowUnprotected = cfg.DNS.AllowUnprotected
+		}
+		return r.dm.Start(action.TailnetID, action.NsName, allowUnprotected)
 	case ActionStopDaemon:
 		return r.dm.Stop(action.NsName, action.TailnetID)
 	case ActionAuthDaemon:

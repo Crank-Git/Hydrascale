@@ -35,9 +35,38 @@ type StatusNode struct {
 	LastSeen     time.Time `json:"LastSeen"`
 }
 
+// UnprotectedRecord is what the __nsdaemon helper writes when the overlay mount on /etc
+// fails. Reason holds the mount error text. Allowed is true when
+// dns.allow_unprotected let the child start without the overlay mount.
+type UnprotectedRecord struct {
+	Reason  string `json:"reason"`
+	Allowed bool   `json:"allowed"`
+}
+
+// UnprotectedFilePath returns the file in which the __nsdaemon helper of a tailnet
+// records an overlay mount failure.
+func UnprotectedFilePath(tailnetID string) string {
+	return filepath.Join(DefaultStateDir, tailnetID, "dns-unprotected")
+}
+
+// ReadUnprotected returns the record at path. The second result is false when the file
+// is absent, which means that the overlay mount holds.
+func ReadUnprotected(path string) (UnprotectedRecord, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return UnprotectedRecord{}, false
+	}
+	var rec UnprotectedRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return UnprotectedRecord{Reason: fmt.Sprintf("unreadable DNS protection record: %v", err)}, true
+	}
+	return rec, true
+}
+
 // Manager defines the interface for daemon lifecycle operations.
 type Manager interface {
-	Start(tailnetID, nsName string) error
+	Start(tailnetID, nsName string, allowUnprotected bool) error
+	UnprotectedDNS(tailnetID string) (UnprotectedRecord, bool)
 	Stop(nsName, tailnetID string) error
 	CheckHealth(nsName, tailnetID string) (bool, error)
 	GetSocketPath(tailnetID string) string
@@ -54,8 +83,12 @@ func NewRealManager() *RealManager {
 	return &RealManager{}
 }
 
-func (m *RealManager) Start(tailnetID, nsName string) error {
-	return StartDaemon(tailnetID, nsName)
+func (m *RealManager) Start(tailnetID, nsName string, allowUnprotected bool) error {
+	return StartDaemon(tailnetID, nsName, allowUnprotected)
+}
+
+func (m *RealManager) UnprotectedDNS(tailnetID string) (UnprotectedRecord, bool) {
+	return ReadUnprotected(UnprotectedFilePath(tailnetID))
 }
 
 func (m *RealManager) Stop(nsName, tailnetID string) error {
@@ -109,7 +142,7 @@ func GetStatus(ctx context.Context, namespaceName string, tailnetID string) (*Ta
 
 // StartDaemon launches tailscaled inside a network namespace.
 // It uses cmd.Start() to avoid blocking and writes the PID to a file.
-func StartDaemon(tailnetID string, namespaceName string) error {
+func StartDaemon(tailnetID string, namespaceName string, allowUnprotected bool) error {
 	stateDir := filepath.Join(DefaultStateDir, tailnetID)
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		return fmt.Errorf("failed to create state dir: %w", err)
