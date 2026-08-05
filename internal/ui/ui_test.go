@@ -55,10 +55,56 @@ func TestTheEmbeddedConsoleHoldsEveryStaticFile(t *testing.T) {
 	}
 }
 
+// TestTheConsoleServesEveryFontFileAndTheLicence checks that the console self-hosts the
+// two brand typefaces. The console makes no request to another host, so the font files
+// ship in the binary. The SIL Open Font License requires that each copy carries the
+// copyright notice and the licence, so OFL.txt ships beside the font files.
+func TestTheConsoleServesEveryFontFileAndTheLicence(t *testing.T) {
+	fonts := []string{
+		"SpaceGrotesk[wght].woff2",
+		"SpaceMono-Regular.woff2",
+		"SpaceMono-Bold.woff2",
+	}
+	for _, font := range fonts {
+		rec := httptest.NewRecorder()
+		target := "/brand/fonts/" + font
+		Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s returns %d, want %d", target, rec.Code, http.StatusOK)
+			continue
+		}
+		// A WOFF2 file opens with the signature wOF2. See the W3C WOFF2 recommendation.
+		if !strings.HasPrefix(rec.Body.String(), "wOF2") {
+			t.Errorf("GET %s returns a body that holds no WOFF2 signature", target)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/brand/fonts/OFL.txt", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /brand/fonts/OFL.txt returns %d, want %d", rec.Code, http.StatusOK)
+	}
+	licence := rec.Body.String()
+	for _, line := range []string{
+		"SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007",
+		"Copyright 2020 The Space Grotesk Project Authors",
+		"Copyright 2016 The Space Mono Project Authors",
+	} {
+		if !strings.Contains(licence, line) {
+			t.Errorf("OFL.txt holds no line %q", line)
+		}
+	}
+}
+
 // TestTheConsoleRequestsNoResourceFromAnotherHost reads every embedded file and refuses a
 // reference to another host. CLAUDE.md states that the console makes no request to
 // another host, and FR-console-6 holds it. The check skips the xmlns attribute of an SVG
-// file, because that value names an XML namespace and it is not a request.
+// file, because that value names an XML namespace and it is not a request. The check
+// skips brand/fonts/OFL.txt, because that file is the licence text of the two typefaces,
+// quoted from the font projects. It names the SIL licence page and each upstream project,
+// and the console loads no file from either. The console reads the font files from its own
+// origin, which TestTheConsoleDeclaresAFaceForEveryFontFile holds.
 func TestTheConsoleRequestsNoResourceFromAnotherHost(t *testing.T) {
 	markers := []string{"http://", "https://", "src=\"//", "href=\"//", "url(//"}
 
@@ -66,7 +112,7 @@ func TestTheConsoleRequestsNoResourceFromAnotherHost(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
+		if d.IsDir() || path == "brand/fonts/OFL.txt" {
 			return nil
 		}
 		data, err := fs.ReadFile(Files(), path)

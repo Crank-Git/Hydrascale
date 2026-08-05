@@ -120,6 +120,11 @@ func TestTheConsoleSourceHoldsNoEmoji(t *testing.T) {
 		if err != nil || d.IsDir() {
 			return err
 		}
+		// A WOFF2 file is compressed, so its bytes read as arbitrary code points and
+		// they are not console source. The glyph set of each face is not source either.
+		if strings.HasSuffix(name, ".woff2") {
+			return nil
+		}
 		for _, r := range readStatic(t, name) {
 			if inEmojiRange(r) {
 				t.Errorf("%s holds the emoji code point U+%04X", name, r)
@@ -149,6 +154,47 @@ func TestTheConsoleLoadsEveryBrandTokenFile(t *testing.T) {
 		if !strings.Contains(source, reference) {
 			t.Errorf("the console loads no %s", reference)
 		}
+	}
+}
+
+func TestTheConsoleDeclaresAFaceForEveryFontFile(t *testing.T) {
+	// FR-console-6. brand/tokens/fonts.css is the one file that names a font file, so a
+	// view needs no change when a face arrives. Each src is a path of this origin,
+	// because the console makes no request to another host.
+	faces := readStatic(t, "brand/tokens/fonts.css")
+
+	files, err := fs.ReadDir(Files(), "brand/fonts")
+	if err != nil {
+		t.Fatalf("read the font directory: %v", err)
+	}
+	declared := 0
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".woff2") {
+			continue
+		}
+		declared++
+		reference := "url('/brand/fonts/" + file.Name() + "')"
+		if !strings.Contains(faces, reference) {
+			t.Errorf("fonts.css declares no face that reads %s", reference)
+		}
+	}
+	if declared == 0 {
+		t.Fatal("the brand holds no font file")
+	}
+	if strings.Count(faces, "@font-face") != declared {
+		t.Errorf("fonts.css holds %d @font-face rules, want %d", strings.Count(faces, "@font-face"), declared)
+	}
+	// typography.css names these two families, and a face that names a third family
+	// reaches no element.
+	for _, family := range []string{"'Space Grotesk'", "'Space Mono'"} {
+		if !strings.Contains(faces, "font-family:"+family) {
+			t.Errorf("fonts.css declares no face for the family %s", family)
+		}
+	}
+	// font-display:swap shows a sentence in the fallback family until the face arrives,
+	// so the console never shows an empty view.
+	if strings.Count(faces, "font-display:swap") != declared {
+		t.Errorf("fonts.css sets font-display:swap on %d faces, want %d", strings.Count(faces, "font-display:swap"), declared)
 	}
 }
 
