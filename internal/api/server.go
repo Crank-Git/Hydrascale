@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"hydrascale/internal/config"
+	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
 	"hydrascale/internal/reconciler"
 )
@@ -106,7 +106,12 @@ func (s *Server) Start() error {
 			ln.Close()
 			return fmt.Errorf("failed to apply socket group %q: %w", s.socketGroup, err)
 		}
-		log.Printf("api: socket group access enabled for %q", s.socketGroup)
+		info, err := os.Stat(s.socketPath)
+		if err != nil {
+			ln.Close()
+			return fmt.Errorf("failed to read the mode of socket %s: %w", s.socketPath, err)
+		}
+		log.Print(socketGroupLog(s.socketPath, s.socketGroup, info.Mode()))
 	}
 	s.listener = ln
 
@@ -177,6 +182,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// handleReconcile serves POST /api/reconcile.
+// The route reads no request body, so it validates the method only.
 func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -196,6 +203,14 @@ func (s *Server) writeReconcileResponse(w http.ResponseWriter, err error) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// socketGroupLog returns the start log line for a group-accessible control socket.
+// The line names the socket path, the socket mode, and the group. It also states that a
+// member of the group holds root access on the host.
+func socketGroupLog(socketPath, group string, mode os.FileMode) string {
+	return fmt.Sprintf("api: socket %s has mode %04o and group %q; a member of that group sends a command to the daemon, which runs as root, so membership is equivalent to root access on this host",
+		socketPath, mode.Perm(), group)
+}
+
 // applySocketGroup makes the control socket reachable by members of group:
 // the parent dir gets root:<group> 0750 (group can traverse to the socket) and
 // the socket itself root:<group> 0660 (group can connect). The daemon still
@@ -208,6 +223,11 @@ func applySocketGroup(socketPath, group string) error {
 	gid, err := strconv.Atoi(g.Gid)
 	if err != nil {
 		return fmt.Errorf("parse gid for %q: %w", group, err)
+	}
+	// A member of the socket group controls a root daemon, so the root group adds no
+	// account and it hides that fact from the operator.
+	if gid == 0 {
+		return fmt.Errorf("group %q has group id 0: name a group other than the root group", group)
 	}
 	dir := filepath.Dir(socketPath)
 	if err := os.Chown(dir, 0, gid); err != nil {
@@ -225,34 +245,71 @@ func applySocketGroup(socketPath, group string) error {
 	return nil
 }
 
-// isValidControlURL reports whether s is an absolute http(s) URL with a host,
-// as required for a Headscale/custom coordination server (--login-server).
-func isValidControlURL(s string) bool {
-	u, err := url.Parse(s)
-	if err != nil {
-		return false
+// writeRefusal refuses the request with HTTP 400 and the body {"error": "<message>"}.
+// writeRefusal writes the reason into the log, so message must hold no secret.
+func writeRefusal(w http.ResponseWriter, message string) {
+	log.Printf("api: refused a request: %s", message)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: message}); err != nil {
+		log.Printf("api: encode refusal: %v", err)
 	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
+// decodeBody reads a JSON request body of 1 MiB or less into dst.
+// decodeBody refuses the request and returns false when the body does not parse.
+func decodeBody(w http.ResponseWriter, r *http.Request, dst interface{}) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeRefusal(w, fmt.Sprintf("invalid request body: %v", err))
+		return false
+	}
+	return true
+}
+
+// validateTailnetID returns an error when id is not a tailnet identifier that the daemon
+// accepts. config.IsValidID holds the one rule, and the configuration loader applies the
+// same rule, so an identifier that a route writes always loads again.
+func validateTailnetID(id string) error {
+	if id == "" {
+		return errors.New("id is required")
+	}
+	if !config.IsValidID(id) {
+		return fmt.Errorf("invalid id %q: an id starts with a letter or a digit, holds the characters a-z A-Z 0-9 . _ - only, and holds 63 characters or fewer", id)
+	}
+	return nil
+}
+
+// hasTailnet reports whether the configuration holds a tailnet with this identifier.
+func hasTailnet(cfg *config.Config, id string) bool {
+	for _, tn := range cfg.Tailnets {
+		if tn.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// handleTailnetAdd serves POST /api/tailnet/add.
+// The route validates the whole body before it writes the configuration file.
+// The route writes the auth key into /etc/hydrascale/config.yaml, which the secrets file
+// of Epic 3 replaces. See SA-36 in docs/security-audit.md.
 func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
-	if req.ID == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+	if err := validateTailnetID(req.ID); err != nil {
+		writeRefusal(w, err.Error())
 		return
 	}
-	if req.ControlURL != "" && !isValidControlURL(req.ControlURL) {
-		http.Error(w, "control_url must be an absolute http(s) URL", http.StatusBadRequest)
+	if err := config.ValidateControlURL(req.ControlURL); err != nil {
+		writeRefusal(w, err.Error())
 		return
 	}
 
@@ -263,11 +320,9 @@ func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, tn := range cfg.Tailnets {
-		if tn.ID == req.ID {
-			s.writeReconcileResponse(w, fmt.Errorf("tailnet %s already exists", req.ID))
-			return
-		}
+	if hasTailnet(cfg, req.ID) {
+		writeRefusal(w, fmt.Sprintf("tailnet %s already exists", req.ID))
+		return
 	}
 
 	cfg.Tailnets = append(cfg.Tailnets, config.Tailnet{
@@ -291,15 +346,13 @@ func (s *Server) handleTailnetRemove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
-	if req.ID == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+	if err := validateTailnetID(req.ID); err != nil {
+		writeRefusal(w, err.Error())
 		return
 	}
 
@@ -310,17 +363,15 @@ func (s *Server) handleTailnetRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	found := false
+	if !hasTailnet(cfg, req.ID) {
+		writeRefusal(w, fmt.Sprintf("tailnet %s not found", req.ID))
+		return
+	}
 	for i, tn := range cfg.Tailnets {
 		if tn.ID == req.ID {
 			cfg.Tailnets = append(cfg.Tailnets[:i], cfg.Tailnets[i+1:]...)
-			found = true
 			break
 		}
-	}
-	if !found {
-		s.writeReconcileResponse(w, fmt.Errorf("tailnet %s not found", req.ID))
-		return
 	}
 
 	if err := config.SaveConfig(cfgPath, cfg); err != nil {
@@ -336,15 +387,23 @@ func (s *Server) handleTailnetConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
-	if req.ID == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+	if err := validateTailnetID(req.ID); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
+	cfg, err := config.LoadConfig(s.reconciler.ConfigPath())
+	if err != nil {
+		s.writeReconcileResponse(w, fmt.Errorf("failed to load config: %w", err))
+		return
+	}
+	if !hasTailnet(cfg, req.ID) {
+		writeRefusal(w, fmt.Sprintf("tailnet %s not found", req.ID))
 		return
 	}
 
@@ -357,15 +416,29 @@ func (s *Server) handleTailnetDisconnect(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req TailnetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
-	if req.ID == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+	if err := validateTailnetID(req.ID); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+	// StopDaemon joins the identifier onto the state directory and it removes a file
+	// under the result, so the route confirms the containment before it acts. See SA-2.
+	if _, ok := config.SafeStateDir(daemon.DefaultStateDir, req.ID); !ok {
+		writeRefusal(w, fmt.Sprintf("id %q leaves the state directory %s", req.ID, daemon.DefaultStateDir))
+		return
+	}
+
+	cfg, err := config.LoadConfig(s.reconciler.ConfigPath())
+	if err != nil {
+		s.writeReconcileResponse(w, fmt.Errorf("failed to load config: %w", err))
+		return
+	}
+	if !hasTailnet(cfg, req.ID) {
+		writeRefusal(w, fmt.Sprintf("tailnet %s not found", req.ID))
 		return
 	}
 
@@ -377,19 +450,18 @@ func (s *Server) handleConfigDNS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req DNSConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
-
-	if req.BindAddress != "" {
-		if err := config.ValidateBindAddress(req.BindAddress); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	if err := config.ValidateResolverMode(req.Mode); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+	if err := config.ValidateBindAddress(req.BindAddress); err != nil {
+		writeRefusal(w, err.Error())
+		return
 	}
 
 	cfgPath := s.reconciler.ConfigPath()

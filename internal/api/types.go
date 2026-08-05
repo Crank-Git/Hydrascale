@@ -27,6 +27,11 @@ type EventsResponse struct {
 	Events []reconciler.Event `json:"events"`
 }
 
+// ErrorResponse is the JSON body that a route returns when it refuses a request.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // ReconcileResponse is the JSON response for POST /api/reconcile.
 type ReconcileResponse struct {
 	OK      bool   `json:"ok"`

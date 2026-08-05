@@ -22,6 +22,7 @@ import (
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/routing"
+	"hydrascale/internal/secrets"
 	"hydrascale/internal/tui"
 )
 
@@ -421,6 +422,17 @@ func serveCmd() *cobra.Command {
 			cfg, err := loadConfig()
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			// The daemon starts when the secrets file is absent or unreadable. Upstream
+			// policy control is then unavailable. The message names the reason and it
+			// never holds a credential value. See FR-fix-17.
+			if store, err := secrets.Load(cfg.SecretsFile); err != nil {
+				fmt.Fprintf(os.Stderr, "Secrets file refused: %v (starting without upstream policy control)\n", err)
+			} else if len(store.Tailnets) == 0 {
+				fmt.Printf("No credential in %s; upstream policy control is unavailable\n", cfg.SecretsFile)
+			} else {
+				fmt.Printf("Read credentials for %d tailnets from %s\n", len(store.Tailnets), cfg.SecretsFile)
 			}
 
 			// Start DNS forwarder (retained for graceful shutdown)

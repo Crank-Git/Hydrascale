@@ -196,8 +196,9 @@ func TestTeardownVethRemovesEveryRuleWhenADeleteFails(t *testing.T) {
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
-	if err := m.TeardownVeth(nsName, infraSubnet); err != nil {
-		t.Fatalf("TeardownVeth: %v", err)
+	// A failed delete does not stop the remaining steps, and TeardownVeth reports it.
+	if err := m.TeardownVeth(nsName, infraSubnet); err == nil {
+		t.Fatal("TeardownVeth returned no error for three failed rule deletes")
 	}
 	if len(rec.Calls()) != 4 {
 		t.Errorf("TeardownVeth ran %d commands, want 4", len(rec.Calls()))
