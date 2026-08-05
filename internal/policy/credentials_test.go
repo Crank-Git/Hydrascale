@@ -2,22 +2,32 @@ package policy
 
 import (
 	"bytes"
-	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
+
+	"hydrascale/internal/secrets"
 )
 
 // The test values below are not credentials. Each one is a fixed string that a test
-// searches for in an error, in a log line, or in a JSON body.
+// searches for in an error or in a log line.
 const (
 	testClientID     = "TESTVALUE-client-id-154"
 	testClientSecret = "TESTVALUE-client-secret-154"
 	testAPIKey       = "TESTVALUE-api-key-154"
+	fromTheEnv       = "TESTVALUE-from-the-environment"
 )
+
+const twoTailnets = `tailnets:
+  jbones:
+    tailscale_oauth_client_id: "` + testClientID + `"
+    tailscale_oauth_client_secret: "` + testClientSecret + `"
+  corp:
+    headscale_api_key: "` + testAPIKey + `"
+    headscale_address: "https://headscale.example.net"
+`
 
 // writeSecrets writes a secrets file at mode 0600 in a new directory and returns its path.
 func writeSecrets(t *testing.T, body string) string {
@@ -28,15 +38,6 @@ func writeSecrets(t *testing.T, body string) string {
 	}
 	return path
 }
-
-const twoTailnets = `tailnets:
-  jbones:
-    tailscale_oauth_client_id: "` + testClientID + `"
-    tailscale_oauth_client_secret: "` + testClientSecret + `"
-  corp:
-    headscale_api_key: "` + testAPIKey + `"
-    headscale_address: "https://headscale.example.net"
-`
 
 func TestLoadCredential_reads_the_credential_of_one_tailnet(t *testing.T) {
 	path := writeSecrets(t, twoTailnets)
@@ -71,7 +72,7 @@ func TestLoadCredential_returns_an_empty_credential_for_an_unknown_tailnet(t *te
 	if err != nil {
 		t.Fatalf("LoadCredential: %v", err)
 	}
-	if cred != (Credential{}) {
+	if cred != (secrets.Tailnet{}) {
 		t.Errorf("LoadCredential returned %+v, want an empty credential", cred)
 	}
 }
@@ -83,37 +84,25 @@ func TestLoadCredential_accepts_a_missing_secrets_file(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCredential returned %v, want no error", err)
 	}
-	if cred != (Credential{}) {
+	if cred != (secrets.Tailnet{}) {
 		t.Errorf("LoadCredential returned %+v, want an empty credential", cred)
 	}
 }
 
-func TestLoadCredential_refuses_a_secrets_file_whose_mode_is_wider_than_0600(t *testing.T) {
+// TestLoadCredential_returns_the_refusal_of_the_secrets_package proves that the override
+// layer adds no second reader. internal/secrets holds the mode rule and the regular file
+// rule, and TestLoad_refuses_a_file_that_grants_group_access and
+// TestLoad_refuses_a_symbolic_link assert them.
+func TestLoadCredential_returns_the_refusal_of_the_secrets_package(t *testing.T) {
 	path := writeSecrets(t, twoTailnets)
 	if err := os.Chmod(path, 0640); err != nil {
 		t.Fatalf("Chmod: %v", err)
 	}
+	// The variable is set, and the refusal of the file still wins.
+	t.Setenv(TailscaleClientIDEnvVar("jbones"), fromTheEnv)
 
-	_, err := LoadCredential(path, "jbones")
-	if err == nil {
-		t.Fatal("LoadCredential returned no error, want an error")
-	}
-	if !strings.Contains(err.Error(), path) {
-		t.Errorf("the error names no path: %v", err)
-	}
-	if !strings.Contains(err.Error(), "0640") {
-		t.Errorf("the error names no mode: %v", err)
-	}
-}
-
-func TestLoadCredential_accepts_a_secrets_file_at_mode_0400(t *testing.T) {
-	path := writeSecrets(t, twoTailnets)
-	if err := os.Chmod(path, 0400); err != nil {
-		t.Fatalf("Chmod: %v", err)
-	}
-
-	if _, err := LoadCredential(path, "jbones"); err != nil {
-		t.Fatalf("LoadCredential: %v", err)
+	if _, err := LoadCredential(path, "jbones"); err == nil {
+		t.Fatal("LoadCredential returned no error, want the refusal of secrets.Load")
 	}
 }
 
@@ -124,21 +113,21 @@ func TestLoadCredential_takes_the_environment_variable_over_the_file_value(t *te
 		name    string
 		tailnet string
 		envVar  string
-		field   func(Credential) string
+		field   func(secrets.Tailnet) string
 	}{
-		{"the Tailscale client identifier", "jbones", TailscaleClientIDEnvVar("jbones"), func(c Credential) string { return c.TailscaleOAuthClientID }},
-		{"the Tailscale client secret", "jbones", TailscaleClientSecretEnvVar("jbones"), func(c Credential) string { return c.TailscaleOAuthClientSecret }},
-		{"the Headscale API key", "corp", HeadscaleAPIKeyEnvVar("corp"), func(c Credential) string { return c.HeadscaleAPIKey }},
+		{"the Tailscale client identifier", "jbones", TailscaleClientIDEnvVar("jbones"), func(c secrets.Tailnet) string { return c.TailscaleOAuthClientID }},
+		{"the Tailscale client secret", "jbones", TailscaleClientSecretEnvVar("jbones"), func(c secrets.Tailnet) string { return c.TailscaleOAuthClientSecret }},
+		{"the Headscale API key", "corp", HeadscaleAPIKeyEnvVar("corp"), func(c secrets.Tailnet) string { return c.HeadscaleAPIKey }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(tc.envVar, "TESTVALUE-from-the-environment")
+			t.Setenv(tc.envVar, fromTheEnv)
 			cred, err := LoadCredential(path, tc.tailnet)
 			if err != nil {
 				t.Fatalf("LoadCredential: %v", err)
 			}
-			if got := tc.field(cred); got != "TESTVALUE-from-the-environment" {
-				t.Errorf("%s = %q, want TESTVALUE-from-the-environment", tc.envVar, got)
+			if got := tc.field(cred); got != fromTheEnv {
+				t.Errorf("%s = %q, want %q", tc.envVar, got, fromTheEnv)
 			}
 		})
 	}
@@ -146,7 +135,7 @@ func TestLoadCredential_takes_the_environment_variable_over_the_file_value(t *te
 
 func TestLoadCredential_keeps_the_other_file_values_when_one_variable_overrides(t *testing.T) {
 	path := writeSecrets(t, twoTailnets)
-	t.Setenv(TailscaleClientIDEnvVar("jbones"), "TESTVALUE-from-the-environment")
+	t.Setenv(TailscaleClientIDEnvVar("jbones"), fromTheEnv)
 
 	cred, err := LoadCredential(path, "jbones")
 	if err != nil {
@@ -157,16 +146,32 @@ func TestLoadCredential_keeps_the_other_file_values_when_one_variable_overrides(
 	}
 }
 
+func TestLoadCredential_writes_no_variable_back_to_the_secrets_file(t *testing.T) {
+	path := writeSecrets(t, twoTailnets)
+	t.Setenv(TailscaleClientIDEnvVar("jbones"), fromTheEnv)
+
+	if _, err := LoadCredential(path, "jbones"); err != nil {
+		t.Fatalf("LoadCredential: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != twoTailnets {
+		t.Errorf("LoadCredential changed the secrets file: %s", data)
+	}
+}
+
 func TestLoadCredential_takes_the_environment_variable_when_the_file_is_absent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent.yaml")
-	t.Setenv(HeadscaleAPIKeyEnvVar("corp"), "TESTVALUE-from-the-environment")
+	t.Setenv(HeadscaleAPIKeyEnvVar("corp"), fromTheEnv)
 
 	cred, err := LoadCredential(path, "corp")
 	if err != nil {
 		t.Fatalf("LoadCredential: %v", err)
 	}
-	if cred.HeadscaleAPIKey != "TESTVALUE-from-the-environment" {
-		t.Errorf("HeadscaleAPIKey = %q, want TESTVALUE-from-the-environment", cred.HeadscaleAPIKey)
+	if cred.HeadscaleAPIKey != fromTheEnv {
+		t.Errorf("HeadscaleAPIKey = %q, want %q", cred.HeadscaleAPIKey, fromTheEnv)
 	}
 }
 
@@ -183,101 +188,6 @@ func TestTheEnvironmentVariableNamesFollowTheAuthKeyPattern(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("got %q, want %q", tc.got, tc.want)
 		}
-	}
-}
-
-func TestCredential_encodes_no_value_in_JSON(t *testing.T) {
-	data, err := json.Marshal(Credential{
-		TailscaleOAuthClientID:     testClientID,
-		TailscaleOAuthClientSecret: testClientSecret,
-		HeadscaleAPIKey:            testAPIKey,
-		HeadscaleAddress:           "https://headscale.example.net",
-	})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if string(data) != "{}" {
-		t.Errorf("the JSON form of a credential is %s, want {}", data)
-	}
-}
-
-func TestWriteCredential_creates_the_secrets_file_at_mode_0600(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secrets.yaml")
-
-	err := WriteCredential(path, "jbones", Credential{
-		TailscaleOAuthClientID:     testClientID,
-		TailscaleOAuthClientSecret: testClientSecret,
-	})
-	if err != nil {
-		t.Fatalf("WriteCredential: %v", err)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("the mode of %s is %04o, want 0600", path, perm)
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		t.Fatal("Stat returned no syscall.Stat_t")
-	}
-	// The daemon runs as root, therefore the owner of the file it creates is root. The
-	// test asserts the account that runs the test, which is root in that case.
-	if int(stat.Uid) != os.Getuid() {
-		t.Errorf("the owner of %s is %d, want %d", path, stat.Uid, os.Getuid())
-	}
-
-	cred, err := LoadCredential(path, "jbones")
-	if err != nil {
-		t.Fatalf("LoadCredential: %v", err)
-	}
-	if cred.TailscaleOAuthClientID != testClientID {
-		t.Errorf("TailscaleOAuthClientID = %q, want %q", cred.TailscaleOAuthClientID, testClientID)
-	}
-}
-
-func TestWriteCredential_keeps_the_mode_0600_of_an_existing_file(t *testing.T) {
-	path := writeSecrets(t, twoTailnets)
-
-	if err := WriteCredential(path, "jbones", Credential{TailscaleOAuthClientID: "TESTVALUE-second"}); err != nil {
-		t.Fatalf("WriteCredential: %v", err)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("the mode of %s is %04o, want 0600", path, perm)
-	}
-}
-
-func TestWriteCredential_keeps_the_credential_of_the_other_tailnet(t *testing.T) {
-	path := writeSecrets(t, twoTailnets)
-
-	if err := WriteCredential(path, "jbones", Credential{TailscaleOAuthClientID: "TESTVALUE-second"}); err != nil {
-		t.Fatalf("WriteCredential: %v", err)
-	}
-
-	corp, err := LoadCredential(path, "corp")
-	if err != nil {
-		t.Fatalf("LoadCredential: %v", err)
-	}
-	if corp.HeadscaleAPIKey != testAPIKey {
-		t.Errorf("HeadscaleAPIKey = %q, want %q", corp.HeadscaleAPIKey, testAPIKey)
-	}
-}
-
-func TestWriteCredential_rejects_an_empty_tailnet_identifier(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secrets.yaml")
-
-	if err := WriteCredential(path, "", Credential{}); err == nil {
-		t.Fatal("WriteCredential returned no error, want an error")
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("WriteCredential created %s, want no file", path)
 	}
 }
 
@@ -301,18 +211,11 @@ func TestNoLogLineHoldsACredentialValue(t *testing.T) {
 	broken := writeSecrets(t, "tailnets: [\n  "+testClientSecret+"\n")
 	parseErr := failedLoad(t, broken)
 
-	// A write that fails, because the directory does not exist.
-	writeErr := WriteCredential(filepath.Join(t.TempDir(), "absent", "secrets.yaml"), "jbones",
-		Credential{TailscaleOAuthClientSecret: testClientSecret})
-	if writeErr == nil {
-		t.Fatal("WriteCredential returned no error, want an error")
-	}
-
 	for _, value := range []string{testClientID, testClientSecret, testAPIKey} {
 		if strings.Contains(buf.String(), value) {
 			t.Errorf("a log line holds a credential value: %s", buf.String())
 		}
-		for _, err := range []error{modeErr, parseErr, writeErr} {
+		for _, err := range []error{modeErr, parseErr} {
 			if strings.Contains(err.Error(), value) {
 				t.Errorf("an error holds a credential value: %v", err)
 			}
