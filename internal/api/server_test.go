@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -633,6 +635,31 @@ func TestApplySocketGroup_UnknownGroup(t *testing.T) {
 	// An unknown group is a config error, surfaced before any chown/chmod.
 	if err := applySocketGroup("/tmp/hydrascale-test.sock", "no-such-group-9c3f1a"); err == nil {
 		t.Error("expected error for unknown group, got nil")
+	}
+}
+
+func TestApplySocketGroup_RootGroup(t *testing.T) {
+	t.Run("refuses a group with group id 0 and names the reason", func(t *testing.T) {
+		g, err := user.LookupGroupId("0")
+		if err != nil {
+			t.Skipf("this host holds no group with group id 0: %v", err)
+		}
+		err = applySocketGroup("/tmp/hydrascale-test.sock", g.Name)
+		if err == nil {
+			t.Fatalf("applySocketGroup(%q) returned no error", g.Name)
+		}
+		if !strings.Contains(err.Error(), "group id 0") {
+			t.Errorf("message = %q, want it to contain %q", err.Error(), "group id 0")
+		}
+	})
+}
+
+func TestSocketGroupLog(t *testing.T) {
+	line := socketGroupLog("/var/lib/hydrascale/api.sock", "hydrascale", os.FileMode(0660))
+	for _, want := range []string{"/var/lib/hydrascale/api.sock", "hydrascale", "0660"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("line = %q, want it to contain %q", line, want)
+		}
 	}
 }
 
