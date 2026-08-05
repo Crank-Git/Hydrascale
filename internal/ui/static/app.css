@@ -260,6 +260,75 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 a.btn{display:inline-block; text-decoration:none}
 a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
+/* The DNS view, the activity view, and the settings view.
+   These views hold no accent: neither holds an affirmative action, a selection, or an
+   allowed path. A state is a coloured dot and a lowercase word, and no rule tints a whole
+   card, a whole row, or a whole edge. See FR-console-40. */
+
+.panels > * + *{margin-top:var(--sp-3)}
+.panels + .card{margin-top:var(--sp-3)}
+
+/* A description list: the label is a sentence and the value is a machine value. */
+.kv-list{margin:var(--sp-3) 0 0}
+.kv{
+  display:flex;
+  justify-content:space-between;
+  gap:var(--sp-4);
+  padding:var(--sp-2) 0;
+  border-bottom:1px solid var(--border-soft);
+}
+.kv:last-child{border-bottom:none}
+.kv dt{color:var(--text-secondary); font-size:var(--fs-sm)}
+.kv dd{
+  margin:0;
+  font-family:var(--font-data);
+  font-size:var(--fs-data);
+  letter-spacing:var(--ls-mono);
+  color:var(--text-body);
+  text-align:right;
+  word-break:break-all;
+}
+/* A value that the daemon does not report is a sentence, so it keeps the sans typeface. */
+.kv dd.unset{font-family:var(--font-body); font-size:var(--fs-sm); color:var(--text-tertiary); letter-spacing:var(--ls-body)}
+
+/* One row per namespace, with the protected state. */
+.nsrows{margin-top:var(--sp-3)}
+.nsrow{
+  display:flex;
+  align-items:center;
+  gap:var(--sp-4);
+  padding:var(--sp-3) 0;
+  border-bottom:1px solid var(--border-soft);
+}
+.nsrow:last-child{border-bottom:none}
+.nsrow .id{min-width:120px}
+.nsrow .st{display:flex; align-items:center; gap:var(--sp-2); color:var(--text-secondary); font-size:var(--fs-sm)}
+.nsrow .err{margin-left:auto; text-align:right; color:var(--text-secondary); font-size:var(--fs-micro)}
+
+/* A banner states one fact that the operator acts on. The dot carries the state and the
+   border carries the tone, so no rule fills a region with a state colour. */
+.alert{
+  display:flex;
+  gap:var(--sp-3);
+  align-items:flex-start;
+  padding:var(--pad-row);
+  border:1px solid var(--border-default);
+  border-radius:var(--r);
+  background:var(--surface-card);
+}
+.alert .dot{margin-top:6px}
+.alert p{margin:0; font-size:var(--fs-sm); color:var(--text-body); max-width:var(--maxw-read)}
+.alert p + p{margin-top:var(--sp-2); color:var(--text-secondary)}
+.card > .alert{margin-top:var(--sp-3)}
+
+.ev-date{color:var(--text-tertiary); flex:none; font-size:var(--fs-micro)}
+.ev-net{color:var(--text-secondary); flex:none; width:96px; font-size:var(--fs-micro)}
+
+/* A link inside a sentence keeps the body colour, because the accent belongs to one thing
+   per view and this view gives it to nothing. */
+.note a{color:var(--text-body)}
+.note a:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+
 @media (max-width:1040px){
   .grid{grid-template-columns:1fr}
   .stats{grid-template-columns:repeat(2,1fr)}

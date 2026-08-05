@@ -166,7 +166,7 @@ test("the DNS view escapes every value that the daemon reports", () => {
   );
   const markup = dnsMarkup(model);
   assert.doesNotMatch(markup, /<img/);
-  assert.doesNotMatch(markup, /onerror=/);
+  assert.doesNotMatch(markup, /onerror="/);
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
@@ -258,7 +258,7 @@ test("the activity view escapes every value that the daemon reports", () => {
   ]);
   const markup = activityMarkup(rows);
   assert.doesNotMatch(markup, /<img/);
-  assert.doesNotMatch(markup, /onerror=/);
+  assert.doesNotMatch(markup, /onerror="/);
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
@@ -352,6 +352,6 @@ test("the settings view escapes every value that the daemon reports", () => {
   );
   const markup = settingsMarkup(model);
   assert.doesNotMatch(markup, /<img/);
-  assert.doesNotMatch(markup, /onerror=/);
+  assert.doesNotMatch(markup, /onerror="/);
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });

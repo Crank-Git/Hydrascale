@@ -8,8 +8,7 @@
 // document exists, which is why an import under Node starts no timer.
 //
 // Issue #143, issue #144 and issue #145 add one module per view. A view module calls
-// registerView and reads the snapshot that the poll layer gives it. Those issues change
-// nothing in this file.
+// registerView and reads the snapshot that the poll layer gives it.
 
 /** The route that the console polls. */
 export const STATUS_ROUTE = "/api/status";
@@ -19,6 +18,9 @@ export const ACCESS_ROUTE = "/api/access";
 
 /** The route that holds the event log. */
 export const EVENTS_ROUTE = "/api/events";
+
+/** The route that holds the resolver settings and the DNS protection state. */
+export const DNS_ROUTE = "/api/dns";
 
 /** The poll interval that the console uses when the operator sets none. FR-console-15. */
 export const DEFAULT_POLL_INTERVAL_MS = 5000;
@@ -70,14 +72,14 @@ export const VIEWS = [
     heading: "Activity",
     lead: "What the daemon did, newest first.",
     empty: "The daemon reports no event. An event arrives when the reconciler creates a namespace, connects a tailnet, or writes the access rules.",
-    pending: "This view lists every event with its time, its kind, its tailnet, and its message. The view arrives with issue #145.",
+    pending: "This view lists every event with its time, its kind, its tailnet, and its message.",
   },
   {
     id: "settings",
     heading: "Settings",
-    lead: "The console and the paths that the daemon reads.",
+    lead: "The resolver, the host file, and the console that serves this page.",
     empty: "The daemon reports no configuration path yet. This view shows the configuration path, the socket path, and the console address when the poll succeeds.",
-    pending: "This view shows the configuration path, the socket path, the console address, and the version. The view arrives with issue #145. The poll interval is below, and it works now.",
+    pending: "This view shows the resolver, the protected state of every namespace, the host file, and the paths that the daemon reads.",
   },
 ];
 
@@ -128,29 +130,31 @@ export async function requestJSON(route, method = "GET", body) {
 }
 
 /**
- * fetchConsoleState reads the three routes of one poll and returns one body.
+ * fetchConsoleState reads the four routes of one poll and returns one body.
  *
  * The status route holds neither the peer count, nor the local rule set, nor the event
- * log, and the overview shows all three. The console therefore reads the three routes
- * together on one tick rather than on three timers, so the whole console still holds one
- * data source and one cadence. See FR-console-15.
+ * log, nor the DNS state, and the console shows all four. The console therefore reads the
+ * four routes together on one tick rather than on four timers, so the whole console still
+ * holds one data source and one cadence. See FR-console-15.
  *
- * A failure of any one route fails the poll, which marks the state stale. The three routes
+ * A failure of any one route fails the poll, which marks the state stale. The four routes
  * come from the one daemon on the one listener, so a partial answer states nothing that a
  * whole answer does not.
  *
  * @param {function} [request] the transport, which a test replaces.
  */
 export async function fetchConsoleState(request = requestJSON) {
-  const [status, access, events] = await Promise.all([
+  const [status, access, events, dns] = await Promise.all([
     request(STATUS_ROUTE),
     request(ACCESS_ROUTE),
     request(EVENTS_ROUTE),
+    request(DNS_ROUTE),
   ]);
   return {
     ...status,
     access_model: access,
     events: (events && events.events) || [],
+    dns,
   };
 }
 
@@ -463,41 +467,16 @@ function drawPlaceholder(section, view, snapshot) {
   section.append(card);
 }
 
-/** drawSettings draws the one control that this view owns: the poll interval. */
-function drawSettings(section, view, snapshot) {
-  drawPlaceholder(section, view, snapshot);
-
-  const card = element("div", "card");
-  card.style.marginTop = "var(--sp-3)";
-  card.append(element("h2", undefined, "Poll interval"));
-
-  // The route is a machine value, so it renders in the mono typeface inside the sentence.
-  const note = element("p", "note", "The console reads ");
-  note.append(element("code", "mono", `GET ${STATUS_ROUTE}`));
-  note.append(document.createTextNode(" on this interval. A change applies at once and it holds for the next session."));
-  card.append(note);
-
-  const row = element("div", "row");
-  const select = element("select", "field");
-  select.id = "poll-interval";
-  select.setAttribute("aria-label", "Poll interval");
-  for (const seconds of [1, 2, 5, 10, 30, 60]) {
-    const option = document.createElement("option");
-    option.value = String(seconds * 1000);
-    option.textContent = `${seconds}s`;
-    select.append(option);
-  }
-  select.value = String(snapshot.interval);
-  select.addEventListener("change", () => {
-    const ms = Number(select.value);
-    poller.setInterval(ms);
-    saveInterval(ms);
-  });
-  row.append(select);
-  card.append(row);
-
-  card.append(element("p", "note", "The console has no authentication. Any local account on this host reaches it and drives the daemon, which runs as root."));
-  section.append(card);
+/**
+ * applyPollInterval changes the cadence of the one poll layer and stores the value.
+ *
+ * The settings view owns the control, and the poll layer belongs to the shell, so the
+ * shell states the one function that changes it. It refuses a value that the poll layer
+ * refuses. See FR-console-15.
+ */
+export function applyPollInterval(ms) {
+  poller.setInterval(ms);
+  saveInterval(ms);
 }
 
 /** drawCurrent draws the view that the address names. */
@@ -526,8 +505,6 @@ function drawCurrent() {
     const draw = mounts.get(entry.id);
     if (draw) {
       draw(section, latest);
-    } else if (entry.id === "settings") {
-      drawSettings(section, entry, latest);
     } else {
       drawPlaceholder(section, entry, latest);
     }

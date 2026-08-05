@@ -300,17 +300,23 @@ func TestTheProtectionStateIsAColouredDotAndALowercaseWord(t *testing.T) {
 	// states it the way every other state in this console reads.
 	source := readStatic(t, "panels.js")
 	for _, word := range []string{"protected", "unprotected"} {
-		if !strings.Contains(source, `"`+word+`"`) {
+		if !strings.Contains(source, `word: "`+word+`"`) {
 			t.Errorf("panels.js states no protection word %q", word)
 		}
-		if strings.Contains(source, strings.ToUpper(word[:1])+word[1:]) {
-			t.Errorf("panels.js states the protection word %q in a capital letter", word)
+	}
+	// Every state word of this console is lowercase, so no state reads as a title.
+	for _, match := range regexp.MustCompile(`word: "([^"]*)"`).FindAllStringSubmatch(source, -1) {
+		if match[1] != strings.ToLower(match[1]) {
+			t.Errorf("panels.js states the state word %q in a capital letter", match[1])
 		}
 	}
 	for _, tone := range []string{"ok", "crit", "warn"} {
-		if !strings.Contains(source, `dot `+tone) {
-			t.Errorf("panels.js draws no dot of the tone %s", tone)
+		if !strings.Contains(source, `tone: "`+tone+`"`) {
+			t.Errorf("panels.js states no state of the tone %s", tone)
 		}
+	}
+	if !strings.Contains(source, `class="dot ${`) {
+		t.Error("panels.js draws no dot from the tone of a state")
 	}
 
 	style := readStatic(t, "app.css")
