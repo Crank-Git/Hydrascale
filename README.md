@@ -153,6 +153,16 @@ sudo hydrascale serve
 
 4. Open the console at `http://127.0.0.1:9443`.
 
+5. Read the state:
+
+```bash
+sudo hydrascale status
+```
+
+A tailnet needs up to 90 seconds after a start of the daemon before `hydrascale status`
+reports `healthy` and `running`. An earlier read reports `down` and `degraded`, which is
+the normal state of a tailnet that still authenticates.
+
 ## The console
 
 The daemon serves the console on the loopback address. The console is a static single-page
@@ -169,6 +179,18 @@ console:
 ```
 
 The daemon serves the JSON API on the console listener as well as on the control socket.
+
+To confirm the listener, read the status code:
+
+```bash
+curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9443/    # prints 200
+```
+
+The daemon writes the address and the authentication position to the log at every start:
+
+```bash
+sudo journalctl -u hydrascale | grep 'the console listens on'
+```
 
 ### The console has no authentication
 
@@ -265,10 +287,24 @@ policy changed between the read and the write, the control server answers HTTP 4
 console reports a conflict. The console re-reads the document and keeps the text of the
 operator, so that the operator compares the two.
 
-**A Headscale control server needs `policy.mode: "db"` for a policy write.** A server that
-runs the file policy mode rejects `PUT /api/v1/policy`, and the daemon returns the message
-of the control server word for word. Policy access also needs Headscale v0.29 or later,
-because an older server exposes no policy route.
+**A Headscale control server needs `policy.mode: "database"` for a policy write.** A server
+that runs the file policy mode rejects `PUT /api/v1/policy`, and the daemon returns the
+message of the control server word for word:
+
+```json
+{"code":2,"message":"update is disabled for modes other than 'database'","details":[]}
+```
+
+`hscontrol/types/config.go:54` of the Headscale source at tag `v0.29.3` declares the two
+values:
+
+```go
+PolicyModeDB   = "database"
+PolicyModeFile = "file"
+```
+
+Policy access also needs Headscale v0.29 or later, because an older server exposes no
+policy route.
 
 ## Credentials
 
@@ -338,8 +374,8 @@ headscale apikeys create --expiration 90d
 Write the key into the secrets file as `headscale_api_key`, and write the base address of
 the control server as `headscale_address`. The daemon sends the key as a bearer token.
 
-Set `policy.mode: "db"` in the Headscale configuration before a policy write. A server in
-the file policy mode serves a policy read and refuses a policy write.
+Set `policy.mode: "database"` in the Headscale configuration before a policy write. A
+server in the file policy mode serves a policy read and refuses a policy write.
 
 ### An environment variable overrides a file value
 
@@ -940,14 +976,26 @@ paths that the mode `enforce` denies:
 sudo journalctl -u hydrascale | grep hydrascale-would-deny
 ```
 
+**`hydrascale status` reports `down` and `degraded` after a restart**
+A tailnet needs up to 90 seconds after a start of the daemon to authenticate. Wait 90
+seconds and read the state again:
+```bash
+sleep 90 && sudo hydrascale status
+```
+A tailnet that still reports `down` after 90 seconds has a real failure. Read the events:
+```bash
+sudo journalctl -u hydrascale -n 50
+```
+
 **A policy write returns a permission error on Tailscale**
 The OAuth client holds the scope `policy_file` alone. Add `devices:posture_attributes` and
 `devices:core:read`, then write the new client identifier and client secret into the
 secrets file.
 
 **A policy write fails on Headscale**
-The control server runs the file policy mode. Set `policy.mode: "db"` in the Headscale
-configuration and restart the control server.
+The control server runs the file policy mode, and the answer holds the message
+`update is disabled for modes other than 'database'`. Set `policy.mode: "database"` in the
+Headscale configuration and restart the control server.
 
 **The daemon refuses the secrets file**
 The file grants group access or other access. Set the mode and the owner:
