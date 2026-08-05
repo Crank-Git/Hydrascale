@@ -6,11 +6,15 @@
 // tailnet reaches. The view states that difference above the editor, because a warning
 // comes before the step that it applies to. See FR-policy-28.
 //
-// This view draws. The validate action and the push action arrive with issue #159.
-//
 // The model holds the document that the daemon reported and the text of the operator. The
-// difference between the two is the edit, which FR-policy-24 states. The state changes
-// alone; the view sends no document.
+// difference between the two is the edit, which FR-policy-24 states.
+//
+// One entry holds one stage, and the stage is the whole state of the two actions. The
+// stages are read, validating, validated, validate-failed, pushing, pushed, conflict, and
+// push-failed. Push is enabled in the stage validated and in no other stage, therefore
+// FR-policy-25 reads from one value rather than from two values that disagree. Every edit
+// returns the entry to the stage read, which the behaviour rule of
+// features/08-upstream-policy.md requires.
 //
 // The poll layer holds no policy route, because GET /api/policy/{id} reaches the control
 // server and the control server rate-limits. The view therefore reads the list when the
@@ -28,6 +32,28 @@ export const POLICY_ROUTE = "/api/policy";
 export const EVERY_DEVICE_STATEMENT =
   "A policy change affects every device in the tailnet, not only this host.";
 
+/**
+ * The two sentences that come before the push action.
+ *
+ * A push writes the document that every device in the tailnet reads, therefore the copy
+ * names the exact effect and it states what survives. The console shows it beside the
+ * action and not only in the heading of the view.
+ */
+export const PUSH_STATEMENT = {
+  effect: "Push replaces the policy document of the control server, and it changes what every device in the tailnet reaches.",
+  survives: "The local rule set of this host does not change, because the two systems are independent.",
+};
+
+/**
+ * The status that the daemon returns when the control server reports a conflict.
+ *
+ * The Tailscale control server returns HTTP 412 when the If-Match value does not match its
+ * ETag value, and internal/api/policy.go maps that to HTTP 409. The console reads this
+ * status, because a message is text for a person and the status is the value that the
+ * daemon owns. See FR-policy-18.
+ */
+export const CONFLICT_STATUS = 409;
+
 /** The text of policy.ErrHeadscaleFileMode that names the mode a write needs. */
 const FILE_MODE_MARKER = 'policy.mode: "db"';
 
@@ -44,6 +70,69 @@ function esc(value) {
 /** policyDocumentRoute returns the route of one policy document. */
 export function policyDocumentRoute(id) {
   return `${POLICY_ROUTE}/${encodeURIComponent(id)}`;
+}
+
+/** policyValidateRoute returns the route that checks one document and writes nothing. */
+export function policyValidateRoute(id) {
+  return `${policyDocumentRoute(id)}/validate`;
+}
+
+/** messageOf returns the message that a rejected request stated, word for word. */
+function messageOf(err) {
+  return err && err.message ? err.message : String(err);
+}
+
+/**
+ * lineNumberOf returns the line number that one error names, and null for an error that
+ * names none.
+ *
+ * The control servers state a line in two shapes: "line 12" and "policy.hujson:7:3". The
+ * function reads both, and it changes no character of the message. See FR-policy-26.
+ */
+function lineNumberOf(message) {
+  const named = /\bline (\d+)/i.exec(message);
+  if (named) {
+    return Number(named[1]);
+  }
+  const positional = /:(\d+):\d+/.exec(message);
+  if (positional) {
+    return Number(positional[1]);
+  }
+  return null;
+}
+
+/**
+ * validateErrors returns one entry per error of a validate result.
+ *
+ * result is the field result of POST /api/policy/{id}/validate, which holds the answer of
+ * the control server word for word. A Tailscale answer is JSON that carries the field
+ * message, and a Headscale answer is the message of the daemon. validateErrors takes the
+ * message of the JSON answer when the answer holds one, and the whole text otherwise. It
+ * returns one entry per line, each with its line number and its message word for word.
+ */
+export function validateErrors(result) {
+  const text = String(result === null || result === undefined ? "" : result).trim();
+  if (text === "") {
+    return [];
+  }
+  return statedMessage(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((message) => ({ line: lineNumberOf(message), message }));
+}
+
+/** statedMessage returns the field message of a JSON answer, or the whole text. */
+function statedMessage(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.message === "string" && parsed.message !== "") {
+      return parsed.message;
+    }
+  } catch {
+    return text;
+  }
+  return text;
 }
 
 /**
@@ -135,10 +224,12 @@ export function readFailure(message) {
  * state is the model that createPolicyState returned and id is the selected identifier, or
  * null. The state field names one of unselected, no-credential, loading, document,
  * read-only, and failed. Each one reads a value that the daemon reported.
+ * The stage field names the stage of the two actions, and the result field holds the
+ * answer of the last action word for word.
  */
 export function editorModel(state, id) {
   if (!id) {
-    return { id: "", state: "unselected", lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
+    return { id: "", state: "unselected", stage: "read", result: "", lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
   }
 
   const row = state.rows().find((entry) => entry.id === id);
@@ -147,6 +238,8 @@ export function editorModel(state, id) {
     id,
     kind: row ? row.kind : "",
     state: "loading",
+    stage: held.stage,
+    result: held.result,
     lines: 0,
     text: held.text,
     edited: held.text !== held.base,
@@ -174,12 +267,94 @@ export function editorModel(state, id) {
   }
 
   model.state = "document";
-  model.readOnly = !held.writeAvailable;
+  // The editor takes no edit while the push runs, because the control server holds the
+  // text of that request and an edit would then cover a document that no push carried.
+  model.readOnly = !held.writeAvailable || held.stage === "pushing";
   model.lines = held.text.split("\n").length;
-  if (model.readOnly) {
+  if (!held.writeAvailable) {
     model.sentence = "This tailnet is read only. The daemon reports no write availability for its control server.";
   }
   return model;
+}
+
+/** The label of the validate action while the control server checks the document. */
+export const VALIDATING_LABEL = "The control server checks the document";
+
+/** The label of the push action while the control server takes the document. */
+export const PUSHING_LABEL = "The control server takes the document";
+
+/**
+ * actionsModel returns the controls of the editor region, in the order that they draw.
+ *
+ * model is the value that editorModel returned. The push is enabled in the stage validated
+ * and in no other stage, which FR-policy-25 states. The accent marks the push alone,
+ * because the push is the affirmative action of this view.
+ * A tailnet that takes no write gets every control disabled, and a request that runs
+ * disables every control until the answer arrives.
+ */
+export function actionsModel(model) {
+  if (model.state !== "document") {
+    return [];
+  }
+  const busy = model.stage === "validating" || model.stage === "pushing";
+  const writable = !model.readOnly && !busy;
+  return [
+    {
+      id: "validate",
+      label: model.stage === "validating" ? VALIDATING_LABEL : "Validate",
+      accent: false,
+      disabled: !writable,
+    },
+    { id: "discard", label: "Discard", accent: false, disabled: !model.edited || busy },
+    {
+      id: "push",
+      label: model.stage === "pushing" ? PUSHING_LABEL : "Push",
+      accent: true,
+      disabled: model.stage !== "validated",
+    },
+  ];
+}
+
+/**
+ * resultModel returns what the result region states, and null while no action returned.
+ *
+ * model is the value that editorModel returned. Every message of the control server and of
+ * the daemon reaches the field message or the field errors word for word, because
+ * .claude/rules/ste.md states that a rewritten message is destroyed evidence.
+ * The field reread is true for the conflict alone, which offers the re-read action.
+ */
+export function resultModel(model) {
+  const result = (tone, word, sentence, extra = {}) => ({
+    tone,
+    word,
+    sentence,
+    errors: [],
+    message: "",
+    reread: false,
+    ...extra,
+  });
+
+  switch (model.stage) {
+    case "validated":
+      return result("ok", "validated", "The control server accepted the document.", { message: model.result });
+    case "validate-failed":
+      return result("crit", "validate failed", "The control server rejected the document.", {
+        errors: validateErrors(model.result),
+      });
+    case "pushed":
+      return result("ok", "pushed", "The control server accepted the document, and the daemon recorded the event policy.pushed.", {
+        message: model.result,
+      });
+    case "conflict":
+      return result("warn", "conflict", "Another person changed the policy document of the control server after this console read it. The control server kept its document, and this editor keeps your text.", {
+        message: model.result,
+        reread: true,
+      });
+    case "push-failed":
+      return result("crit", "push failed", "The control server did not take the document.", { message: model.result });
+    default:
+      return null;
+  }
 }
 
 /** gutterMarkup returns one element per line of the document. */
@@ -199,6 +374,69 @@ function noteMarkup(sentence) {
 /** detailMarkup returns the message of the daemon word for word, as a machine value. */
 function detailMarkup(detail) {
   return detail ? `<p class="pol-detail mono">${esc(detail)}</p>` : "";
+}
+
+/** buttonMarkup returns one control of the editor region. */
+function buttonMarkup(control) {
+  const className = control.accent ? "btn primary" : "btn";
+  return (
+    `<button type="button" class="${className}" data-act="${esc(control.id)}"${control.disabled ? " disabled" : ""}>` +
+    `${esc(control.label)}</button>`
+  );
+}
+
+/**
+ * actionsMarkup returns the controls of the editor region.
+ *
+ * controls is the list that actionsModel returned. The two sentences of PUSH_STATEMENT
+ * come before the controls, because .claude/rules/ste.md states that a warning comes
+ * before the step that it applies to.
+ */
+export function actionsMarkup(controls) {
+  if (controls.length === 0) {
+    return `<div class="pol-acts"></div>`;
+  }
+  return (
+    `<div class="pol-acts">` +
+    `<div class="pol-push-note">` +
+    `<p class="note">${esc(PUSH_STATEMENT.effect)}</p>` +
+    `<p class="note">${esc(PUSH_STATEMENT.survives)}</p>` +
+    `</div>` +
+    `<div class="pol-btns">${controls.map(buttonMarkup).join("")}</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * resultMarkup returns the result region of the last action.
+ *
+ * result is the value that resultModel returned, or null. The state reads as a coloured
+ * dot and a lowercase word. Every message of the control server draws in the mono
+ * typeface, because the control server owns that text.
+ */
+export function resultMarkup(result) {
+  if (!result) {
+    return `<div class="pol-result"></div>`;
+  }
+  const errors = result.errors
+    .map((one) => {
+      const line = one.line === null ? "" : `<span class="pol-err-line mono">line ${one.line}</span>`;
+      return `<div class="pol-err">${line}<span class="pol-err-msg mono">${esc(one.message)}</span></div>`;
+    })
+    .join("");
+  const message = result.message ? `<p class="pol-detail mono">${esc(result.message)}</p>` : "";
+  const reread = result.reread
+    ? `<div class="pol-btns">${buttonMarkup({ id: "reread", label: "Read the document again", accent: false, disabled: false })}</div>`
+    : "";
+  return (
+    `<div class="pol-result">` +
+    `<div class="pol-res-head"><span class="dot ${esc(result.tone)}"></span><span class="pol-word">${esc(result.word)}</span></div>` +
+    `<p class="note">${esc(result.sentence)}</p>` +
+    message +
+    (errors ? `<div class="pol-errs">${errors}</div>` : "") +
+    reread +
+    `</div>`
+  );
 }
 
 /**
@@ -238,6 +476,8 @@ export function editorMarkup(model) {
     `<textarea class="pol-doc mono"${readOnly} rows="${model.lines}" spellcheck="false" wrap="off" aria-label="The policy document of ${esc(model.id)}">${esc(model.text)}</textarea>` +
     `</div></div>` +
     (etag ? `<div class="pol-meta">${etag}</div>` : "") +
+    actionsMarkup(actionsModel(model)) +
+    resultMarkup(resultModel(model)) +
     `</div>`
   );
 }
@@ -245,15 +485,19 @@ export function editorMarkup(model) {
 /**
  * createPolicyState returns the model of the policy view.
  *
- * options.request sends one request. It takes the route and it rejects with the message
- * that the daemon stated. A test replaces it.
+ * options.request sends one request. It takes the route, the method, and the body, and it
+ * rejects with the message that the daemon stated and the status in the field status. A
+ * test replaces it.
  *
  * The model holds the list of GET /api/policy, and one entry per tailnet that the operator
- * opened. An entry holds the document of the read, the text of the operator, and the
- * message of a failed read. The model sends no document.
+ * opened. An entry holds the document of the read, the text of the operator, the message
+ * of a failed read, and the stage of the two actions.
+ * The validate action and the push action each send one request. Neither one sends a
+ * second request after a failure, because an automatic retry against a rate limit of the
+ * control server makes that limit worse.
  */
 export function createPolicyState(options = {}) {
-  const request = options.request || ((route) => requestJSON(route));
+  const request = options.request || ((route, method, body) => requestJSON(route, method, body));
 
   let list = null;
   let selectedId = null;
@@ -262,10 +506,16 @@ export function createPolicyState(options = {}) {
   function entryOf(id) {
     let entry = entries.get(id);
     if (!entry) {
-      entry = { loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "" };
+      entry = { loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "", stage: "read", result: "" };
       entries.set(id, entry);
     }
     return entry;
+  }
+
+  /** rest returns the entry to the stage read, which disables the push. */
+  function rest(entry) {
+    entry.stage = "read";
+    entry.result = "";
   }
 
   return {
@@ -312,6 +562,7 @@ export function createPolicyState(options = {}) {
       entry.text = entry.base;
       entry.etag = (body && body.etag) || "";
       entry.writeAvailable = Boolean(body && body.write_available);
+      rest(entry);
     },
 
     /** setError states the message that a failed read returned, word for word. */
@@ -320,9 +571,27 @@ export function createPolicyState(options = {}) {
       entry.error = String(message === null || message === undefined ? "" : message);
     },
 
-    /** setText replaces the text of the operator. It sends nothing. */
+    /**
+     * setText replaces the text of the operator. It sends nothing.
+     *
+     * An edit returns the entry to the stage read, therefore an edit after a validate that
+     * passed disables the push again. The behaviour rule of
+     * features/08-upstream-policy.md requires that.
+     */
     setText(id, text) {
-      entryOf(id).text = text;
+      const entry = entryOf(id);
+      if (entry.text === text) {
+        return;
+      }
+      entry.text = text;
+      rest(entry);
+    },
+
+    /** discard returns the text to the document that the console read. */
+    discard(id) {
+      const entry = entryOf(id);
+      entry.text = entry.base;
+      rest(entry);
     },
 
     /** edited reports whether the text differs from the document of the read. */
@@ -361,7 +630,94 @@ export function createPolicyState(options = {}) {
       try {
         this.setDocument(id, await request(policyDocumentRoute(id)));
       } catch (err) {
-        this.setError(id, err && err.message ? err.message : String(err));
+        this.setError(id, messageOf(err));
+      }
+    },
+
+    /**
+     * validate sends the text of the operator to POST /api/policy/{id}/validate.
+     *
+     * validate writes nothing on the control server. It sends one request, and it sends no
+     * second request after a failure.
+     * The operator edits while the request runs, therefore validate reads the text again
+     * when the answer arrives. A text that changed leaves the entry in the stage read, and
+     * the push stays disabled.
+     */
+    async validate(id) {
+      const entry = entryOf(id);
+      if (!entry.loaded) {
+        return;
+      }
+      const sent = entry.text;
+      entry.stage = "validating";
+      entry.result = "";
+      try {
+        const answer = await request(policyValidateRoute(id), "POST", { document: sent });
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.stage = answer && answer.passed ? "validated" : "validate-failed";
+        entry.result = (answer && answer.result) || "";
+      } catch (err) {
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.stage = "validate-failed";
+        entry.result = messageOf(err);
+      }
+    },
+
+    /**
+     * push sends the text of the operator to PUT /api/policy/{id}.
+     *
+     * push sends no request while the stage is not validated, which FR-policy-25 states.
+     * It sends the ETag value of the read, and it sends none for a control server that
+     * holds none.
+     * A refusal with the status CONFLICT_STATUS moves the entry to the stage conflict. push
+     * reads that status and never the message of the daemon.
+     * push sends one request, and it sends no second request after a failure.
+     */
+    async push(id) {
+      const entry = entryOf(id);
+      if (entry.stage !== "validated") {
+        return;
+      }
+      const body = { document: entry.text };
+      if (entry.etag) {
+        body.etag = entry.etag;
+      }
+      entry.stage = "pushing";
+      entry.result = "";
+      try {
+        const answer = await request(policyDocumentRoute(id), "PUT", body);
+        entry.base = answer && typeof answer.document === "string" ? answer.document : body.document;
+        entry.text = entry.base;
+        entry.etag = (answer && answer.etag) || "";
+        entry.stage = "pushed";
+      } catch (err) {
+        entry.stage = err && err.status === CONFLICT_STATUS ? "conflict" : "push-failed";
+        entry.result = messageOf(err);
+      }
+    },
+
+    /**
+     * reread reads GET /api/policy/{id} again and it keeps the text of the operator.
+     *
+     * The operator compares their text against the document that the control server holds
+     * now, therefore reread replaces the document of the read and it keeps the text. The
+     * console removes no work of the operator to resolve a conflict.
+     * A read that fails keeps the stage conflict, and it states the message of the failed
+     * read. reread sends one request and no second request.
+     */
+    async reread(id) {
+      const entry = entryOf(id);
+      const kept = entry.text;
+      try {
+        const answer = await request(policyDocumentRoute(id));
+        this.setDocument(id, answer);
+        entry.text = kept;
+      } catch (err) {
+        entry.result = messageOf(err);
       }
     },
   };
@@ -454,6 +810,58 @@ function bindRows(holder) {
 }
 
 /**
+ * runAction draws the busy state, and it draws the answer when the request returns.
+ *
+ * work is the promise of one action of the state. The operator starts every action, and
+ * the view starts no timer, therefore the console sends no request of its own and it
+ * repeats no request that failed.
+ */
+function runAction(work) {
+  caret = null;
+  redraw();
+  work.then(redraw);
+}
+
+/** bindActions wires each control of the editor region to its action. */
+function bindActions(holder, id) {
+  const actions = {
+    validate: () => runAction(state.validate(id)),
+    push: () => runAction(state.push(id)),
+    reread: () => runAction(state.reread(id)),
+    discard: () => {
+      state.discard(id);
+      caret = null;
+      redraw();
+    },
+  };
+  for (const button of holder.querySelectorAll("[data-act]")) {
+    const action = actions[button.getAttribute("data-act")];
+    button.addEventListener("click", action);
+  }
+}
+
+/**
+ * syncActions draws the controls and the result of the editor region again.
+ *
+ * An edit changes the stage, therefore it changes which controls the operator reaches.
+ * syncActions replaces the two regions beside the text area, so the caret of the operator
+ * stays where it is. The two serializers escape every value that the control server and
+ * the daemon reported, and a test asserts each one.
+ */
+function syncActions(holder, id) {
+  const model = editorModel(state, id);
+  const acts = holder.querySelector(".pol-acts");
+  if (acts) {
+    acts.outerHTML = actionsMarkup(actionsModel(model));
+  }
+  const result = holder.querySelector(".pol-result");
+  if (result) {
+    result.outerHTML = resultMarkup(resultModel(model));
+  }
+  bindActions(holder, id);
+}
+
+/**
  * bindEditor keeps the text of the operator and the position of the caret.
  *
  * The console edits no document for the operator, therefore the handler stores the text
@@ -478,6 +886,7 @@ function bindEditor(holder, id) {
     if (chip) {
       chip.hidden = !state.edited(id);
     }
+    syncActions(holder, id);
   });
   field.addEventListener("blur", () => {
     if (field.isConnected) {
@@ -550,6 +959,7 @@ function draw(section, snapshot) {
   editor.innerHTML = editorMarkup(editorModel(state, state.selected()));
   if (state.selected()) {
     bindEditor(editor, state.selected());
+    bindActions(editor, state.selected());
   }
   grid.append(editor);
 

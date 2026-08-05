@@ -573,11 +573,14 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-ruleline .ns-error{display:block; margin-top:var(--sp-2)}
 .ac-ruleline .ns-error:empty{display:none}
 
-/* The policy view: the tailnet list, the read-only statement, and the document editor.
-   The accent of this view marks the selected row and nothing else, because the view draws
-   no affirmative action until issue #159 adds the push. The credential state of a row is a
-   coloured dot and a lowercase word. The document is a machine value, therefore the gutter
-   and the text area both carry the mono typeface. FR-policy-22 to FR-policy-28. */
+/* The policy view: the tailnet list, the document editor, the two actions, and the result.
+   The accent of this view marks the push action and nothing else, because the push is the
+   affirmative action of the view. Issue #158 gave the accent to the selected row while the
+   view drew no action, and issue #159 moved it to the push. The selected row now shows the
+   selection with a surface and a brighter border, as the namespace list does.
+   The credential state of a row is a coloured dot and a lowercase word. The document is a
+   machine value, therefore the gutter and the text area both carry the mono typeface.
+   FR-policy-22 to FR-policy-28. */
 
 .pol-grid{display:grid; grid-template-columns:var(--w-side) 1fr; gap:var(--sp-3); align-items:start}
 .pol-side{min-width:0}
@@ -596,7 +599,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 }
 .pol-row + .pol-row{margin-top:var(--sp-2)}
 .pol-row:hover{background:var(--surface-raised)}
-.pol-row[aria-selected="true"]{background:var(--surface-raised); border-color:var(--accent)}
+.pol-row[aria-selected="true"]{background:var(--surface-raised); border-color:var(--text-tertiary)}
 .pol-row:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-line{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3)}
 .pol-state{display:flex; align-items:center; gap:var(--sp-2)}
@@ -670,6 +673,43 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-doc:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-doc[readonly]{color:var(--text-secondary)}
 .pol-meta{display:flex; gap:var(--sp-2); margin-top:var(--sp-3); flex-wrap:wrap}
+
+/* The two sentences of the push come before the controls, because a warning comes before
+   the step that it applies to. */
+.pol-acts{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:var(--sp-4);
+  margin-top:var(--sp-4);
+  flex-wrap:wrap;
+}
+.pol-acts:empty{display:none}
+.pol-push-note{max-width:62ch}
+.pol-push-note .note{margin:0}
+.pol-push-note .note + .note{margin-top:var(--sp-1)}
+.pol-btns{display:flex; gap:var(--sp-2); flex:none}
+
+.pol-result{margin-top:var(--sp-4)}
+.pol-result:empty{display:none}
+.pol-res-head{display:flex; align-items:center; gap:var(--sp-2)}
+.pol-result .note{margin:var(--sp-2) 0 0}
+.pol-result .pol-btns{margin-top:var(--sp-3)}
+
+/* One error of the validate, with the line number that the control server stated. The
+   message is the text of the control server, therefore it draws in the mono typeface. */
+.pol-errs{
+  margin-top:var(--sp-3);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  padding:var(--pad-card);
+  display:flex;
+  flex-direction:column;
+  gap:var(--sp-2);
+}
+.pol-err{display:flex; gap:var(--sp-3); font-size:var(--fs-micro)}
+.pol-err-line{flex:none; color:var(--text-tertiary)}
+.pol-err-msg{color:var(--text-body); overflow-wrap:anywhere}
 
 @media (max-width:1040px){
   .pol-grid{grid-template-columns:1fr}
