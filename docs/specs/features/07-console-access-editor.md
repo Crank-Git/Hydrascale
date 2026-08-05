@@ -2,8 +2,8 @@
 id: console-access-editor
 feature: Console access editor
 epic: "Epic 7: Console access editor"
-status: planned
-issues: []
+status: issued
+issues: [148, 149, 150, 151, 152]
 mockups: [mockups/03-acl-editor.html]
 ---
 

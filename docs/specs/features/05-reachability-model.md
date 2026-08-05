@@ -2,8 +2,8 @@
 id: reachability-model
 feature: Local reachability model
 epic: "Epic 5: Local reachability model"
-status: planned
-issues: []
+status: issued
+issues: [134, 135, 136, 137, 138, 139]
 mockups: []
 ---
 

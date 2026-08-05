@@ -2,8 +2,8 @@
 id: docs-and-release
 feature: Documentation, terminal interface restyle, and the release
 epic: "Epic 9: Documentation, terminal interface restyle, and the release"
-status: planned
-issues: []
+status: issued
+issues: [161, 162, 163, 164, 165]
 mockups: []
 ---
 

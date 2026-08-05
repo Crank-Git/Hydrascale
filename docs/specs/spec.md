@@ -613,6 +613,7 @@ security and DNS work must not wait behind the console.
 | 2026-08-05 | 1 | Issue #134. **The row above about `! -o vh+` is not complete, and this row corrects it.** That match excludes every namespace device and no address range, therefore a namespace with an `internet` rule reached `192.168.1.215`. That is the finding `SA-9`, which the operator accepted for Epic 5. Issue #137 gives every tailnet an `internet` rule at migration, so the gap would have reached every host that upgrades. |
 | 2026-08-05 | 1 | Issue #134. **The compiler excludes the five ranges with a repeated `iprange` match in one rule.** The two other forms are wrong: a `RETURN` rule leaves `HYDRASCALE-FWD` and skips its closing `-j DROP`, and one accept rule for each range accepts a packet that is outside any one range. `ipset` is a new host command, which the operator rejected. A read-only check on the test host measured the syntax: `iptables v1.8.10 (nf_tables)` accepts a rule with two `-m iprange ! --dst-range` matches, and it answers `multiple -d flags not allowed` for a rule with two `-d` options. |
 | 2026-08-05 | 1 | Issue #122. `go mod tidy` moved `github.com/charmbracelet/bubbles` from the indirect block to the direct block, because `internal/tui/model.go` imports `bubbles/textinput`. The count of direct dependencies that `CLAUDE.md` states goes from six to seven. No dependency is added; the go.mod record was wrong. |
+| 2026-08-05 | 1 | **Epics 5 to 9 are on the tracker.** The decomposition produced 28 sub-issues: #134 to #139, #141 to #146, #148 to #152, #154 to #159, and #161 to #165. Every one of the 163 requirements in features 05 to 09 is cited by at least one sub-issue. Two sub-issues hold an open question and carry `status:needs-feedback`: #155 needs the Tailscale OAuth write scope, and #146 needs the operator to confirm the font source and the licence text before a commit. |
 | 2026-08-05 | 1 | Issue #137 built. **The migration does not restore one version 0.9 path: a namespace reaching the host local network.** **FR-access-22** states the exact rule set, and it is `internet` only. The `internet` destination now excludes the five private ranges, which the row above records. That path is the finding `SA-9`, therefore the migration closes it rather than preserving it. |
 | 2026-08-05 | 1 | Issue #137. **`backupFile` of `cmd/hydrascale/init.go` moves to `config.BackupFile` and both call sites share it.** `SA-24` records that the previous helper wrote the copy at the fixed mode `0640`, and the configuration file can hold an `auth_key`. The copy now takes the mode of the source file, and the helper writes a temporary file and renames it, so a copy that a previous run left at a wider mode does not survive. This narrows the mode of `config.yaml.bak` on a host whose configuration file is `0600`. |
 | 2026-08-05 | 1 | Issue #137. **The edge case "a tailnet is removed while a rule names it" cannot arise in the migration**, because the migration runs only when the file holds no `access` block. `LoadConfig` rejects an `access` block that names an undeclared tailnet, which issue #134 added, and that rejection contradicts the stated behaviour "It does not refuse to start". The correction belongs with the chain writer of issue #135, and this issue does not make it. |
@@ -629,9 +630,9 @@ security and DNS work must not wait behind the console.
 
 ## Issue map
 
-Epics 0 to 4 are on the tracker. Epics 5 to 9 stay `planned` until the first milestones
-land, so that the console and policy epics can be re-decomposed if the security audit
-changes what they need.
+Every epic of version 1.0 is on the tracker. Epics 5 to 9 were filed on 2026-08-05, after
+the security audit closed, so that each decomposition carries the audit findings it must
+fix.
 
 | Epic | Issue | Sub-issues | Feature file |
 |---|---|---|---|
@@ -640,11 +641,11 @@ changes what they need.
 | Epic 2: Security audit | #62 | #63 #64 #65 #66 #67 | `features/02-security-audit.md` |
 | Epic 3: Security fixes | #68 | #69 #70 #71 #72 #73 | `features/03-security-fixes.md` |
 | Epic 4: DNS integrity | #74 | #75 #76 #77 #78 #79 | `features/04-dns-integrity.md` |
-| Epic 5: Local reachability model | not issued | — | `features/05-reachability-model.md` |
-| Epic 6: Console foundation | not issued | — | `features/06-console-foundation.md` |
-| Epic 7: Console access editor | not issued | — | `features/07-console-access-editor.md` |
-| Epic 8: Upstream policy control | not issued | — | `features/08-upstream-policy.md` |
-| Epic 9: Documentation and release | not issued | — | `features/09-docs-and-release.md` |
+| Epic 5: Local reachability model | #133 | #134 #135 #136 #137 #138 #139 | `features/05-reachability-model.md` |
+| Epic 6: Console foundation | #140 | #141 #142 #143 #144 #145 #146 | `features/06-console-foundation.md` |
+| Epic 7: Console access editor | #147 | #148 #149 #150 #151 #152 | `features/07-console-access-editor.md` |
+| Epic 8: Upstream policy control | #153 | #154 #155 #156 #157 #158 #159 | `features/08-upstream-policy.md` |
+| Epic 9: Documentation and release | #160 | #161 #162 #163 #164 #165 | `features/09-docs-and-release.md` |
 
 ### Requirement coverage
 
@@ -655,8 +656,18 @@ changes what they need.
 | security-audit | FR-audit-1 to 14 | #63 #64 #65 #66 #67 |
 | security-fixes | FR-fix-1 to 19 | #69 #70 #71 #72 #73 |
 | dns-integrity | FR-dns-1 to 16 | #75 #76 #77 #78 #79 |
+| reachability-model | FR-access-1 to 28 | #134 #135 #136 #137 #138 #139 |
+| console-foundation | FR-console-1 to 47 | #141 #142 #143 #144 #145 #146 |
+| console-access-editor | FR-editor-1 to 33 | #148 #149 #150 #151 #152 |
+| upstream-policy | FR-policy-1 to 28 | #154 #155 #156 #157 #158 #159 |
+| docs-and-release | FR-docs-1 to 27 | #161 #162 #163 #164 #165 |
 
-Every one of the 75 requirements in these five features is cited by at least one issue.
+Every one of the 238 requirements in these ten features is cited by at least one issue.
+
+**FR-access-2 is covered and reversed.** The requirement states that the daemon appends the
+jump rule into `FORWARD`. The operator decided on 2026-08-05 that the daemon keeps the
+insert at position 1. Issue #139 edits the requirement text, corrects `CLAUDE.md`, and adds
+the detection that the decision needs.
 
 ### Requirements already satisfied when the issues were created
 
