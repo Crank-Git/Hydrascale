@@ -708,6 +708,11 @@ func (r *Reconciler) Reconcile() error {
 		return err
 	}
 
+	// Runs before the repair steps below, because the measurement must report the host
+	// that this tick found. A tick that repairs the forward path and then measures reports
+	// no loss, and the operator never learns that a rule went away.
+	r.probeReachability(desired, actual)
+
 	actions := r.Diff(desired, actual)
 	if len(actions) > 0 {
 		r.emit("reconcile_apply", "", fmt.Sprintf("%d actions", len(actions)))
@@ -723,11 +728,6 @@ func (r *Reconciler) Reconcile() error {
 	r.applyAccess()
 	r.ensureForwardPath(desired, actual)
 	r.checkNamespaceForwarding(desired)
-
-	// Runs last, because the repair of the forward path above changes what a packet from
-	// the namespace does. The measurement therefore reports the host as this tick leaves
-	// it.
-	r.probeReachability(desired, actual)
 
 	if len(actions) == 0 {
 		r.emit("reconcile_complete", "", "no changes needed")
