@@ -12,10 +12,13 @@ import {
   DEFAULT_POLL_INTERVAL_MS,
   MINIMUM_POLL_INTERVAL_MS,
   RETRY_AFTER_MS,
+  ACCESS_ROUTE,
+  EVENTS_ROUTE,
   STATUS_ROUTE,
   VIEWS,
   consoleRequestInit,
   createPollLayer,
+  fetchConsoleState,
 } from "../static/app.js";
 
 // clock returns a fake timer set that a test steps by hand, so no test waits.
@@ -288,4 +291,38 @@ test("the shell names five views and each one holds a heading and an empty state
       `${view.id} states the empty state where it holds data`,
     );
   }
+});
+
+test("one poll reads the status route, the access route, and the event route", async () => {
+  assert.equal(ACCESS_ROUTE, "/api/access");
+  assert.equal(EVENTS_ROUTE, "/api/events");
+
+  const asked = [];
+  const bodies = {
+    "/api/status": { server_version: "1.0.0", desired: { jbones: {} } },
+    "/api/access": { mode: "enforce", rules: [], nodes: [] },
+    "/api/events": { events: [{ Time: "2026-08-05T14:02:19Z", Type: "reconcile_complete" }] },
+  };
+
+  const body = await fetchConsoleState((route) => {
+    asked.push(route);
+    return Promise.resolve(bodies[route]);
+  });
+
+  assert.deepEqual(asked.slice().sort(), ["/api/access", "/api/events", "/api/status"]);
+  assert.equal(body.server_version, "1.0.0");
+  assert.deepEqual(body.desired, { jbones: {} });
+  assert.deepEqual(body.access_model, bodies["/api/access"]);
+  assert.equal(body.events.length, 1);
+});
+
+test("a poll that reads one route with an error fails the whole poll", async () => {
+  await assert.rejects(
+    fetchConsoleState((route) =>
+      route === ACCESS_ROUTE
+        ? Promise.reject(new Error("connection refused"))
+        : Promise.resolve({}),
+    ),
+    /connection refused/,
+  );
 });

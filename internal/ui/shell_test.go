@@ -200,8 +200,17 @@ func TestEveryFocusRuleUsesTheFocusRingToken(t *testing.T) {
 		t.Fatal("app.css holds no :focus-visible rule, so a control shows no focus ring")
 	}
 	for _, block := range blocks {
-		if !strings.Contains(block[2], "var(--ring-focus)") {
-			t.Errorf("the rule %q draws no ring from var(--ring-focus)", strings.TrimSpace(block[1]))
+		if strings.Contains(block[2], "var(--ring-focus)") {
+			continue
+		}
+		// An SVG element is not a CSS box, so box-shadow draws no ring on it and
+		// var(--ring-focus) states a box-shadow value. Such a rule draws the ring with the
+		// outline property, and it still takes its colour from a brand token.
+		outlined := strings.Contains(block[2], "outline:") &&
+			!strings.Contains(block[2], "outline:none") &&
+			strings.Contains(block[2], "var(--")
+		if !outlined {
+			t.Errorf("the rule %q draws no ring from var(--ring-focus) and no ring from an outline", strings.TrimSpace(block[1]))
 		}
 	}
 
@@ -226,6 +235,77 @@ func TestTheConsoleStatesAnEmptyStateForEveryView(t *testing.T) {
 	}
 	if got := strings.Count(app, "empty:"); got != len(consoleViews) {
 		t.Errorf("the view table states %d empty states, want %d", got, len(consoleViews))
+	}
+}
+
+// viewModules names the view that each module file draws. The shell draws a placeholder
+// for a view that no module claims, so this table grows as each view lands.
+var viewModules = map[string]string{"overview": "overview.js"}
+
+func TestEveryViewModuleReachesTheBrowserAndRegistersItself(t *testing.T) {
+	// A module file has to be embedded, has to be loaded from the console origin, and has
+	// to claim its view. A module that the page does not load leaves the view on the
+	// placeholder that the shell draws.
+	index := readStatic(t, "index.html")
+
+	for _, view := range consoleViews {
+		module, ok := viewModules[view]
+		if !ok {
+			continue
+		}
+		source := readStatic(t, module)
+		if !strings.Contains(index, `src="/`+module+`"`) {
+			t.Errorf("the page loads no /%s, so the %s view keeps its placeholder", module, view)
+		}
+		if !strings.Contains(source, `registerView("`+view+`"`) {
+			t.Errorf("%s registers no draw function for the %s view", module, view)
+		}
+	}
+}
+
+func TestTheTopologyDrawsAnAllowedPathAsADottedCurveInTheAccentColour(t *testing.T) {
+	// FR-console-20 and FR-console-23. The geometry of the curve belongs to app.css, so the
+	// renderer writes a class and no inline stroke. The accent belongs to the paths of the
+	// selected node and to nothing else in this view. See FR-console-40.
+	style := readStatic(t, "app.css")
+
+	for _, rule := range []string{
+		"stroke-dasharray:2 6",
+		"stroke-width:1.4",
+		"stroke:var(--edge)",
+		"stroke:var(--edge-active)",
+	} {
+		if !strings.Contains(style, rule) {
+			t.Errorf("app.css states no %s, so the allowed path is not the dotted curve of the brand", rule)
+		}
+	}
+	if !strings.Contains(style, ".edge.sel") {
+		t.Error("app.css holds no rule for the paths of the selected node")
+	}
+	if !strings.Contains(style, ".edge.muted") {
+		t.Error("app.css holds no rule that mutes the paths of every other node")
+	}
+}
+
+func TestTheConsoleDrawsNoArrowheadAndNoNodeIcon(t *testing.T) {
+	// FR-console-22. The renderer holds no marker element and no image, so no build of the
+	// console can put an arrowhead or an icon on the topology.
+	forbidden := []string{"<marker", "marker-end", "marker-start", "marker-mid", "<textPath"}
+
+	err := fs.WalkDir(Files(), ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || strings.HasPrefix(name, "brand/") {
+			return err
+		}
+		source := readStatic(t, name)
+		for _, word := range forbidden {
+			if strings.Contains(source, word) {
+				t.Errorf("%s holds %s, so the topology can draw an arrowhead or an edge label", name, word)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WalkDir: %v", err)
 	}
 }
 

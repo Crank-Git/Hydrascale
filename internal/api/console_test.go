@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/reconciler"
+	"hydrascale/internal/ui"
 )
 
 // captureLog sends the standard logger to a buffer for the length of the test.
@@ -399,5 +401,18 @@ func TestNoConsoleResponseBodyHoldsAnAuthKey(t *testing.T) {
 		if strings.Contains(string(payload), "tskey-") {
 			t.Errorf("%s %s returns a value that starts with tskey- in the body %s", target.method, target.path, payload)
 		}
+	}
+}
+
+func TestTheConsoleNamesTheSocketPathThatTheDaemonOpens(t *testing.T) {
+	// The error state of the overview names the socket path, and the console reads that
+	// path from no route. This test holds the two values together, so a change to
+	// DefaultSocketPath cannot leave the console with a path that the daemon does not open.
+	source, err := fs.ReadFile(ui.Files(), "topology.js")
+	if err != nil {
+		t.Fatalf("read the console topology module: %v", err)
+	}
+	if !strings.Contains(string(source), `"`+DefaultSocketPath+`"`) {
+		t.Errorf("the console names no socket path %q, so its error state names a path that the daemon does not open", DefaultSocketPath)
 	}
 }

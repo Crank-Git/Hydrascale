@@ -193,6 +193,78 @@ h2{
 .field:focus-visible,
 .skip:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
+/* The overview */
+
+/* A screen reader reads this region and no eye sees it. The topology puts its text
+   equivalent here, because a dotted curve carries no meaning to a screen reader. */
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
+
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:var(--sp-3); margin-bottom:var(--sp-3)}
+.stat{
+  background:var(--surface-card);
+  border:1px solid var(--border-default);
+  border-radius:var(--r-lg);
+  padding:var(--pad-card);
+}
+.stat-value{
+  font-size:var(--fs-h1);
+  letter-spacing:var(--ls-h1);
+  line-height:var(--lh-head);
+  margin-top:var(--sp-2);
+}
+/* A state is a coloured dot and a lowercase word, so it takes the sans typeface. */
+.stat-value.state{
+  font-family:var(--font-body);
+  font-size:var(--fs-h2);
+  letter-spacing:var(--ls-h2);
+  display:flex;
+  align-items:center;
+  gap:var(--sp-2);
+}
+
+.grid{display:grid; grid-template-columns:1fr var(--w-side); gap:var(--sp-3); align-items:start}
+.card-head{display:flex; justify-content:space-between; gap:var(--sp-3); margin-bottom:var(--sp-4)}
+.flow-wrap{min-width:0}
+svg.flow{width:100%; height:auto; display:block; overflow:visible}
+
+.node rect{fill:var(--surface-raised); stroke:var(--border-default)}
+.node text.n{fill:var(--text-body); font-family:var(--font-data); font-size:var(--fs-data)}
+.node text.s{fill:var(--text-tertiary); font-family:var(--font-data); font-size:var(--fs-label)}
+.node circle.dot{fill:var(--text-tertiary)}
+.node circle.dot.ok{fill:var(--status-ok)}
+.node circle.dot.warn{fill:var(--status-warn)}
+.node circle.dot.crit{fill:var(--status-crit)}
+.node{cursor:pointer}
+/* An SVG group is not a CSS box, therefore box-shadow draws no ring on it and the rule
+   draws the ring with the outline property. The ring is not the accent: the accent of
+   this view belongs to the paths of the selected node. */
+.node:focus-visible{outline:2px solid var(--text-body); outline-offset:2px; border-radius:var(--r)}
+.node[aria-pressed="true"] rect{stroke:var(--accent)}
+
+/* An allowed path is a dotted curve. A denied path has no line at all, therefore this
+   file declares no rule for one. The accent belongs to the paths of the selected node. */
+.edge{fill:none; stroke:var(--edge); stroke-width:1.4; stroke-dasharray:2 6; stroke-linecap:round}
+.edge.sel{stroke:var(--edge-active)}
+.edge.muted{stroke:var(--border-soft)}
+
+.events{margin-top:var(--sp-3)}
+.ev{display:flex; gap:var(--sp-3); padding:var(--sp-3) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
+.ev:last-child{border-bottom:none}
+.ev time{color:var(--text-tertiary); flex:none; width:58px; font-size:var(--fs-micro)}
+.ev-kind{color:var(--text-secondary); flex:none; width:112px; font-size:var(--fs-micro)}
+.ev p{margin:0; font-size:var(--fs-sm); color:var(--text-body); min-width:0}
+
+/* The empty state of the overview holds no topology, therefore the add action takes the
+   accent there. See FR-console-40. */
+.btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:var(--fw-semibold)}
+a.btn{display:inline-block; text-decoration:none}
+a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+
+@media (max-width:1040px){
+  .grid{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}
+
 @media (max-width:900px){
   .app{grid-template-columns:1fr}
   .nav{border-right:none; border-bottom:1px solid var(--border-default); flex-direction:row; flex-wrap:wrap; align-items:center}
