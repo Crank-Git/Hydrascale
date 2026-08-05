@@ -501,3 +501,68 @@ func TestTheReconcilerReportsThePositionOfTheJumpRule(t *testing.T) {
 		t.Errorf("AccessJumpPosition(%q) = %d, want 4", access.ParentForward, got)
 	}
 }
+
+// pathEvents returns the access.path_repaired events that the Reconciler recorded.
+func pathEvents(r *Reconciler) []Event {
+	var got []Event
+	for _, e := range r.Events() {
+		if e.Type == "access.path_repaired" {
+			got = append(got, e)
+		}
+	}
+	return got
+}
+
+func TestTheReconcilerWritesAMissingForwardRuleForANamespaceThatExists(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	ns := newMockNS()
+	ns.namespaces[namespaces.GetNamespaceName("alpha")] = true
+	ns.pathWritten = []string{"nat POSTROUTING -s 10.200.0.2/30 -j MASQUERADE"}
+	r := newTestReconciler(cfgPath, ns, newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{})
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	want := namespaces.GetNamespaceName("alpha")
+	if len(ns.pathNames) != 1 || ns.pathNames[0] != want {
+		t.Fatalf("the Reconciler read the forward path of %v, want [%s]", ns.pathNames, want)
+	}
+	got := pathEvents(r)
+	if len(got) != 1 {
+		t.Fatalf("the Reconciler recorded %d access.path_repaired events, want 1: %+v", len(got), r.Events())
+	}
+	if !strings.Contains(got[0].Message, "MASQUERADE") {
+		t.Errorf("the event message is %q, want the rule that the Reconciler wrote", got[0].Message)
+	}
+}
+
+func TestTheReconcilerRecordsNoEventWhenTheForwardPathIsComplete(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	ns := newMockNS()
+	ns.namespaces[namespaces.GetNamespaceName("alpha")] = true
+	r := newTestReconciler(cfgPath, ns, newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{})
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := pathEvents(r); len(got) != 0 {
+		t.Errorf("the Reconciler recorded %d events for a complete forward path: %+v", len(got), got)
+	}
+}
+
+func TestTheReconcilerReadsNoForwardPathForANamespaceThatIsAbsent(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	ns := newMockNS()
+	r := newTestReconciler(cfgPath, ns, newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{})
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(ns.pathNames) != 0 {
+		t.Errorf("the Reconciler read the forward path of %v, want no read", ns.pathNames)
+	}
+}

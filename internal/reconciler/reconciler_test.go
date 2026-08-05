@@ -48,6 +48,10 @@ type mockNS struct {
 	reapErr    error  // the error that ReapStaleRules returns
 	legacy     int    // the count that RemoveLegacyForwardRules returns
 	forwarding string // the value that NamespaceForwarding returns
+
+	pathNames   []string // the namespace of each EnsureForwardPath call, in order
+	pathWritten []string // the rules that EnsureForwardPath returns
+	pathErr     error    // the error that EnsureForwardPath returns
 }
 
 func newMockNS() *mockNS {
@@ -103,6 +107,11 @@ func (m *mockNS) ReapStaleRules() (int, error) {
 
 func (m *mockNS) RemoveLegacyForwardRules() (int, error) {
 	return m.legacy, nil
+}
+
+func (m *mockNS) EnsureForwardPath(nsName string, index int, infraSubnet string) ([]string, error) {
+	m.pathNames = append(m.pathNames, nsName)
+	return m.pathWritten, m.pathErr
 }
 
 func (m *mockNS) NamespaceForwarding(nsName string) (string, error) {
