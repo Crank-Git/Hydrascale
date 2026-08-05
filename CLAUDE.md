@@ -15,7 +15,7 @@ Design lives in `docs/specs/`. Read `docs/specs/spec.md` and the relevant
 
 ## Stack
 
-- Go 1.24, standard library first. Six direct dependencies, vendored in `/vendor`.
+- Go 1.26.5, standard library first. Seven direct dependencies, vendored in `/vendor`.
 - Bubble Tea and Lip Gloss for the terminal interface.
 - The console is a static single-page application with no build step. `go:embed` places
   `internal/ui/static` in the binary.
