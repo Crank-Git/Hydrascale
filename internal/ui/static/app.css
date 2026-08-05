@@ -418,7 +418,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-acts{display:flex; gap:var(--sp-2); margin-top:var(--sp-4); flex-wrap:wrap}
 .ns-dialog-acts{justify-content:flex-end; margin-top:var(--sp-5)}
 
-.ns-scrim{
+.ns-scrim,
+.ac-scrim{
   position:fixed;
   inset:0;
   background:var(--scrim);
@@ -428,7 +429,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   padding:var(--sp-6);
   z-index:9;
 }
-.ns-dialog{
+.ns-dialog,
+.ac-dialog{
   background:var(--surface-card);
   border:1px solid var(--border-default);
   border-radius:var(--r-xl);
@@ -439,7 +441,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   overflow:auto;
   box-shadow:var(--shadow-pop);
 }
-.ns-dialog h3{font-family:var(--font-display); font-size:var(--fs-h2); letter-spacing:var(--ls-h2); margin:0 0 var(--sp-2)}
+.ns-dialog h3,
+.ac-dialog h3{font-family:var(--font-display); font-size:var(--fs-h2); letter-spacing:var(--ls-h2); margin:0 0 var(--sp-2)}
 
 .ns-form{display:flex; flex-direction:column; gap:var(--sp-4); margin-top:var(--sp-4)}
 .ns-field{display:flex; flex-direction:column; gap:var(--sp-2)}
@@ -465,3 +468,106 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   .ns-addr{margin-left:0}
   .ns-row{flex-wrap:wrap}
 }
+
+/* The access view: the header, the observe statement, and the mode dialog. The apply
+   action is the one thing that takes the accent, through the .btn.primary rule above.
+   The mode and the staged count are states, so each one is a chip and no rule tints a
+   region with a state colour. Issue #149, issue #150 and issue #151 add the matrix, the
+   flow overview and the rule list. */
+
+.ac-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--sp-4);
+  flex-wrap:wrap;
+  margin-bottom:var(--sp-4);
+}
+.ac-states{display:flex; align-items:center; gap:var(--sp-2)}
+.ac-acts{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:var(--sp-2);
+  padding:3px 9px;
+  border-radius:var(--r-pill);
+  border:1px solid var(--border-default);
+  background:var(--surface-raised);
+  color:var(--text-secondary);
+}
+
+.ac-observe .ns-cmds{margin-top:var(--sp-3)}
+.ac-observe + .card{margin-top:var(--sp-3)}
+
+/* The staged list and the three statements that come before it: the offer to rebase, the
+   dropped rule, and the message of a refused apply. The list scrolls, because the operator
+   can stage one edit per square of the matrix and the list must leave the editor on the
+   screen. No rule here takes the accent; the apply action holds it. */
+
+.ac-notice{margin-top:var(--sp-3)}
+.ac-notice .ns-cmds{margin-top:var(--sp-3)}
+.ac-staged{margin-top:var(--sp-3)}
+.ac-stagedlist{margin-top:var(--sp-3); max-height:220px; overflow-y:auto}
+.ac-stagedrow{display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
+.ac-stagedrow:last-child{border-bottom:none}
+.ac-stagedverb{color:var(--text-secondary); font-size:var(--fs-sm); min-width:150px; flex:none}
+
+/* The flow overview. The picture reuses the .node rules and the .edge rules of the
+   overview topology above, therefore this block states the card alone. The accent reaches
+   the picture through .edge.sel, which marks the paths of the selected source. */
+
+.ac-flow-cap{display:flex; align-items:baseline; gap:var(--sp-2)}
+.ac-flow .flow-wrap{margin-bottom:var(--sp-3)}
+
+/* The reachability matrix. The accent of this view marks the allowed path: a filled
+   square, and the row label and the column label of the square under the pointer. An
+   empty square is the absence of a rule, therefore no rule paints a refused path. The
+   square carries the 6 pixel radius token, because a grid must read as a grid.
+   FR-editor-7 to FR-editor-15. */
+.ac-matrix{margin-top:var(--sp-3)}
+.ac-mtx{--ac-square:34px; border-collapse:separate; border-spacing:4px; margin-top:var(--sp-3)}
+.ac-mtx th{
+  font-family:var(--font-data);
+  font-size:var(--fs-label);
+  font-weight:400;
+  letter-spacing:var(--ls-mono);
+  color:var(--text-tertiary);
+  text-align:left;
+  padding:0 4px;
+}
+.ac-mtx th.col{writing-mode:vertical-rl; transform:rotate(180deg); height:78px; vertical-align:bottom; text-align:right}
+.ac-mtx th.hot{color:var(--accent)}
+.ac-square{
+  width:var(--ac-square);
+  height:var(--ac-square);
+  padding:0;
+  border-radius:var(--r-xs);
+  border:1px solid var(--border-default);
+  background:var(--surface-inset);
+  cursor:pointer;
+  transition:background var(--dur-1) var(--ease);
+}
+.ac-square:hover{background:var(--surface-raised)}
+.ac-square.on{background:var(--accent); border-color:var(--accent)}
+.ac-square.inert{background:transparent; border-color:var(--border-soft); cursor:default}
+.ac-square.inert:hover{background:transparent}
+
+/* The rule list. A row exists for an allowed path alone, therefore no rule paints a
+   refused path and no row carries a state colour. The connector is the dotted line of the
+   brand, and the port chip is a machine value in the mono typeface. The staged row takes
+   the word staged as a chip rather than the accent, because the accent of this view marks
+   the allowed path and the apply action. FR-editor-16 to FR-editor-22. */
+.ac-rules{margin-top:var(--sp-3)}
+.ac-rulelist{margin-top:var(--sp-3)}
+.ac-ruleline{padding:var(--sp-2) 0}
+.ac-ruleline + .ac-ruleline{border-top:1px solid var(--border-soft)}
+.ac-rule{display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap}
+.ac-end{color:var(--text-body); white-space:nowrap}
+.ac-conn{flex:none; width:52px; height:0; border-top:1.4px dotted var(--edge)}
+.ac-ports{display:flex; gap:var(--sp-2); flex-wrap:wrap; margin-left:auto}
+.ac-noports{color:var(--text-tertiary); margin-left:auto}
+.ac-portfield{width:16ch; flex:none}
+.ac-del{flex:none}
+.ac-ruleline .ns-error{display:block; margin-top:var(--sp-2)}
+.ac-ruleline .ns-error:empty{display:none}

@@ -138,6 +138,40 @@ func TestTheConsoleSourceHoldsNoEmoji(t *testing.T) {
 	}
 }
 
+func TestEveryConsoleSourceFileIsText(t *testing.T) {
+	// git stores a file that holds one control character as a binary file. That file then
+	// carries no diff, no comment on a line, and no blame, and every later change to the
+	// console loses its review. A separator inside a template literal is the way this
+	// happens, so the test names the line feed and the tab as the two control characters
+	// that a source file holds.
+	textFile := func(name string) bool {
+		for _, suffix := range []string{".js", ".css", ".html", ".json", ".svg"} {
+			if strings.HasSuffix(name, suffix) {
+				return true
+			}
+		}
+		return false
+	}
+
+	err := fs.WalkDir(Files(), ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !textFile(name) {
+			return err
+		}
+		for at, r := range readStatic(t, name) {
+			if r == '\n' || r == '\t' {
+				continue
+			}
+			if r < 0x20 || r == 0x7F {
+				t.Errorf("%s holds the control character U+%04X at byte %d, so git reads the file as binary", name, r, at)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WalkDir: %v", err)
+	}
+}
+
 func TestTheConsoleLoadsEveryBrandTokenFile(t *testing.T) {
 	// FR-console-39. The console holds no second palette and no second spacing scale, so
 	// every token file of the brand reaches the page.
@@ -289,6 +323,7 @@ func TestTheConsoleStatesAnEmptyStateForEveryView(t *testing.T) {
 // for a view that no module claims, so this table grows as each view lands.
 var viewModules = map[string]string{
 	"overview": "overview.js",
+	"access":   "access.js",
 	"activity": "activity.js",
 	"settings": "settings.js",
 }
