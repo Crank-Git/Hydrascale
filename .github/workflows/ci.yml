@@ -19,6 +19,16 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Format
+        run: |
+          # gofmt walks vendor/ as well, so the check drops those paths.
+          unformatted=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt reports that these files are not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 

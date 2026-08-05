@@ -254,8 +254,8 @@ func TestResolveAuthKey_Neither(t *testing.T) {
 
 func TestAuthKeyEnvVar(t *testing.T) {
 	cases := map[string]string{
-		"personal":  "HYDRASCALE_AUTHKEY_PERSONAL",
-		"corp-prod": "HYDRASCALE_AUTHKEY_CORP_PROD",
+		"personal":   "HYDRASCALE_AUTHKEY_PERSONAL",
+		"corp-prod":  "HYDRASCALE_AUTHKEY_CORP_PROD",
 		"home-lab-1": "HYDRASCALE_AUTHKEY_HOME_LAB_1",
 	}
 	for in, want := range cases {
