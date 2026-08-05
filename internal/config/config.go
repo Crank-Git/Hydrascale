@@ -229,6 +229,48 @@ func ValidateBindAddress(addr string) error {
 	return nil
 }
 
+// isLoopbackHost reports whether host holds a loopback IP address.
+// host is the host component of a URL, with an optional port.
+// isLoopbackHost rejects a name such as localhost, because a name resolves to an address
+// that the operator can change.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// ValidateResolverMode checks that mode is empty or a mode that the resolver runs.
+// An empty value keeps the current mode. The resolver runs the mode unified only
+// (internal/dns/forwarder.go:233-236).
+func ValidateResolverMode(mode string) error {
+	if mode == "" || mode == "unified" {
+		return nil
+	}
+	return fmt.Errorf("invalid resolver mode %q: the daemon runs the mode unified only", mode)
+}
+
+// SafeStateDir returns the state directory of a tailnet under base, and it reports
+// whether the daemon can operate on that directory.
+// SafeStateDir rejects an identifier that IsValidID rejects, and it rejects a directory
+// that is not a direct child of base. A caller that gets false must change nothing.
+func SafeStateDir(base, id string) (string, bool) {
+	if !IsValidID(id) {
+		return "", false
+	}
+	dir := filepath.Join(base, id)
+	if filepath.Dir(dir) != filepath.Clean(base) {
+		return "", false
+	}
+	return dir, true
+}
+
 // AuthKeyEnvVar returns the environment variable name that overrides the auth
 // key for a tailnet: HYDRASCALE_AUTHKEY_<ID>, where <ID> is uppercased with
 // dashes replaced by underscores (e.g. "corp-prod" -> HYDRASCALE_AUTHKEY_CORP_PROD).
@@ -247,6 +289,9 @@ func ResolveAuthKey(tailnetID string, configKey string) string {
 }
 
 // ValidateControlURL checks that a control URL is empty or a valid https URL with a host.
+// ValidateControlURL also accepts the http scheme when the host is a loopback address,
+// because a Headscale server on the same host carries no traffic across a network.
+// Every caller uses this one function, so the control API and the loader apply one rule.
 func ValidateControlURL(raw string) error {
 	if raw == "" {
 		return nil
@@ -255,8 +300,11 @@ func ValidateControlURL(raw string) error {
 	if err != nil {
 		return fmt.Errorf("invalid control_url %q: %w", raw, err)
 	}
+	if u.Scheme == "http" && isLoopbackHost(u.Host) {
+		return nil
+	}
 	if u.Scheme != "https" {
-		return fmt.Errorf("control_url %q must use https scheme", raw)
+		return fmt.Errorf("control_url %q must use https scheme, unless the host is a loopback address", raw)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("control_url %q has no host", raw)
