@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"log"
@@ -400,6 +401,103 @@ func TestNoConsoleResponseBodyHoldsAnAuthKey(t *testing.T) {
 		}
 		if strings.Contains(string(payload), "tskey-") {
 			t.Errorf("%s %s returns a value that starts with tskey- in the body %s", target.method, target.path, payload)
+		}
+	}
+}
+
+func TestTheStatusRouteReportsThePathsThatTheSettingsViewShows(t *testing.T) {
+	// FR-console-37. The console shows no invented data, therefore the settings view reads
+	// the configuration path and the socket path from the daemon rather than from a
+	// constant of its own.
+	cfgPath := writeTestConfig(t, "alpha")
+	srv, _, cleanup := startTestServer(t, newTestReconciler(cfgPath))
+	defer cleanup()
+
+	resp, err := unixHTTPClient(srv).Get("http://localhost/api/status")
+	if err != nil {
+		t.Fatalf("GET /api/status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body StatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if body.ConfigPath != cfgPath {
+		t.Errorf("config_path = %q, want %q", body.ConfigPath, cfgPath)
+	}
+	if body.SocketPath != srv.socketPath {
+		t.Errorf("socket_path = %q, want %q", body.SocketPath, srv.socketPath)
+	}
+	if body.ConsoleAddress != "" {
+		t.Errorf("console_address = %q, want an empty string for a daemon with no console listener", body.ConsoleAddress)
+	}
+}
+
+func TestTheStatusRouteReportsTheConsoleAddressThatTheListenerHolds(t *testing.T) {
+	srv := NewServer(tempSocketPath(t, "address-api.sock"), newTestReconciler(writeTestConfig(t, "alpha")))
+	if err := srv.StartConsole(true, "127.0.0.1:0"); err != nil {
+		t.Fatalf("StartConsole: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	})
+
+	resp, err := http.Get("http://" + srv.ConsoleAddress() + "/api/status")
+	if err != nil {
+		t.Fatalf("GET /api/status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body StatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if body.ConsoleAddress != srv.ConsoleAddress() {
+		t.Errorf("console_address = %q, want %q", body.ConsoleAddress, srv.ConsoleAddress())
+	}
+}
+
+func TestNoRouteOfTheSettingsViewHoldsAnAuthKey(t *testing.T) {
+	// The settings view reads GET /api/status and GET /api/dns. An auth key, an OAuth
+	// client secret, and a Headscale API key never reach a control API response. See SA-1.
+	const authKey = "tskey-auth-kNotARealKey-000000000000"
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig()
+	cfg.Tailnets = append(cfg.Tailnets, config.Tailnet{ID: "alpha", AuthKey: authKey})
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	// The configuration file must really hold the key, so that the assertion tests the
+	// response rather than an empty field.
+	loaded, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.Tailnets[0].AuthKey != authKey {
+		t.Fatalf("the configuration file holds the key %q, want %q", loaded.Tailnets[0].AuthKey, authKey)
+	}
+
+	srv, _, cleanup := startTestServer(t, newTestReconciler(cfgPath))
+	defer cleanup()
+
+	for _, route := range []string{"/api/status", "/api/dns", "/api/events"} {
+		resp, err := unixHTTPClient(srv).Get("http://localhost" + route)
+		if err != nil {
+			t.Fatalf("GET %s: %v", route, err)
+		}
+		payload, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		if strings.Contains(string(payload), "tskey-") {
+			t.Errorf("GET %s returns a value that starts with tskey- in the body %s", route, payload)
 		}
 	}
 }
