@@ -24,6 +24,7 @@ func TestTeardownRemovesTheNamesOfTheTailnetFromTheHostsFile(t *testing.T) {
 	hostsPath := filepath.Join(dir, "hosts")
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m.Runner = quietRunner{}
 	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "ns-corp")
 	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "ns-home")
 
@@ -54,6 +55,7 @@ func TestTeardownReturnsTheErrorOfAFailedHostsFileWrite(t *testing.T) {
 	hostsPath := filepath.Join(dir, "hosts")
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m.Runner = quietRunner{}
 	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "ns-corp")
 	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "ns-home")
 
@@ -77,6 +79,7 @@ func TestTeardownAllReturnsTheErrorOfAFailedHostsFileWrite(t *testing.T) {
 	hostsPath := filepath.Join(dir, "hosts")
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m.Runner = quietRunner{}
 	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "ns-corp")
 
 	// TeardownAll removes the last tailnet, so the manager rewrites the file without the

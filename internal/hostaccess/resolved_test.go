@@ -8,6 +8,7 @@ import (
 // gracefully when systemd-resolved is not available (CI/test environments).
 func TestResolvedManager_NilWhenUnavailable(t *testing.T) {
 	rm := NewResolvedManager()
+	rm.Runner = quietRunner{}
 	err := rm.RegisterDomains([]string{"example.com"})
 	// Either succeeds (resolved is running) or returns a clear error — no panic.
 	if err != nil {
@@ -23,6 +24,7 @@ func TestResolvedManager_NilWhenUnavailable(t *testing.T) {
 // registered does not panic or error.
 func TestResolvedManager_DeregisterIdempotent(t *testing.T) {
 	rm := NewResolvedManager()
+	rm.Runner = quietRunner{}
 	rm.DeregisterAll() // should be a no-op
 	rm.DeregisterAll() // calling twice must also be safe
 }
@@ -31,6 +33,7 @@ func TestResolvedManager_DeregisterIdempotent(t *testing.T) {
 // a no-op that returns no error.
 func TestResolvedManager_EmptyDomains(t *testing.T) {
 	rm := NewResolvedManager()
+	rm.Runner = quietRunner{}
 	if err := rm.RegisterDomains(nil); err != nil {
 		t.Errorf("expected nil error for nil domains, got: %v", err)
 	}
