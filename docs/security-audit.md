@@ -20,10 +20,16 @@ Severity describes the harm. Severity never describes the size of the fix.
 
 ## The status of the dispositions
 
-**Every disposition in this document is a proposal. The maintainer has confirmed none of
-them.** The date of the proposal is **2026-08-05**.
+**The operator confirmed every disposition in this document on 2026-08-05.** The operator
+answered in these words:
 
-A proposed disposition is one of four values.
+> Accept all 48 proposals as written.
+
+Each disposition is therefore a decision and not a proposal. The document keeps the word
+`propose:` in each value, because the operator accepted each proposal as written. The four
+values stay as they are.
+
+A disposition is one of four values.
 
 - `propose: fix in Epic 3` — a Hydrascale requirement in
   `docs/specs/features/03-security-fixes.md` covers the finding.
@@ -33,12 +39,12 @@ A proposed disposition is one of four values.
   holds today.
 - `propose: accept the risk` — the audit proposes that version 1.0 keeps the behaviour.
 
-One finding is not a proposal. `SA-5` records the console threat model, and the maintainer
-already accepted that risk. `docs/specs/spec.md:100-101` holds the decision, and the body
-of issue #67 records it.
+One finding is outside the set of 48. `SA-5` records the console threat model, and the
+maintainer accepted that risk before this run. `docs/specs/spec.md:100-101` holds the
+decision, and the body of issue #67 records it.
 
-The maintainer confirms or reverses each proposal after this run. Until that answer
-arrives, the fourth acceptance criterion of issue #67 is open.
+A single finding stays reversible with a follow-up issue, because this document removes
+nothing.
 
 ## The summary table
 
@@ -2038,6 +2044,13 @@ this `Other defects` section that
   that the configuration file holds today.
 - A cross-tailnet delivery. `SA-48` records the attempt, the commands, the output, and the
   reason the result is inconclusive.
+
+## Changelog
+
+| Date | Change |
+|---|---|
+| 2026-08-05 | Epic 2 built this document. It holds 49 findings, and it collects the four fragments of issues #63 to #66. Every disposition was a proposal. |
+| 2026-08-05 | The operator confirmed the set of 48 proposals: "Accept all 48 proposals as written." The `## The status of the dispositions` section records the answer. `SA-5` keeps the acceptance that predates this run. No finding, severity, `file:line` reference, or harm condition changed. |
 
 
 

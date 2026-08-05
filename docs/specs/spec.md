@@ -585,6 +585,7 @@ security and DNS work must not wait behind the console.
 | 2026-08-05 | 1 | Epic 3 built. `execx` gains a second interface, `Starter`, for a long-lived child process. `Runner` runs a command to completion and returns its combined output, and `tailscaled` outlives the call, so it does not fit. The daemon keeps `Setpgid` and `Pdeathsig`, which stop an orphaned `tailscaled`. |
 | 2026-08-05 | 1 | Epic 3 built. Two teardown functions had no caller. `hostaccess.Manager.Teardown` and `namespaces.TeardownHostAccess` were dead code, therefore a tailnet the operator removed kept its `/etc/hosts` entries and `host_access: false` left its rules in place. Issue #69 wires both into the reconciler and proves the wiring with a test on the diff. |
 | 2026-08-05 | 1 | **Issue #73 is held, and issue #122 records why.** `govulncheck` reports 13 called vulnerabilities in the Go standard library and one in `golang.org/x/net` on `dev`. To merge the step is to fail every pull request until the Go toolchain and the dependencies move. That change alters what the release builds with, therefore the operator decides it. |
+| 2026-08-05 | 1 | **The operator confirmed the dispositions of the security audit.** The answer is "Accept all 48 proposals as written." `docs/security-audit.md` records it, and the earlier statement that the maintainer had confirmed none of them is removed. `SA-5` keeps the acceptance that this specification already holds. The routing of `SA-8`, `SA-9`, `SA-33`, and `SA-48` to Epic 5 is settled input to the Epic 5 decomposition. |
 
 ## Issue map
 
