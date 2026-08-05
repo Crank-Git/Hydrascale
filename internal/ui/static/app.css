@@ -254,8 +254,9 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 .ev-kind{color:var(--text-secondary); flex:none; width:112px; font-size:var(--fs-micro)}
 .ev p{margin:0; font-size:var(--fs-sm); color:var(--text-body); min-width:0}
 
-/* The empty state of the overview holds no topology, therefore the add action takes the
-   accent there. See FR-console-40. */
+/* The affirmative action is the one thing that takes the accent, in every view. The
+   overview empty state, the namespace add flow, and the removal dialog all use this one
+   rule, so no view holds a second accent use. See FR-console-40. */
 .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:var(--fw-semibold)}
 a.btn{display:inline-block; text-decoration:none}
 a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
@@ -272,11 +273,10 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   .nav-foot{margin-top:0}
 }
 
-/* The namespace view: the list, the panel, the add flow, and the removal dialog.
-   The accent belongs to one thing here: the affirmative action. The selected row shows
-   the selection with a surface and a border, so the view holds one accent use. */
+/* The namespace view: the list, the panel, the add flow, and the removal dialog. The
+   affirmative action takes the accent from the one .btn.primary rule above. The selected
+   row shows the selection with a surface and a border, so the view holds one accent use. */
 
-.btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:var(--fw-semibold)}
 .btn.primary:hover{filter:brightness(.92)}
 
 .ns-head{display:flex; justify-content:flex-end; margin-bottom:var(--sp-4)}
