@@ -131,6 +131,14 @@ func (f *Forwarder) SetUpstreams(upstreams []string) {
 	f.upstreams = upstreams
 }
 
+// Upstreams returns a copy of the upstream DNS servers of the forwarder.
+// The forwarder sends a query that no domain route matches to one of these servers.
+func (f *Forwarder) Upstreams() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return append([]string(nil), f.upstreams...)
+}
+
 // SetDomainRoutes replaces the domain routing table.
 // Each key is a domain suffix (e.g., "tail1234.ts.net") and each value
 // is the upstream DNS address to use for queries matching that suffix
