@@ -110,6 +110,8 @@ func TestScriptRejectsATrackedFileThatHoldsARealAuthKey(t *testing.T) {
 }
 
 func TestScriptRejectsAnAwsAccessKeyIdAndAPrivateKeyBlock(t *testing.T) {
+	// Each value comes from parts, because a whole literal in this file would make the
+	// script fail on this file.
 	cases := []struct {
 		name    string
 		file    string
@@ -125,7 +127,7 @@ func TestScriptRejectsAnAwsAccessKeyIdAndAPrivateKeyBlock(t *testing.T) {
 		{
 			name:    "a private key block",
 			file:    "deploy/id_rsa",
-			content: "-----" + "BEGIN OPENSSH PRIVATE KEY" + "-----\n",
+			content: "-----BEGIN " + "OPENSSH PRIVATE KEY-----\n",
 			pattern: "BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY",
 		},
 	}
