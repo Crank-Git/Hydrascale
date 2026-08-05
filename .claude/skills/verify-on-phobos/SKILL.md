@@ -47,6 +47,10 @@ rollback section before you start.
    ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'systemctl is-active hydrascale; sha256sum /usr/local/bin/hydrascale'
    ```
 
+   If the host restarted, read the crash record before you continue. The section
+   [Read the crash record](#read-the-crash-record) holds the steps. Report no restart as
+   unexplained until you read that record.
+
 2. Build for the host. If the build fails, stop. Copy nothing:
    ```sh
    GOOS=linux GOARCH=amd64 go build -o /tmp/hydrascale.test ./cmd/hydrascale
@@ -108,6 +112,78 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sha256sum /etc/resolv.conf'
 
 Record the command and its output verbatim in the pull request. A claim about host
 behaviour needs the output that proves it.
+
+## Read the crash record
+
+Issue #104 records that the test host restarts without a clean shutdown record. The
+kernel writes a crash record before it restarts, and the record survives the restart.
+Read the crash record before you report a restart as unexplained.
+
+The test host holds the `efi_pstore` backend, so it needs no reserved memory and no
+`kdump` package. This command names the backend that the kernel registered:
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo dmesg | grep "persistent store backend"'
+```
+
+The host answers `pstore: Registered efi_pstore as persistent store backend`. A host that
+prints nothing holds no `pstore` backend. On such a host, use `kdump` instead.
+
+`systemd-pstore.service` runs at each start, and Ubuntu enables it by default. The service
+moves every record out of `/sys/fs/pstore` into `/var/lib/systemd/pstore`. `/sys/fs/pstore`
+is therefore empty on a healthy host. Read the archive directory, not the empty one.
+
+1. List the records. The newest directory comes first. One crash writes more than one
+   directory, so count the panic lines of step 2 rather than the directories:
+   ```sh
+   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo ls -1t /var/lib/systemd/pstore'
+   ```
+
+2. Print the panic line of every record:
+   ```sh
+   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo grep -h "Kernel panic" /var/lib/systemd/pstore/*/*/dmesg.txt'
+   ```
+
+3. Read one whole record. `dmesg.txt` holds the joined log, and the files beside it hold
+   the single parts:
+   ```sh
+   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo cat /var/lib/systemd/pstore/<dir>/001/dmesg.txt'
+   ```
+
+**The record holds its parts in reverse order.** `Part1` carries the panic line and the
+backtrace, and it is at the foot of `dmesg.txt`. Search the file with `grep`, because the
+first lines of the file are the oldest part.
+
+The archive keeps a record until an operator deletes it. A record that predates the
+restart under review is therefore normal. Compare the directory timestamp against the
+start time that `last -x reboot` reports.
+
+If the archive holds no record for the restart, then the kernel wrote none. The kernel
+writes no record when the host loses power, when the firmware resets the host, or when
+the host stops without a panic. Report that absence as the measurement. It excludes a
+kernel panic as the cause.
+
+### Confirm that the capture still works
+
+**Warning: the command below stops the host at once, and it stops every tailnet the host
+serves.** Ask the operator before you run it, and never run it while another change is
+verified on that host.
+
+Run this only after a kernel upgrade, or when the archive holds no record for a restart
+that a panic would explain.
+
+`kernel.sysrq` equals `176` on the test host, and `/etc/sysctl.d/10-magic-sysrq.conf` sets
+that value. `176` omits the bit `0x8`, which the crash function needs, so `sysctl` must
+raise the value first. The restart restores `176` from that file, therefore this step
+leaves no change on the host:
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo sysctl -w kernel.sysrq=1 && sync && sudo sh -c "echo c > /proc/sysrq-trigger"'
+```
+
+The SSH connection stops without an answer, which is the correct result. Wait for the
+host, then read the crash record with the steps above. The record holds the line
+`Kernel panic - not syncing: sysrq triggered crash`.
 
 ## Rollback
 
