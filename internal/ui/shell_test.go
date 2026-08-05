@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -453,14 +454,24 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 }
 
 // nodeForConsoleTests looks for node on the path. It returns the path of node when node
-// is present. It returns an empty path and no error when the caller skips. It returns an
-// error when the caller fails.
+// is present. It returns an empty path and no error when the caller skips, which is a
+// developer machine that holds no node. It returns an error when the caller fails, which
+// is a gate that holds no node.
+//
+// A gate runs every test, so a gate that holds no node loses the 70 tests of
+// internal/ui/jstest and reports success all the same. The environment variable CI marks
+// a gate. GitHub Actions sets it. See issue 181.
 func nodeForConsoleTests() (string, error) {
 	node, err := exec.LookPath("node")
-	if err != nil {
+	if err == nil {
+		return node, nil
+	}
+	if os.Getenv("CI") == "" {
 		return "", nil
 	}
-	return node, nil
+	return "", fmt.Errorf("node is not on the path of this gate, so the console JavaScript "+
+		"tests of internal/ui/jstest do not run and their coverage disappears without a "+
+		"report. Install node on the gate. See issue 181. LookPath: %w", err)
 }
 
 func TestTheConsoleJavaScriptTestsFailOnAGateThatHoldsNoNode(t *testing.T) {
