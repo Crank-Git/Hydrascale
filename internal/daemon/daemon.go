@@ -164,17 +164,29 @@ func StartDaemon(tailnetID string, namespaceName string, allowUnprotected bool) 
 	}
 	etcUpper := filepath.Join(stateDir, "etc-upper")
 	etcWork := filepath.Join(stateDir, "etc-work")
+	// The helper writes this file when the overlay mount fails, so remove the record of
+	// the previous launch. A record that stays behind reports a failure that is over.
+	unprotectedFile := UnprotectedFilePath(tailnetID)
+	if err := os.Remove(unprotectedFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove the DNS protection record for %s: %w", tailnetID, err)
+	}
 	args := []string{
 		"netns", "exec", namespaceName,
 		self, "__nsdaemon",
 		"--etc-upper", etcUpper,
 		"--etc-work", etcWork,
+		"--unprotected-file", unprotectedFile,
+	}
+	if allowUnprotected {
+		args = append(args, "--allow-unprotected")
+	}
+	args = append(args,
 		"--",
 		"tailscaled",
-		"--state=" + stateFile,
-		"--socket=" + socketPath,
-		"--statedir=" + stateDir,
-	}
+		"--state="+stateFile,
+		"--socket="+socketPath,
+		"--statedir="+stateDir,
+	)
 
 	// Kill any existing daemon before starting a new one
 	cleanupExistingDaemon(tailnetID)

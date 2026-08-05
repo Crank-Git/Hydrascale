@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +12,8 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"hydrascale/internal/daemon"
 )
 
 // mountinfoSeparator divides the optional fields from the filesystem type in one
@@ -63,16 +67,43 @@ type nsDaemonOptions struct {
 	execChild func(args []string) error
 }
 
-// runNsDaemon mounts the per-namespace /etc overlay (best-effort) then execs the child.
+// runNsDaemon places the overlay mount on /etc, verifies it, then executes the child.
+// A namespace without the overlay mount lets tailscaled write the host /etc/resolv.conf
+// file, so runNsDaemon returns an error and starts no child when the mount does not
+// hold. Only dns.allow_unprotected lets the child start in that state, and runNsDaemon
+// records the mount error either way. See issue #76.
 func runNsDaemon(o nsDaemonOptions, cmdArgs []string) error {
 	if o.upper != "" && o.work != "" {
-		if err := o.mountEtc(o.upper, o.work); err != nil {
-			// Don't fail the daemon over the overlay mount; log and continue so the
-			// tailnet still comes up (falls back to pre-#28 behaviour).
-			fmt.Fprintf(os.Stderr, "hydrascale __nsdaemon: overlay /etc failed: %v (continuing without the overlay mount)\n", err)
+		if mountErr := o.mountEtc(o.upper, o.work); mountErr != nil {
+			reason := fmt.Sprintf("overlay /etc failed: %v", mountErr)
+			writeErr := writeUnprotectedFile(o.unprotectedFile, reason, o.allowUnprotected)
+			if !o.allowUnprotected {
+				return errors.Join(fmt.Errorf("%s; set dns.allow_unprotected to true to start the tailnet without the overlay mount", reason), writeErr)
+			}
+			if writeErr != nil {
+				return writeErr
+			}
+			fmt.Fprintf(os.Stderr, "hydrascale __nsdaemon: %s; dns.allow_unprotected is true, so the tailnet starts without the overlay mount\n", reason)
 		}
 	}
 	return o.execChild(cmdArgs)
+}
+
+// writeUnprotectedFile records the overlay mount failure where the daemon reads it.
+// The standard error stream of the child reaches no journal, so the file is the only
+// record that survives. See internal/daemon/daemon.go and issue #75.
+func writeUnprotectedFile(path, reason string, allowed bool) error {
+	if path == "" {
+		return nil
+	}
+	data, err := json.Marshal(daemon.UnprotectedRecord{Reason: reason, Allowed: allowed})
+	if err != nil {
+		return fmt.Errorf("encode the DNS protection record: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // mountEtcOverlay places the overlay mount on /etc and verifies it.

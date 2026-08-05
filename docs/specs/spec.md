@@ -565,6 +565,8 @@ security and DNS work must not wait behind the console.
 | 2026-08-05 | 1 | Epic 1 built. The compiled daemon leaves the index. The rule `/hydrascale` was already in `.gitignore`; a tracked file overrides an ignore rule, which is why the binary stayed. The 15 MB blob stays in the history, which the non-goals require. |
 | 2026-08-05 | 1 | Epic 1 built. Issue #93 records that `.goreleaser.yaml` uses `archives.format`, which GoReleaser version 2 deprecates. The release workflow fails when a later version removes it. |
 | 2026-08-05 | 1 | Epic 1 built. The hygiene script omits three rules that `features/01-desktop-client-removal.md` names: `CLAUDE.md`, `.claude/`, and the `Claude Code` text pattern. Risk R8 tracks the first two on purpose, and the third matches the tracked `.claude/` files, so a script holding all three exits 1 on every run. Issue #96 holds the decision. |
+| 2026-08-05 | 1 | Epic 4 built. Issue #76 adds the configuration key `dns.allow_unprotected`, default `false`. **FR-dns-5** and **FR-dns-6** read two ways together, so the build settles the conflict: a failed overlay mount always records the event `dns.unprotected`, and it places the tailnet in an error state only when `dns.allow_unprotected` is `false`. A tailnet that the operator opted out of protection stays out of the error state, because an error state that the operator cannot clear makes the opt-in useless. |
+| 2026-08-05 | 1 | Epic 4 built. Issue #76 records the overlay mount failure in the file `/var/lib/hydrascale/state/<id>/dns-unprotected`, because `internal/daemon/daemon.go:151` sets `cmd.Stderr = nil` and the standard error stream of the child reaches no journal. Issue #75 records that finding. |
 
 ## Issue map
 

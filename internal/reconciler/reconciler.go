@@ -88,6 +88,7 @@ type Reconciler struct {
 	errorStates   map[string]bool   // tailnetID -> true if in error state
 	pausedStates  map[string]bool   // tailnetID -> true if manually disconnected
 	lastErrors    map[string]string // tailnetID -> last error message
+	unprotected   map[string]string // tailnetID -> the reported overlay mount error
 	events        []Event
 
 	eventLogPath string
@@ -111,6 +112,7 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		errorStates:   make(map[string]bool),
 		pausedStates:  make(map[string]bool),
 		lastErrors:    make(map[string]string),
+		unprotected:   make(map[string]string),
 	}
 }
 
@@ -402,15 +404,50 @@ func (r *Reconciler) Reconcile() error {
 	}
 
 	actions := r.Diff(desired, actual)
+	if len(actions) > 0 {
+		r.emit("reconcile_apply", "", fmt.Sprintf("%d actions", len(actions)))
+		r.Apply(actions)
+	}
+
+	// Runs after Apply, because Apply clears the last error of a tailnet whose actions
+	// all succeeded, and an unprotected namespace must keep its error.
+	r.checkDNSProtection(desired)
+
 	if len(actions) == 0 {
 		r.emit("reconcile_complete", "", "no changes needed")
 		return nil
 	}
-
-	r.emit("reconcile_apply", "", fmt.Sprintf("%d actions", len(actions)))
-	r.Apply(actions)
 	r.emit("reconcile_complete", "", fmt.Sprintf("applied %d actions", len(actions)))
 	return nil
+}
+
+// checkDNSProtection records the event dns.unprotected for each tailnet whose overlay
+// mount on /etc failed, and places that tailnet in an error state. A tailnet that
+// dns.allow_unprotected covers keeps its event and stays out of the error state, because
+// the operator chose to run it without the overlay mount. checkDNSProtection records one
+// event for one failure, so a repeated cycle adds no event. See issue #76.
+func (r *Reconciler) checkDNSProtection(desired map[string]config.Tailnet) {
+	for id := range desired {
+		record, unprotected := r.dm.UnprotectedDNS(id)
+
+		r.mu.Lock()
+		if !unprotected {
+			delete(r.unprotected, id)
+			r.mu.Unlock()
+			continue
+		}
+		reported, seen := r.unprotected[id]
+		r.unprotected[id] = record.Reason
+		if !record.Allowed {
+			r.errorStates[id] = true
+			r.lastErrors[id] = record.Reason
+		}
+		r.mu.Unlock()
+
+		if !seen || reported != record.Reason {
+			r.emit("dns.unprotected", id, record.Reason)
+		}
+	}
 }
 
 // Loop runs the reconciliation loop until the context is cancelled.
@@ -488,6 +525,8 @@ func (r *Reconciler) ResetError(tailnetID string) {
 	delete(r.errorStates, tailnetID)
 	delete(r.failureCounts, tailnetID)
 	delete(r.pausedStates, tailnetID)
+	// The next cycle reports an overlay mount that still fails.
+	delete(r.unprotected, tailnetID)
 }
 
 // ResetAllErrors clears all error states. Called by one-shot apply.
@@ -496,6 +535,7 @@ func (r *Reconciler) ResetAllErrors() {
 	defer r.mu.Unlock()
 	r.errorStates = make(map[string]bool)
 	r.failureCounts = make(map[string]int)
+	r.unprotected = make(map[string]string)
 }
 
 // ErrorStates returns a copy of the current error states.
