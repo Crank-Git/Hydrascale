@@ -35,6 +35,7 @@ Design lives in `docs/specs/`. Read `docs/specs/spec.md` and the relevant
 | `internal/api` | The HTTP server on the control socket and on loopback. |
 | `internal/ui` | The console: `static/` plus its Go handlers and tests. |
 | `internal/policy` | The Tailscale and Headscale policy clients. |
+| `internal/session` | The reader of the sessions that the host holds now. |
 | `internal/tui` | The terminal interface. |
 | `internal/execx` | The command runner interface that tests replace. |
 

@@ -7,6 +7,7 @@ import (
 	"hydrascale/internal/access"
 	"hydrascale/internal/config"
 	"hydrascale/internal/reconciler"
+	"hydrascale/internal/session"
 )
 
 // DefaultSocketPath is the default Unix socket path for the API server.
@@ -59,10 +60,13 @@ type AccessRequest struct {
 
 // AccessResponse is the JSON response for GET /api/access and for PUT /api/access.
 // Rules is never null, because the console reads the field as a list.
+// ActivePaths holds one entry for each tailnet that carries an active session to the
+// host. The console reads it for the warning of FR-editor-28, and it is never null.
 type AccessResponse struct {
-	Mode  string        `json:"mode"`
-	Rules []access.Rule `json:"rules"`
-	Nodes []AccessNode  `json:"nodes"`
+	Mode        string         `json:"mode"`
+	Rules       []access.Rule  `json:"rules"`
+	Nodes       []AccessNode   `json:"nodes"`
+	ActivePaths []session.Path `json:"active_paths"`
 }
 
 // PolicyTailnet is one row of GET /api/policy. It states the control server kind, the

@@ -16,9 +16,11 @@ import (
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/execx"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/routing"
+	"hydrascale/internal/session"
 )
 
 // --- Mock implementations for testing ---
@@ -189,6 +191,12 @@ func startTestServer(t *testing.T, r *reconciler.Reconciler) (*Server, *Client, 
 	t.Helper()
 	socketPath := tempSocketPath(t, "test-api.sock")
 	srv := NewServer(socketPath, r)
+	// GET /api/access reads the sessions of the host. The test server holds a Recorder
+	// that reports none, therefore a test that states no session runs no host command. A
+	// test that states a session calls SetSessionReader with its own Recorder.
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{}, "ss", "-H", "-tna")
+	srv.SetSessionReader(session.NewReaderWith(rec))
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

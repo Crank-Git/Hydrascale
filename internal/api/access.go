@@ -167,8 +167,10 @@ func topology(cfg *config.Config) access.Topology {
 // buildAccessResponse reads the peer count of each tailnet from the live daemon, and it
 // reports the count 0 for a tailnet whose daemon answers with an error, because a tailnet
 // that is not running is still a node of the model.
+// buildAccessResponse reports the path of every active session that arrives on a tailnet,
+// which the console reads for the warning of FR-editor-28.
 // buildAccessResponse returns an error when the veth address of a tailnet is outside the
-// infra subnet.
+// infra subnet, and when the reader of the live sessions fails.
 func (s *Server) buildAccessResponse(ctx context.Context, cfg *config.Config, set access.RuleSet) (*AccessResponse, error) {
 	rules := make([]access.Rule, 0, len(set.Rules))
 	for _, rule := range set.Rules {
@@ -198,7 +200,12 @@ func (s *Server) buildAccessResponse(ctx context.Context, cfg *config.Config, se
 		AccessNode{ID: access.Host, Kind: access.Host},
 		AccessNode{ID: access.Internet, Kind: access.Internet})
 
-	return &AccessResponse{Mode: set.EffectiveMode(), Rules: rules, Nodes: nodes}, nil
+	paths, err := s.sessions.Paths(ctx, topology(cfg).Devices)
+	if err != nil {
+		return nil, fmt.Errorf("the active sessions of the host: %w", err)
+	}
+
+	return &AccessResponse{Mode: set.EffectiveMode(), Rules: rules, Nodes: nodes, ActivePaths: paths}, nil
 }
 
 // peerCount returns the number of peers that the tailnet holds, and it returns 0 when the

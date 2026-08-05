@@ -23,6 +23,7 @@ import (
 	"hydrascale/internal/dns"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
+	"hydrascale/internal/session"
 )
 
 // Server is an HTTP server listening on a Unix socket.
@@ -34,6 +35,10 @@ type Server struct {
 	socketGroup string
 	version     string
 	forwarder   *dns.Forwarder
+
+	// sessions reads the sessions that the host holds now. GET /api/access reports the
+	// path of each one, and the console warns from that report. See FR-editor-28.
+	sessions *session.Reader
 
 	// mux holds the JSON routes. The control socket serves it, and the console listener
 	// serves it under /api/, so one route set answers on both. See FR-console-4.
@@ -61,11 +66,16 @@ func (s *Server) SetVersion(v string) { s.version = v }
 // A nil forwarder gives an empty list of upstreams.
 func (s *Server) SetForwarder(f *dns.Forwarder) { s.forwarder = f }
 
+// SetSessionReader records the reader of the live sessions, which GET /api/access reads.
+// A test replaces the reader, so that the route runs no command on the host.
+func (s *Server) SetSessionReader(r *session.Reader) { s.sessions = r }
+
 // NewServer creates a new Server that will listen on socketPath.
 func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	s := &Server{
 		reconciler: r,
 		socketPath: socketPath,
+		sessions:   session.NewReader(),
 	}
 
 	mux := http.NewServeMux()
