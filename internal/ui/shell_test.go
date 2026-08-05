@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -534,6 +535,70 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the console JavaScript tests fail: %v", err)
 	}
+
+	// The count is the signal that a comment cannot carry: a deleted test file still
+	// passes, so the floor fails the run instead. See issue 231.
+	count, err := consoleJavaScriptTestCount(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count < minimumConsoleJavaScriptTests {
+		t.Errorf("the run passes %d console JavaScript tests and the floor is %d, so "+
+			"internal/ui/jstest lost a test. Restore the test, or lower "+
+			"minimumConsoleJavaScriptTests and state the reason",
+			count, minimumConsoleJavaScriptTests)
+	}
+}
+
+// minimumConsoleJavaScriptTests is the floor that internal/ui/jstest must reach. The
+// value is a floor rather than an exact count, because a new console test must not fail
+// the build. Raise it when a batch of tests lands. See issue 231.
+const minimumConsoleJavaScriptTests = 218
+
+// nodeTestPassLine matches the summary line "ℹ pass 218" that node --test writes last.
+var nodeTestPassLine = regexp.MustCompile(`(?m)^(?:ℹ|#)\s+pass\s+(\d+)\s*$`)
+
+// consoleJavaScriptTestCount returns the number of tests that node --test reports as
+// passed. It reads the combined output of the run. It returns an error when the output
+// holds no pass line, which is a changed report format that hides the count.
+func consoleJavaScriptTestCount(out []byte) (int, error) {
+	match := nodeTestPassLine.FindSubmatch(out)
+	if match == nil {
+		return 0, fmt.Errorf("the output of node --test holds no pass line, so the " +
+			"console JavaScript test count is unknown. Correct nodeTestPassLine for the " +
+			"report format of this node version")
+	}
+	count, err := strconv.Atoi(string(match[1]))
+	if err != nil {
+		return 0, fmt.Errorf("the pass line of node --test holds no number: %w", err)
+	}
+	return count, nil
+}
+
+func TestTheConsoleTestCountComesFromTheNodeSummaryLine(t *testing.T) {
+	out := []byte("✔ a rule list row names the ports (0.1ms)\nℹ tests 218\nℹ suites 0\nℹ pass 218\nℹ fail 0\n")
+
+	count, err := consoleJavaScriptTestCount(out)
+	if err != nil {
+		t.Fatalf("the summary line is present and the count fails: %v", err)
+	}
+	if count != 218 {
+		t.Errorf("the summary line reports 218 and the count is %d", count)
+	}
+}
+
+func TestTheConsoleTestCountFailsWhenTheOutputHoldsNoSummaryLine(t *testing.T) {
+	// A changed report format must fail the run rather than report a count of zero,
+	// because a count of zero reads the same as a lost test file.
+	out := []byte("✔ a rule list row names the ports (0.1ms)\n")
+
+	count, err := consoleJavaScriptTestCount(out)
+	if err == nil {
+		t.Fatalf("the output holds no summary line and the count is %d", count)
+	}
+	if !strings.Contains(err.Error(), "pass line") {
+		t.Errorf("the message does not name the pass line: %v", err)
+	}
 }
 
 // nodeForConsoleTests looks for node on the path. It returns the path of node when node
@@ -541,7 +606,7 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 // developer machine that holds no node. It returns an error when the caller fails, which
 // is a gate that holds no node.
 //
-// A gate runs every test, so a gate that holds no node loses the 70 tests of
+// A gate runs every test, so a gate that holds no node loses every test of
 // internal/ui/jstest and reports success all the same. Two environment variables mark a
 // gate: GitHub Actions sets CI, and the gate script of the test host exports
 // HYDRASCALE_GATE. See issue 181 and issue 191.
@@ -559,7 +624,7 @@ func nodeForConsoleTests() (string, error) {
 }
 
 func TestTheConsoleJavaScriptTestsFailOnAGateThatHoldsNoNode(t *testing.T) {
-	// A gate that loses node runs 0 of the 70 tests of internal/ui/jstest and still
+	// A gate that loses node runs none of the tests of internal/ui/jstest and still
 	// reports success, so the coverage disappears and nothing states it. See issue 181.
 	t.Setenv("CI", "true")
 	t.Setenv("PATH", "")
@@ -575,7 +640,7 @@ func TestTheConsoleJavaScriptTestsFailOnAGateThatHoldsNoNode(t *testing.T) {
 
 func TestTheConsoleJavaScriptTestsFailOnATestHostGateThatHoldsNoNode(t *testing.T) {
 	// The gate script of the test host sets no CI, so it exports HYDRASCALE_GATE instead.
-	// Without the marker the gate loses the 70 tests and reports success. See issue 191.
+	// Without the marker the gate loses every test and reports success. See issue 191.
 	t.Setenv("CI", "")
 	t.Setenv("HYDRASCALE_GATE", "1")
 	t.Setenv("PATH", "")
