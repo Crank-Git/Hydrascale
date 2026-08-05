@@ -23,8 +23,38 @@ const devicePrefix = "vh"
 type Tail [][]string
 
 // EnforceTail drops a packet that no rule allows.
-// Issue #136 adds the tail that the mode observe needs, which logs and returns.
 var EnforceTail = Tail{{"-j", "DROP"}}
+
+// LogPrefix marks each line that the mode observe writes to the kernel log. The operator
+// reads the lines with journalctl -u hydrascale | grep hydrascale-would-deny.
+const LogPrefix = "hydrascale-would-deny: "
+
+// logLimit holds 60 packets each minute, because the LOG target on a busy host writes one
+// line for every packet that no rule allows.
+const logLimit = "60/minute"
+
+// ObserveTail logs a packet that no rule allows and returns it to the calling chain.
+// The tail holds no DROP rule, therefore the mode observe denies nothing.
+var ObserveTail = Tail{
+	{"-m", "limit", "--limit", logLimit, "-j", "LOG", "--log-prefix", LogPrefix},
+	{"-j", "RETURN"},
+}
+
+// TailForMode returns the rules that close each chain in the named mode.
+// mode is the value of access.mode, and an empty value means ModeEnforce.
+// TailForMode returns an error when the mode is not ModeEnforce and not ModeObserve,
+// because a caller that guesses the tail chooses between a host that filters nothing and
+// a host that drops everything.
+func TailForMode(mode string) (Tail, error) {
+	switch mode {
+	case "", ModeEnforce:
+		return EnforceTail, nil
+	case ModeObserve:
+		return ObserveTail, nil
+	default:
+		return nil, fmt.Errorf("invalid mode %q: the daemon runs the modes %s and %s", mode, ModeEnforce, ModeObserve)
+	}
+}
 
 // Topology holds the host facts that Compile needs. Compile takes them as an argument,
 // so that it stays a pure function.

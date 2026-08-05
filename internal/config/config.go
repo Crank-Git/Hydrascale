@@ -96,6 +96,16 @@ type Config struct {
 	Access *access.RuleSet `yaml:"access,omitempty"`
 }
 
+// AccessMode returns the mode that the daemon applies the local rule set in.
+// AccessMode returns access.ModeEnforce when the file holds no access key, and when the
+// access block holds no mode key.
+func (c *Config) AccessMode() string {
+	if c.Access == nil {
+		return access.ModeEnforce
+	}
+	return c.Access.EffectiveMode()
+}
+
 // TailnetHostAccess returns whether host access is enabled for a specific tailnet,
 // resolving per-tailnet override against the global default.
 func (c *Config) TailnetHostAccess(tailnetID string) bool {

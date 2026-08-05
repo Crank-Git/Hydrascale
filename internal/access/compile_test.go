@@ -282,6 +282,134 @@ func TestCompile(t *testing.T) {
 	})
 }
 
+func TestObserveTail(t *testing.T) {
+	// observeSet holds one rule, so that the chain carries an allow rule and a tail.
+	observeSet := RuleSet{Mode: ModeObserve, Rules: []Rule{{From: "alpha", To: "beta"}}}
+
+	t.Run("ends the forward chain with a log rule and a return rule", func(t *testing.T) {
+		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		got := lines(compiled.Forward)
+		want := []string{
+			"-A HYDRASCALE-FWD -m limit --limit 60/minute -j LOG --log-prefix hydrascale-would-deny: ",
+			"-A HYDRASCALE-FWD -j RETURN",
+		}
+		if len(got) < 2 {
+			t.Fatalf("the forward chain holds %d rules, want at least 2", len(got))
+		}
+		equalLines(t, compiled.Forward[len(compiled.Forward)-2:], want)
+	})
+
+	t.Run("ends the out chain with a log rule and a return rule for each namespace device", func(t *testing.T) {
+		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		want := []string{
+			"-A HYDRASCALE-OUT -i vh0a0a0a0a0a0a -m limit --limit 60/minute -j LOG --log-prefix hydrascale-would-deny: ",
+			"-A HYDRASCALE-OUT -i vh0a0a0a0a0a0a -j RETURN",
+			"-A HYDRASCALE-OUT -i vh0b0b0b0b0b0b -m limit --limit 60/minute -j LOG --log-prefix hydrascale-would-deny: ",
+			"-A HYDRASCALE-OUT -i vh0b0b0b0b0b0b -j RETURN",
+		}
+		if len(compiled.Out) < 4 {
+			t.Fatalf("the out chain holds %d rules, want at least 4", len(compiled.Out))
+		}
+		equalLines(t, compiled.Out[len(compiled.Out)-4:], want)
+	})
+
+	t.Run("holds no drop rule in either chain", func(t *testing.T) {
+		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		for _, line := range append(lines(compiled.Forward), lines(compiled.Out)...) {
+			if strings.Contains(line, "DROP") {
+				t.Errorf("rule %q holds DROP, want none in the mode %s", line, ModeObserve)
+			}
+		}
+	})
+
+	t.Run("carries the prefix hydrascale-would-deny on the log rule", func(t *testing.T) {
+		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		rule := compiled.Forward[len(compiled.Forward)-2]
+		prefix, ok := argValue(rule, "--log-prefix")
+		if !ok {
+			t.Fatalf("rule %q holds no --log-prefix option", strings.Join(rule, " "))
+		}
+		if prefix != "hydrascale-would-deny: " {
+			t.Errorf("--log-prefix = %q, want %q", prefix, "hydrascale-would-deny: ")
+		}
+	})
+
+	t.Run("carries the rate limit of 60 packets each minute on the log rule", func(t *testing.T) {
+		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		rule := strings.Join(compiled.Forward[len(compiled.Forward)-2], " ")
+		if !strings.Contains(rule, "-m limit --limit 60/minute") {
+			t.Errorf("rule = %q, want the match -m limit --limit 60/minute", rule)
+		}
+	})
+
+	t.Run("ends the forward chain with a drop rule in the mode enforce", func(t *testing.T) {
+		set := RuleSet{Mode: ModeEnforce, Rules: []Rule{{From: "alpha", To: "beta"}}}
+		compiled, err := Compile(set, testTopology(), EnforceTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		last := strings.Join(compiled.Forward[len(compiled.Forward)-1], " ")
+		if last != "-A HYDRASCALE-FWD -j DROP" {
+			t.Errorf("the last forward rule = %q, want %q", last, "-A HYDRASCALE-FWD -j DROP")
+		}
+	})
+}
+
+func TestTailForMode(t *testing.T) {
+	t.Run("returns the enforce tail for an absent mode", func(t *testing.T) {
+		tail, err := TailForMode("")
+		if err != nil {
+			t.Fatalf("TailForMode returned %v, want no error", err)
+		}
+		equalLines(t, tail, lines(EnforceTail))
+	})
+
+	t.Run("returns the observe tail for the mode observe", func(t *testing.T) {
+		tail, err := TailForMode(ModeObserve)
+		if err != nil {
+			t.Fatalf("TailForMode returned %v, want no error", err)
+		}
+		equalLines(t, tail, lines(ObserveTail))
+	})
+
+	t.Run("rejects a mode that the daemon does not run and names both accepted values", func(t *testing.T) {
+		_, err := TailForMode("audit")
+		if err == nil {
+			t.Fatal("TailForMode returned no error, want an error")
+		}
+		for _, want := range []string{"audit", ModeEnforce, ModeObserve} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q, want the value %q in the message", err, want)
+			}
+		}
+	})
+}
+
+// argValue returns the value that follows the named option in one argument list.
+func argValue(rule []string, option string) (string, bool) {
+	for i := 0; i+1 < len(rule); i++ {
+		if rule[i] == option {
+			return rule[i+1], true
+		}
+	}
+	return "", false
+}
+
 func TestValidate(t *testing.T) {
 	t.Run("reports every rule that fails", func(t *testing.T) {
 		set := RuleSet{Rules: []Rule{
@@ -294,6 +422,18 @@ func TestValidate(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "rule 1") || !strings.Contains(err.Error(), "rule 2") {
 			t.Errorf("error = %q, want both rule 1 and rule 2 in the message", err)
+		}
+	})
+
+	t.Run("names both accepted values when it rejects a mode", func(t *testing.T) {
+		err := RuleSet{Mode: "audit"}.Validate(nil)
+		if err == nil {
+			t.Fatal("Validate returned no error, want an error")
+		}
+		for _, want := range []string{"audit", ModeEnforce, ModeObserve} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q, want the value %q in the message", err, want)
+			}
 		}
 	})
 
