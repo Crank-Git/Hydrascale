@@ -2,6 +2,7 @@ package namespaces
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -148,7 +149,10 @@ func hostAccessFixture(t *testing.T, nsName, infraSubnet string, index int) (*ex
 	return rec, &RealManager{Runner: rec}, want
 }
 
-func TestSetupAndTeardownLeaveTheCommandListBalanced(t *testing.T) {
+// TestTeardownRemovesEveryRuleThatSetupAdded holds that the teardown list covers the setup
+// list. The teardown list is longer, because it also removes the two FORWARD rules of
+// version 0.9 that this version does not write.
+func TestTeardownRemovesEveryRuleThatSetupAdded(t *testing.T) {
 	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
 	// TeardownVeth derives the index from the namespace name, so the balance holds only
 	// for the index that Create passes to SetupVeth.
@@ -180,13 +184,10 @@ func TestSetupAndTeardownLeaveTheCommandListBalanced(t *testing.T) {
 	if len(added) == 0 {
 		t.Fatal("setup added no rule")
 	}
-	if len(added) != len(removed) {
-		t.Fatalf("setup added %d rules and teardown removed %d:\nadded:\n%s\nremoved:\n%s",
-			len(added), len(removed), strings.Join(added, "\n"), strings.Join(removed, "\n"))
-	}
-	for i := range added {
-		if added[i] != removed[i] {
-			t.Errorf("rule %d: setup added %q, teardown removed %q", i, added[i], removed[i])
+	for _, rule := range added {
+		if !slices.Contains(removed, rule) {
+			t.Errorf("setup added %q and teardown removed no such rule:\nremoved:\n%s",
+				rule, strings.Join(removed, "\n"))
 		}
 	}
 }
@@ -336,6 +337,85 @@ func TestReapStaleRulesKeepsARuleThatNamesALiveVethDevice(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("ReapStaleRules removed %d rules, want 0", count)
+	}
+}
+
+func TestRemoveLegacyForwardRulesRemovesBothRulesOfVersionZeroNine(t *testing.T) {
+	const live = "vhbbbbbbbbbbbb"
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(
+		"-P FORWARD DROP\n" +
+			"-A FORWARD -i " + live + " -j ACCEPT\n" +
+			"-A FORWARD -o " + live + " -m state --state RELATED,ESTABLISHED -j ACCEPT\n" +
+			"-A FORWARD -j HYDRASCALE-FWD\n")},
+		"iptables", "-S", "FORWARD")
+	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-i", live, "-j", "ACCEPT")
+	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-o", live, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+
+	m := &RealManager{Runner: rec}
+	count, err := m.RemoveLegacyForwardRules()
+	if err != nil {
+		t.Fatalf("RemoveLegacyForwardRules: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("RemoveLegacyForwardRules removed %d rules, want 2", count)
+	}
+}
+
+func TestRemoveLegacyForwardRulesKeepsARuleOfTheOperator(t *testing.T) {
+	const live = "vhbbbbbbbbbbbb"
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(
+		"-P FORWARD DROP\n" +
+			"-A FORWARD -i docker0 -j ACCEPT\n" +
+			"-A FORWARD -i " + live + " -p tcp --dport 22 -j ACCEPT\n" +
+			"-A FORWARD -i " + live + " -j DROP\n" +
+			"-A FORWARD -j HYDRASCALE-FWD\n")},
+		"iptables", "-S", "FORWARD")
+
+	m := &RealManager{Runner: rec}
+	count, err := m.RemoveLegacyForwardRules()
+	if err != nil {
+		t.Fatalf("RemoveLegacyForwardRules: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("RemoveLegacyForwardRules removed %d rules, want 0", count)
+	}
+}
+
+func TestNamespaceForwardingReturnsTheValueInsideTheNamespace(t *testing.T) {
+	const nsName = "ns-team-prod"
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte("0\n")},
+		"ip", "netns", "exec", nsName, "sysctl", "-n", "net.ipv4.ip_forward")
+
+	m := &RealManager{Runner: rec}
+	got, err := m.NamespaceForwarding(nsName)
+	if err != nil {
+		t.Fatalf("NamespaceForwarding: %v", err)
+	}
+	if got != "0" {
+		t.Errorf("NamespaceForwarding = %q, want %q", got, "0")
+	}
+}
+
+func TestNamespaceForwardingReportsANamespaceThatForwards(t *testing.T) {
+	const nsName = "ns-team-prod"
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte("1\n")},
+		"ip", "netns", "exec", nsName, "sysctl", "-n", "net.ipv4.ip_forward")
+
+	m := &RealManager{Runner: rec}
+	got, err := m.NamespaceForwarding(nsName)
+	if err != nil {
+		t.Fatalf("NamespaceForwarding: %v", err)
+	}
+	if got != "1" {
+		t.Errorf("NamespaceForwarding = %q, want %q", got, "1")
 	}
 }
 
