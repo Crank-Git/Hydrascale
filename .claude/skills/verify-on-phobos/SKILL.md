@@ -218,6 +218,10 @@ replaces them. A rollback keeps the namespaces, so the setup path does not run a
 rules never return. A restart of the service repairs nothing, for the same reason. The
 project manager measured this on 2026-08-05 and issue #172 records it.
 
+The daemon removes both chains and both jump rules when the service stops, therefore a
+rollback leaves no rule of the newer version on the host. Only the two rules of version
+0.9 are missing. Issue #172 measured this on the test host on 2026-08-05.
+
 **Warning: a namespace with no `FORWARD` rule reaches nothing, and `hydrascale status`
 still reports `healthy` and `running`.** Run these steps after every rollback from a build
 that holds `HYDRASCALE-FWD` to a version 0.9 build.
