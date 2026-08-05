@@ -113,6 +113,13 @@ func (c *Client) postJSON(path string, body interface{}, result interface{}) err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// A refused request carries {"error": "<message>"}, so the caller reads the reason
+		// rather than the status code alone.
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		var refusal ErrorResponse
+		if readErr == nil && json.Unmarshal(data, &refusal) == nil && refusal.Error != "" {
+			return fmt.Errorf("%s refused the request: %s", path, refusal.Error)
+		}
 		return fmt.Errorf("%s returned HTTP %d", path, resp.StatusCode)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
