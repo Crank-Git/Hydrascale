@@ -4,14 +4,26 @@
       "Bash(go build:*)",
       "Bash(go test:*)",
       "Bash(go vet:*)",
-      "Bash(go run:*)",
-      "Bash(go mod:*)",
       "Bash(go doc:*)",
+      "Bash(go mod tidy)",
+      "Bash(go mod verify)",
+      "Bash(go mod download:*)",
+      "Bash(go mod vendor)",
       "Bash(gofmt:*)",
       "Bash(govulncheck:*)",
-      "Bash(gh pr:*)",
-      "Bash(gh issue:*)",
-      "Bash(gh api:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
       "Bash(scripts/check-hygiene.sh)"
     ]
   },
@@ -22,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v gofmt >/dev/null 2>&1 || exit 0; for f in $CLAUDE_FILE_PATHS; do case \"$f\" in *.go) gofmt -w \"$f\" ;; esac; done"
+            "command": "command -v gofmt >/dev/null 2>&1 || exit 0; printf '%s' \"$CLAUDE_FILE_PATHS\" | tr ' ' '\\n' | while IFS= read -r f; do case \"$f\" in *.go) [ -f \"$f\" ] && gofmt -w \"$f\" ;; esac; done; exit 0"
           }
         ]
       }
