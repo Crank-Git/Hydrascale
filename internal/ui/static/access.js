@@ -1,16 +1,16 @@
 // The access view: the header, the staged state model, the mode control, the reachability
-// matrix, and the flow overview.
-//
-// The view draws no rule row. Issue #151 adds it, and it writes into the staged state
-// model that this file holds.
+// matrix, the flow overview, the rule list, the staged list, and the apply.
 //
 // The flow overview reuses the renderer of the overview topology in topology.js. It reads
 // the staged rule set, therefore an edit reaches the picture before the daemon holds it.
 //
 // The model holds three things: the rule set that the daemon reported, the staged rule
 // set, and the difference between them. The staged count is the size of the difference.
-// A staged edit changes the model alone. Only the apply of issue #152 sends a rule set,
-// which FR-editor-23 states.
+// A staged edit changes the model alone. Only the apply sends a rule set, which
+// FR-editor-23 states.
+//
+// The apply sends the dry run first and the write after it. On a failure it changes no
+// staged edit and it repeats the message of the daemon word for word.
 //
 // The mode control is the one mutating request of this view. It sends the rule set of the
 // daemon with the new mode, therefore a staged rule reaches no host until the operator
@@ -19,7 +19,7 @@
 // Every function above the drawing section is pure, or it takes its transport as an
 // argument, so internal/ui/jstest asserts it under Node with no browser and no network.
 
-import { ACCESS_ROUTE, registerView, requestJSON } from "./app.js";
+import { ACCESS_ROUTE, refreshConsole, registerView, requestJSON } from "./app.js";
 import { buildTopology, textEquivalentMarkup, topologySVGMarkup } from "./topology.js";
 
 /** The identifier of the element that holds the text equivalent of the flow overview.
@@ -57,6 +57,44 @@ function samePorts(one, other) {
   return a.length === b.length && a.every((port, at) => port === b[at]);
 }
 
+/** sameRules reports whether two rule sets allow the same paths on the same ports.
+ *  The daemon states no order for the rule set, therefore the comparison reads the key. */
+function sameRules(one, other) {
+  if (one.length !== other.length) {
+    return false;
+  }
+  const byKey = new Map(other.map((rule) => [ruleKey(rule), rule]));
+  return one.every((rule) => {
+    const match = byKey.get(ruleKey(rule));
+    return match !== undefined && samePorts(match, rule);
+  });
+}
+
+/**
+ * differenceBetween returns the added rules, the removed rules, and the changed rules.
+ *
+ * before is a rule set and after is a rule set. A rule of after that before does not hold
+ * is added, a rule of before that after does not hold is removed, and a rule that both
+ * hold on other ports is changed.
+ */
+function differenceBetween(before, after) {
+  const beforeByKey = new Map(before.map((rule) => [ruleKey(rule), rule]));
+  const afterByKey = new Map(after.map((rule) => [ruleKey(rule), rule]));
+
+  const added = [];
+  const changed = [];
+  for (const [key, rule] of afterByKey) {
+    const held = beforeByKey.get(key);
+    if (!held) {
+      added.push(rule);
+    } else if (!samePorts(held, rule)) {
+      changed.push(rule);
+    }
+  }
+  const removed = before.filter((rule) => !afterByKey.has(ruleKey(rule)));
+  return { added, removed, changed };
+}
+
 /**
  * createAccessState returns the staged state model of the access view.
  *
@@ -72,22 +110,17 @@ export function createAccessState(options = {}) {
   let base = { mode: MODE_ENFORCE, rules: [], nodes: [] };
   let staged = [];
 
-  function difference() {
-    const baseByKey = new Map(base.rules.map((rule) => [ruleKey(rule), rule]));
-    const stagedByKey = new Map(staged.map((rule) => [ruleKey(rule), rule]));
+  // stageBase is the rule set of the daemon that the operator staged the edits against. It
+  // is null while the console holds no staged edit. The rebase needs it, because the
+  // difference of the operator is the difference against that rule set and not against the
+  // rule set that a later poll returned.
+  let stageBase = null;
 
-    const added = [];
-    const changed = [];
-    for (const [key, rule] of stagedByKey) {
-      const before = baseByKey.get(key);
-      if (!before) {
-        added.push(rule);
-      } else if (!samePorts(before, rule)) {
-        changed.push(rule);
-      }
-    }
-    const removed = base.rules.filter((rule) => !stagedByKey.has(ruleKey(rule)));
-    return { added, removed, changed };
+  // droppedRules holds every staged rule that names a node the daemon no longer reports.
+  let droppedRules = [];
+
+  function difference() {
+    return differenceBetween(base.rules, staged);
   }
 
   function count() {
@@ -122,17 +155,83 @@ export function createAccessState(options = {}) {
       };
       if (wasClean) {
         staged = base.rules.map(normalizeRule);
+        stageBase = null;
+        droppedRules = [];
+        return;
       }
+
+      // A rule names a tailnet, the host, or the internet, and the daemon reports one node
+      // for each. A staged rule that names a node of no answer reaches no host, therefore
+      // the model drops it and dropped states which rule it dropped.
+      const known = new Set(base.nodes.map((node) => node.id));
+      if (known.size === 0) {
+        return;
+      }
+      const holds = (rule) => known.has(rule.from) && known.has(rule.to);
+      droppedRules = [...droppedRules, ...staged.filter((rule) => !holds(rule))];
+      staged = staged.filter(holds);
     },
 
     /** setRules replaces the staged rule set. It sends nothing. FR-editor-23. */
     setRules(rules) {
+      if (stageBase === null) {
+        stageBase = { mode: base.mode, rules: base.rules.map(normalizeRule) };
+      }
       staged = rules.map(normalizeRule);
+      if (count() === 0) {
+        // The staged rule set equals the rule set of the daemon, therefore the console
+        // tracks the daemon again and a later poll replaces the staged rule set.
+        stageBase = null;
+      }
     },
 
     /** discard returns the staged rule set to the rule set of the daemon. FR-editor-27. */
     discard() {
       staged = base.rules.map(normalizeRule);
+      stageBase = null;
+      droppedRules = [];
+    },
+
+    /**
+     * baseChanged reports whether the daemon holds another rule set than the rule set that
+     * the operator staged the edits against.
+     *
+     * Another console that applies a change raises it. It is false while the console holds
+     * no staged edit, because a clean console takes each answer of the daemon.
+     */
+    baseChanged() {
+      return stageBase !== null && !sameRules(stageBase.rules, base.rules);
+    },
+
+    /**
+     * rebase writes the staged edits onto the rule set that the daemon holds now.
+     *
+     * rebase keeps every rule that the other console added, and it repeats the added rule,
+     * the changed rule, and the removed rule of the operator on that rule set. rebase
+     * sends nothing.
+     */
+    rebase() {
+      if (stageBase === null) {
+        return;
+      }
+      const change = differenceBetween(stageBase.rules, staged);
+      const next = new Map(base.rules.map((rule) => [ruleKey(rule), normalizeRule(rule)]));
+      for (const rule of change.removed) {
+        next.delete(ruleKey(rule));
+      }
+      for (const rule of [...change.added, ...change.changed]) {
+        next.set(ruleKey(rule), normalizeRule(rule));
+      }
+      staged = [...next.values()];
+      stageBase = { mode: base.mode, rules: base.rules.map(normalizeRule) };
+      if (count() === 0) {
+        stageBase = null;
+      }
+    },
+
+    /** dropped returns every staged rule that named a node the daemon stopped reporting. */
+    dropped() {
+      return droppedRules.map(normalizeRule);
     },
 
     /** difference returns the added rules, the removed rules, and the changed rules. */
@@ -148,15 +247,19 @@ export function createAccessState(options = {}) {
   };
 }
 
+/** The label of the apply action while the daemon applies the rule set. */
+export const APPLYING_LABEL = "The daemon applies the rule set";
+
 /**
  * headerModel returns the header of the view: the mode, the staged count, and the
  * controls.
  *
  * mode is the mode that the daemon reported and count is the number of staged edits.
+ * applying is true while the daemon applies the rule set. Every control writes, therefore
+ * every control is disabled while one request runs.
  * The accent belongs to one thing per view, and this view gives it to the apply action.
- * Issue #152 gives the apply control and the discard control their behaviour.
  */
-export function headerModel(mode, count) {
+export function headerModel(mode, count, applying = false) {
   const staged = count === 1 ? "1 staged" : `${count} staged`;
   return {
     mode: {
@@ -165,10 +268,98 @@ export function headerModel(mode, count) {
     },
     staged,
     controls: [
-      { id: "mode", label: "Change the mode", kind: "button", accent: false, disabled: false },
-      { id: "discard", label: "Discard", kind: "button", accent: false, disabled: count === 0 },
-      { id: "apply", label: "Apply", kind: "button", accent: true, disabled: count === 0 },
+      { id: "mode", label: "Change the mode", kind: "button", accent: false, disabled: applying },
+      { id: "discard", label: "Discard", kind: "button", accent: false, disabled: count === 0 || applying },
+      {
+        id: "apply",
+        label: applying ? APPLYING_LABEL : "Apply",
+        kind: "button",
+        accent: true,
+        disabled: count === 0 || applying,
+      },
     ],
+  };
+}
+
+/**
+ * stagedListModel returns one row per staged edit. FR-editor-25.
+ *
+ * difference is the difference that the model returns. The list holds the added rules, the
+ * changed rules, and the removed rules, in that order, and count is the number of rows.
+ * The count and the header therefore read the one difference and they state one number.
+ */
+export function stagedListModel(difference) {
+  const row = (kind, word, rule) => ({
+    kind,
+    word,
+    from: rule.from,
+    to: rule.to,
+    ports: rule.ports.slice(),
+    portsLabel: rule.ports.length === 0 ? ALL_PORTS : rule.ports.join(", "),
+  });
+  const rows = [
+    ...difference.added.map((rule) => row("add", "allow", normalizeRule(rule))),
+    ...difference.changed.map((rule) => row("change", "change the ports of", normalizeRule(rule))),
+    ...difference.removed.map((rule) => row("remove", "remove", normalizeRule(rule))),
+  ];
+  return { count: rows.length, rows };
+}
+
+/**
+ * applyFailureStatement returns the statement of an apply that the daemon refused.
+ *
+ * message is the message that the daemon stated. applyFailureStatement returns it
+ * unchanged, because .claude/rules/ste.md states that a rewritten message is destroyed
+ * evidence. FR-editor-30.
+ */
+export function applyFailureStatement(message) {
+  return {
+    lead: "The daemon refused the rule set. The host keeps the rule set that it held, and the console keeps every staged edit.",
+    message,
+  };
+}
+
+/**
+ * rebaseOffer returns the offer that a changed rule set of the daemon raises, and null
+ * when the daemon holds the rule set that the operator staged the edits against.
+ *
+ * changed is the value of baseChanged and count is the number of staged edits. The offer
+ * takes no accent, because the accent marks the apply action alone.
+ */
+export function rebaseOffer(changed, count) {
+  if (!changed) {
+    return null;
+  }
+  const edits = count === 1 ? "1 staged edit" : `${count} staged edits`;
+  return {
+    sentences: [
+      `Warning: another console changed the rule set of the daemon while this console held ${edits}.`,
+      "Rebase writes the staged edits onto the rule set that the daemon holds now.",
+      "Discard removes every staged edit and it returns the view to the daemon.",
+    ],
+    controls: [
+      { id: "rebase", label: "Rebase the edits", kind: "button", accent: false },
+      { id: "discard", label: "Discard the edits", kind: "button", accent: false },
+    ],
+  };
+}
+
+/**
+ * droppedStatement returns the statement of every staged rule that the model dropped, and
+ * null when the model dropped none.
+ *
+ * rules is the value of dropped. The daemon reports no node for the source or for the
+ * destination of each rule, therefore the rule reaches no host.
+ */
+export function droppedStatement(rules) {
+  if (!rules || rules.length === 0) {
+    return null;
+  }
+  return {
+    sentence: rules.length === 1
+      ? "The daemon reports no node for one staged rule, therefore the console dropped it:"
+      : "The daemon reports no node for these staged rules, therefore the console dropped them:",
+    rules: rules.map((rule) => `${rule.from} to ${rule.to}`),
   };
 }
 
@@ -230,6 +421,47 @@ export function modeChange(mode) {
  */
 export function sendModeChange(state, next) {
   return state.send(ACCESS_ROUTE, "PUT", { mode: next, rules: state.base().rules });
+}
+
+/** The route that computes the effect of a rule set and writes nothing. The daemon reads
+ *  the query parameter in dryRunParam of internal/api/access.go. */
+export const DRY_RUN_ROUTE = `${ACCESS_ROUTE}?dry_run=true`;
+
+/** messageOf returns the message that a rejected request stated. */
+function messageOf(err) {
+  return err && err.message ? err.message : String(err);
+}
+
+/**
+ * applyStagedRules sends the staged rule set to the daemon and returns what happened.
+ *
+ * state is the model. applyStagedRules sends the dry run first, which computes the effect
+ * and writes nothing, and it sends the write after the dry run passes. Both requests carry
+ * the whole rule set, so that two consoles cannot interleave partial writes. FR-editor-26.
+ *
+ * On a success applyStagedRules takes the answer as the new rule set of the daemon and it
+ * clears the staged edits, which FR-editor-29 states. It returns {ok: true, body}.
+ * On a failure it changes no staged edit and it returns {ok: false, error}, where error is
+ * the message of the daemon word for word. FR-editor-30.
+ */
+export async function applyStagedRules(state) {
+  const body = { mode: state.base().mode, rules: state.rules() };
+  try {
+    await state.send(DRY_RUN_ROUTE, "PUT", body);
+  } catch (err) {
+    return { ok: false, error: messageOf(err) };
+  }
+
+  let applied = null;
+  try {
+    applied = await state.send(ACCESS_ROUTE, "PUT", body);
+  } catch (err) {
+    return { ok: false, error: messageOf(err) };
+  }
+
+  state.setBase(applied);
+  state.discard();
+  return { ok: true, body: applied };
 }
 
 /**
@@ -550,6 +782,12 @@ const state = createAccessState();
 let dialog = null; // null, or {sending, error}
 let redraw = () => {};
 
+/** applying is true while the daemon applies the staged rule set. */
+let applying = false;
+
+/** applyError holds the message that the daemon stated on a refused apply, or null. */
+let applyError = null;
+
 /** source holds the source that the picture draws, and null when the operator chose none. */
 let source = null;
 
@@ -588,9 +826,16 @@ function control(model, onClick) {
   return button;
 }
 
+/** The handler of each header control, by identifier. */
+const headerActions = {
+  mode: openModeDialog,
+  discard: discardEdits,
+  apply: runApply,
+};
+
 /** drawHeader draws the mode, the staged count, and the three controls. */
 function drawHeader(base) {
-  const header = headerModel(base.mode, state.count());
+  const header = headerModel(base.mode, state.count(), applying);
   const row = el("div", "ac-head");
 
   const states = el("div", "ac-states");
@@ -600,13 +845,128 @@ function drawHeader(base) {
 
   const acts = el("div", "ac-acts");
   for (const model of header.controls) {
-    // Issue #152 gives the apply action and the discard action their behaviour. Both stay
-    // disabled while the console holds no staged edit, which is every state of this issue.
-    const onClick = model.id === "mode" ? openModeDialog : () => {};
-    acts.append(control(model, onClick));
+    acts.append(control(model, headerActions[model.id]));
   }
   row.append(acts);
   return row;
+}
+
+/** discardEdits returns the view to the rule set of the daemon. FR-editor-27. */
+function discardEdits() {
+  state.discard();
+  applyError = null;
+  redraw();
+}
+
+/**
+ * runApply sends the staged rule set and it draws the result.
+ *
+ * The operator starts it. The view starts no timer, therefore the console applies no edit
+ * on its own.
+ */
+function runApply() {
+  applying = true;
+  applyError = null;
+  redraw();
+
+  applyStagedRules(state).then((result) => {
+    applying = false;
+    applyError = result.ok ? null : result.error;
+    redraw();
+    if (result.ok) {
+      // The daemon holds the new rule set, therefore the console asks the poll layer for a
+      // new tick rather than showing the state of the last tick. FR-editor-29.
+      refreshConsole();
+    }
+  });
+}
+
+/** rebaseEdits writes the staged edits onto the rule set that the daemon holds now. */
+function rebaseEdits() {
+  state.rebase();
+  redraw();
+}
+
+/**
+ * drawRebaseOffer draws the offer that a changed rule set of the daemon raises.
+ *
+ * The offer comes before the staged list and before the operator selects Apply, because
+ * .claude/rules/ste.md states that a warning comes before the step it applies to.
+ */
+function drawRebaseOffer(offer) {
+  const card = el("div", "card ac-notice");
+  const alert = el("div", "alert");
+  alert.append(el("span", "dot warn"));
+  const text = el("div");
+  for (const sentence of offer.sentences) {
+    text.append(el("p", undefined, sentence));
+  }
+  alert.append(text);
+  card.append(alert);
+
+  const acts = el("div", "ns-acts");
+  const actions = { rebase: rebaseEdits, discard: discardEdits };
+  for (const model of offer.controls) {
+    acts.append(control(model, actions[model.id]));
+  }
+  card.append(acts);
+  return card;
+}
+
+/** drawDropped states every staged rule that the console dropped. */
+function drawDropped(statement) {
+  const card = el("div", "card ac-notice");
+  const alert = el("div", "alert");
+  alert.append(el("span", "dot warn"));
+  const text = el("div");
+  text.append(el("p", undefined, statement.sentence));
+  alert.append(text);
+  card.append(alert);
+
+  const list = el("div", "ns-cmds mono");
+  for (const rule of statement.rules) {
+    list.append(el("span", undefined, rule));
+  }
+  card.append(list);
+  return card;
+}
+
+/**
+ * drawApplyFailure states the message of the daemon.
+ *
+ * The message reaches the screen through textContent, therefore a message that holds
+ * markup characters reads as text and never as markup.
+ */
+function drawApplyFailure(statement) {
+  const card = el("div", "card ac-notice");
+  const alert = el("div", "alert");
+  alert.append(el("span", "dot crit"));
+  const text = el("div");
+  text.append(el("p", undefined, statement.lead));
+  alert.append(text);
+  card.append(alert);
+  card.append(el("code", "ns-cmds mono", statement.message));
+  return card;
+}
+
+/** drawStagedList draws one row per staged edit. FR-editor-25. */
+function drawStagedList(model) {
+  const card = el("div", "card ac-staged");
+  card.append(el("span", "label", "Staged edits"));
+  card.append(el("p", "note", "The console holds these edits. The daemon holds none of them until the operator selects Apply."));
+
+  const list = el("div", "ac-stagedlist");
+  for (const row of model.rows) {
+    const line = el("div", "ac-stagedrow");
+    line.append(el("span", "ac-stagedverb", row.word));
+    line.append(el("span", "ac-end mono", row.from));
+    line.append(el("span", "ac-conn"));
+    line.append(el("span", "ac-end mono", row.to));
+    line.append(el("span", "ac-noports mono", row.portsLabel));
+    list.append(line);
+  }
+  card.append(list);
+  return card;
 }
 
 /** drawObserve draws the statement of observe mode and the log command. */
@@ -989,6 +1349,27 @@ function draw(section, snapshot) {
   const base = state.base();
 
   section.append(drawHeader(base));
+
+  // The offer, the dropped statement, and the failure all come before the staged list, and
+  // the operator reads each one before the next apply.
+  const offer = rebaseOffer(state.baseChanged(), state.count());
+  if (offer) {
+    section.append(drawRebaseOffer(offer));
+  }
+
+  const dropped = droppedStatement(state.dropped());
+  if (dropped) {
+    section.append(drawDropped(dropped));
+  }
+
+  if (applyError !== null) {
+    section.append(drawApplyFailure(applyFailureStatement(applyError)));
+  }
+
+  const stagedList = stagedListModel(state.difference());
+  if (stagedList.count > 0) {
+    section.append(drawStagedList(stagedList));
+  }
 
   const observe = observeStatement(base.mode);
   if (observe) {

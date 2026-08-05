@@ -479,6 +479,20 @@ export function applyPollInterval(ms) {
   saveInterval(ms);
 }
 
+/**
+ * refreshConsole polls the daemon at once.
+ *
+ * A view that changed the state of the daemon calls it, so that the console shows the new
+ * state rather than the state of the last tick. The poll layer is the one data source, so
+ * a view reads no route a second time.
+ * refreshConsole does nothing before the shell starts, which is every import under Node.
+ */
+export function refreshConsole() {
+  if (poller !== null) {
+    poller.refresh();
+  }
+}
+
 /** drawCurrent draws the view that the address names. */
 function drawCurrent() {
   if (latest === null) {

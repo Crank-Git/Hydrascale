@@ -500,6 +500,19 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-observe .ns-cmds{margin-top:var(--sp-3)}
 .ac-observe + .card{margin-top:var(--sp-3)}
 
+/* The staged list and the three statements that come before it: the offer to rebase, the
+   dropped rule, and the message of a refused apply. The list scrolls, because the operator
+   can stage one edit per square of the matrix and the list must leave the editor on the
+   screen. No rule here takes the accent; the apply action holds it. */
+
+.ac-notice{margin-top:var(--sp-3)}
+.ac-notice .ns-cmds{margin-top:var(--sp-3)}
+.ac-staged{margin-top:var(--sp-3)}
+.ac-stagedlist{margin-top:var(--sp-3); max-height:220px; overflow-y:auto}
+.ac-stagedrow{display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
+.ac-stagedrow:last-child{border-bottom:none}
+.ac-stagedverb{color:var(--text-secondary); font-size:var(--fs-sm); min-width:150px; flex:none}
+
 /* The flow overview. The picture reuses the .node rules and the .edge rules of the
    overview topology above, therefore this block states the card alone. The accent reaches
    the picture through .edge.sel, which marks the paths of the selected source. */
