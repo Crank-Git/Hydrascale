@@ -8,7 +8,7 @@ func TestCoerceMock(t *testing.T) {
 		flag bool
 		want string
 	}{
-		{"", false, ""},           // fresh install stays disconnected
+		{"", false, ""},             // fresh install stays disconnected
 		{"socket", false, "socket"}, // configured connection preserved
 		{"mock", false, ""},         // persisted demo migrated away without the flag
 		{"", true, "mock"},          // flag opts the developer into demo

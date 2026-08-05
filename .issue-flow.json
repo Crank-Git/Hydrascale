@@ -1,0 +1,32 @@
+{
+  "concurrency": 2,
+  "batchSize": 4,
+  "runLength": "2-epics",
+  "prGranularity": "batch",
+  "prAuthority": "autonomous",
+  "branchModel": "dev-and-live",
+  "devBranch": "dev",
+  "liveBranch": "main",
+  "promotionToLive": "user-requested-only",
+  "worktreeBase": ".claude/worktrees/issue-<n>/",
+  "docsMcp": "none-connected",
+  "review": { "when": "end-of-session" },
+  "practices": {
+    "tdd": "A failing test comes before the implementation. The worker shows the test fail, then pass.",
+    "format": "go vet ./... passes and gofmt -l . prints nothing before a pull request opens.",
+    "race": "go test -race ./... is the local gate on every issue.",
+    "ste": "Every comment, pull request body, and code comment follows .claude/rules/ste.md.",
+    "spec": "docs/specs/spec.md gets a dated Changelog line for every scope decision."
+  },
+  "localChecks": [
+    "go build ./...",
+    "go vet ./...",
+    "gofmt -l .",
+    "go test -race ./..."
+  ],
+  "testHost": {
+    "target": "phobos@192.168.1.221",
+    "autonomous": true,
+    "note": "The daemon is live on this host with the namespaces ns-havoc and ns-jbones. Roll back a failed deploy before you debug."
+  }
+}
