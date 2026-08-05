@@ -63,10 +63,19 @@ an upgrade note that states what changed and what an operator must do.
   without an edit.
 - **FR-docs-15** — `docs/UPGRADING.md` states that the daemon writes an `access` block on
   first start and keeps a backup of the previous configuration file.
-- **FR-docs-16** — `docs/UPGRADING.md` states how to check the new rules before
-  enforcement, with `access.mode: observe`.
+- **FR-docs-16** — `docs/UPGRADING.md` states how to check the new rules with
+  `access.mode: observe`. The operator sets that mode after the first start, because the
+  daemon writes the `access` block at the first start.
 - **FR-docs-17** — `docs/UPGRADING.md` states that the desktop client is gone and that
   the version 0.9 release still carries it.
+- **FR-docs-28** — `docs/UPGRADING.md` states that an `access` block that the operator
+  writes by hand suppresses the migration. `internal/config/migrate.go:72` returns early
+  when the configuration file holds an `access` block.
+- **FR-docs-29** — `docs/UPGRADING.md` states that the migrated rule set holds no rule
+  between two tailnets. `internal/access/migrate.go:7` states the same behaviour.
+- **FR-docs-30** — `docs/UPGRADING.md` states a second order for an operator who accepts
+  no interval in the mode `enforce`. That order writes the `access` block by hand and
+  loses the migration and the copy at `<config>.pre-v1.backup`.
 
 ### The terminal interface
 
@@ -100,14 +109,25 @@ an upgrade note that states what changed and what an operator must do.
 
 ### An existing operator upgrades
 
+**Warning — step 5 starts the daemon in the mode `enforce`.** A path from one tailnet to
+another tailnet stops until step 8 applies the mode `observe`.
+
 1. The operator reads the release note.
-2. The operator downloads the binary and installs it.
-3. The operator sets `access.mode: observe` in the configuration file.
-4. The operator restarts the service.
-5. The daemon writes the `access` block and the backup file.
-6. The operator uses the host for a day and reads the would-deny log lines.
-7. The operator adds the rules the log shows.
-8. The operator sets `access.mode: enforce` and restarts the service.
+2. The operator stops the service.
+3. The operator copies the configuration file to a path of their own.
+4. The operator downloads the binary and installs it.
+5. The operator starts the service.
+6. The daemon writes the `access` block and the copy at `<config>.pre-v1.backup`.
+7. The operator sets `access.mode: observe` in the configuration file.
+8. The operator applies the mode with `systemctl reload hydrascale`.
+9. The operator uses the host for a day and reads the would-deny log lines.
+10. The operator adds the rules the log shows.
+11. The operator sets `access.mode: enforce` and reloads the service.
+
+The operator sets the mode after the first start, because `internal/config/migrate.go:72`
+returns early when the configuration file holds an `access` block. An `access` block that
+holds the mode alone therefore suppresses the migration, the preserving rule set, and the
+copy.
 
 ## Screens & states
 
@@ -143,7 +163,9 @@ None.
 | The terminal does not support 24-bit colour. | Lip Gloss degrades the colour. The state dot and the word still read, because the word carries the meaning. |
 | The hygiene script fails before the tag. | The maintainer fixes the violation. The tag waits. |
 | GoReleaser fails on the tag. | The maintainer deletes the tag, fixes the workflow, and tags again. No release is published in a broken state. |
-| An operator upgrades without reading the note. | The daemon writes the preserving rule set, so the host keeps working. The event log states what the daemon wrote. |
+| An operator upgrades without reading the note. | The daemon writes the preserving rule set, so the path from a tailnet to the internet keeps working. The event log states what the daemon wrote. |
+| The version 0.9 host forwards traffic between two tailnets. | The migrated rule set holds no rule between two tailnets, so the host loses that path under the mode `enforce`. The operator writes a rule to restore it. |
+| The operator writes an `access` block before the first start of version 1.0. | The migration does not run. The daemon writes no preserving rule set and no copy at `<config>.pre-v1.backup`. The operator writes one rule per tailnet, from that tailnet to `internet`. |
 
 ## Acceptance criteria
 
@@ -157,7 +179,13 @@ None.
 - [ ] `docs/DESIGN.md` exists and states the palette, the type, and the edge rules.
 - [ ] `docs/DESIGN.md` names no private document and no generating tool.
 - [ ] `docs/UPGRADING.md` states the removals, the configuration compatibility, and the
-      observe-mode procedure.
+      procedure for the mode `observe`.
+- [ ] `docs/UPGRADING.md` and this file state the same upgrade order: the operator starts
+      version 1.0 first, then sets `access.mode: observe`.
+- [ ] `docs/UPGRADING.md` states that an `access` block written by hand suppresses the
+      migration.
+- [ ] `docs/UPGRADING.md` states that the migrated rule set holds no rule between two
+      tailnets.
 - [ ] The terminal interface uses the brand palette and shows the rule mode.
 - [ ] The repository hygiene script passes on `main`.
 - [ ] The `v1.0.0` release page carries one Linux binary and no desktop client artifact.
