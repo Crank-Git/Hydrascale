@@ -178,6 +178,15 @@ rather than hiding it.
 - The document is huJSON. The console does not parse it as JSON, because huJSON allows a
   comment and a trailing comma.
 - A read failure never changes the local rule set. The two systems are independent.
+- `PUT /api/policy/{id}` sends the document to the validate route of the control server
+  before it writes, because **FR-policy-21** binds the daemon and not the console alone.
+- The control server kind of a tailnet comes from its control URL. A tailnet that
+  declares no control URL is `tailscale`, and every other tailnet is `headscale`.
+- The write availability of a Headscale tailnet states the credential state alone. The
+  control server exposes no route that reports its policy mode, so the daemon learns the
+  file policy mode from the answer to a write.
+- The daemon sends the tailnet name `-` to the Tailscale API. The dash names the tailnet
+  of the access token, and the credential is per tailnet.
 
 ## Data touched
 

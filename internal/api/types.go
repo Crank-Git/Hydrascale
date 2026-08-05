@@ -65,6 +65,66 @@ type AccessResponse struct {
 	Nodes []AccessNode  `json:"nodes"`
 }
 
+// PolicyTailnet is one row of GET /api/policy. It states the control server kind, the
+// credential state, and the write availability of one tailnet. Reason names the
+// credential that the tailnet needs, and it is empty when the tailnet holds one.
+// The row holds no credential value, which FR-policy-4 requires.
+type PolicyTailnet struct {
+	ID                string `json:"id"`
+	Kind              string `json:"kind"`
+	CredentialPresent bool   `json:"credential_present"`
+	WriteAvailable    bool   `json:"write_available"`
+	Reason            string `json:"reason,omitempty"`
+}
+
+// PolicyListResponse is the JSON response for GET /api/policy.
+// Tailnets is never null, because the console reads the field as a list.
+type PolicyListResponse struct {
+	Tailnets []PolicyTailnet `json:"tailnets"`
+}
+
+// PolicyResponse is the JSON response for GET /api/policy/{id} and for
+// PUT /api/policy/{id}. Document holds the policy as text, because the document is
+// huJSON and the daemon parses it never. ETag carries a value for a Tailscale tailnet
+// alone.
+type PolicyResponse struct {
+	ID             string `json:"id"`
+	Kind           string `json:"kind"`
+	Document       string `json:"document"`
+	ETag           string `json:"etag,omitempty"`
+	WriteAvailable bool   `json:"write_available"`
+}
+
+// PolicyWriteRequest is the request body of PUT /api/policy/{id}.
+// ETag carries the value of the read, which the daemon sends as If-Match to a Tailscale
+// control server. See FR-policy-17.
+type PolicyWriteRequest struct {
+	Document string `json:"document"`
+	ETag     string `json:"etag,omitempty"`
+}
+
+// PolicyValidateRequest is the request body of POST /api/policy/{id}/validate.
+type PolicyValidateRequest struct {
+	Document string `json:"document"`
+}
+
+// PolicyValidateResponse is the JSON response for POST /api/policy/{id}/validate.
+// Result holds the answer of the control server verbatim, because the console shows each
+// error with its line number. See FR-policy-26.
+type PolicyValidateResponse struct {
+	Passed bool   `json:"passed"`
+	Result string `json:"result,omitempty"`
+}
+
+// PolicyCredentialsRequest is the request body of PUT /api/policy/{id}/credentials.
+// The daemon writes these values into the secrets file and it returns none of them.
+type PolicyCredentialsRequest struct {
+	TailscaleOAuthClientID     string `json:"tailscale_oauth_client_id,omitempty"`
+	TailscaleOAuthClientSecret string `json:"tailscale_oauth_client_secret,omitempty"`
+	HeadscaleAPIKey            string `json:"headscale_api_key,omitempty"`
+	HeadscaleAddress           string `json:"headscale_address,omitempty"`
+}
+
 // EventsResponse is the JSON response for GET /api/events.
 type EventsResponse struct {
 	Events []reconciler.Event `json:"events"`
