@@ -1,4 +1,4 @@
 /* The console makes no request to another host, so this file loads no font from Google
    Fonts. Until a replacement arrives, the console uses the fallback families that
    tokens/typography.css names: system-ui for --sans, and ui-monospace for --mono. */
-/* TODO(epic-6): Decide what replaces the removed Google Fonts rule. */
+/* TODO(#90): Decide what replaces the removed Google Fonts rule. */

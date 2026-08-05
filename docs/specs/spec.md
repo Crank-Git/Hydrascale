@@ -561,6 +561,9 @@ security and DNS work must not wait behind the console.
 | 2026-08-05 | 1 | Epic 0 built. `internal/routing` now runs `ip route replace` where it ran `ip route add`, because the acceptance criteria of issue #53 name `replace` and because `replace` succeeds for a destination that is already present. |
 | 2026-08-05 | 1 | Epic 0 built. **FR-foundation-6** fixes the `Runner` interface to combined output, so `routing.PollStatus` and `namespaces.ListNamespaces` now read the standard output and the standard error stream together, where they read the standard output alone. No command that they run writes to the standard error stream on success, so no defect is known. Epic 5 must keep this in view. |
 | 2026-08-05 | 1 | Epic 0 built. The skill `verify-on-phobos` takes the host as `phobos@192.168.1.221` rather than the bare name `phobos`, which does not resolve. The skill gained an explicit `rollback` command block, which **FR-foundation-12** requires and which the first draft did not hold. |
+| 2026-08-05 | 1 | Epic 1 built. The console renders in `system-ui` and `ui-monospace` rather than in `Space Grotesk` and `Space Mono`. The source `tokens/fonts.css` loaded both typefaces from Google Fonts, the console makes no request to another host, and `branding/` holds no font file. Issue #90 holds the decision, which Epic 6 must settle. |
+| 2026-08-05 | 1 | Epic 1 built. The compiled daemon leaves the index. The rule `/hydrascale` was already in `.gitignore`; a tracked file overrides an ignore rule, which is why the binary stayed. The 15 MB blob stays in the history, which the non-goals require. |
+| 2026-08-05 | 1 | Epic 1 built. Issue #93 records that `.goreleaser.yaml` uses `archives.format`, which GoReleaser version 2 deprecates. The release workflow fails when a later version removes it. |
 
 ## Issue map
 
