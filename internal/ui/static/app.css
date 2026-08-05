@@ -532,3 +532,22 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-square.on{background:var(--accent); border-color:var(--accent)}
 .ac-square.inert{background:transparent; border-color:var(--border-soft); cursor:default}
 .ac-square.inert:hover{background:transparent}
+
+/* The rule list. A row exists for an allowed path alone, therefore no rule paints a
+   refused path and no row carries a state colour. The connector is the dotted line of the
+   brand, and the port chip is a machine value in the mono typeface. The staged row takes
+   the word staged as a chip rather than the accent, because the accent of this view marks
+   the allowed path and the apply action. FR-editor-16 to FR-editor-22. */
+.ac-rules{margin-top:var(--sp-3)}
+.ac-rulelist{margin-top:var(--sp-3)}
+.ac-ruleline{padding:var(--sp-2) 0}
+.ac-ruleline + .ac-ruleline{border-top:1px solid var(--border-soft)}
+.ac-rule{display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap}
+.ac-end{color:var(--text-body); white-space:nowrap}
+.ac-conn{flex:none; width:52px; height:0; border-top:1.4px dotted var(--edge)}
+.ac-ports{display:flex; gap:var(--sp-2); flex-wrap:wrap; margin-left:auto}
+.ac-noports{color:var(--text-tertiary); margin-left:auto}
+.ac-portfield{width:16ch; flex:none}
+.ac-del{flex:none}
+.ac-ruleline .ns-error{display:block; margin-top:var(--sp-2)}
+.ac-ruleline .ns-error:empty{display:none}

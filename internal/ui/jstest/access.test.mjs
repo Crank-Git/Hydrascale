@@ -16,13 +16,17 @@ import {
   SQUARE_SIDE,
   SQUARE_SIDE_DENSE,
   createAccessState,
+  deleteRule,
   emptyStatement,
   headerModel,
   hoverMarks,
   matrixModel,
   modeChange,
   observeStatement,
+  parsePorts,
+  ruleListModel,
   sendModeChange,
+  setRulePorts,
   toggleSquare,
 } from "../static/access.js";
 
@@ -445,6 +449,194 @@ test("every square reaches focus by keyboard and the keyboard stages the same ed
 
   const source = await readFile(new URL("../static/access.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /tabindex/i);
+});
+
+// ---------------------------------------------------------------------------
+// The rule list
+// ---------------------------------------------------------------------------
+
+// rowFor returns the row of one path from the rule list model.
+function rowFor(model, from, to) {
+  return model.rows.find((one) => one.from === from && one.to === to);
+}
+
+test("the rule list shows one row per rule with the source, the connector, and the destination", () => {
+  // FR-editor-16.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = ruleListModel(state.base(), state.rules());
+
+  assert.equal(model.rows.length, 2);
+  assert.deepEqual(model.rows.map((one) => one.from), ["jbones", "jbones"]);
+  assert.deepEqual(model.rows.map((one) => one.to), ["internet", "host"]);
+  assert.equal(model.rows[0].connector, "dotted");
+});
+
+test("a rule row shows tcp/22 and tcp/443 as two chips", () => {
+  // FR-editor-16, and step 4 of the flow "The operator narrows a rule to two ports".
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules(setRulePorts(state.rules(), "jbones", "host", ["tcp/22", "tcp/443"]));
+
+  const row = rowFor(ruleListModel(state.base(), state.rules()), "jbones", "host");
+  assert.deepEqual(row.chips, ["tcp/22", "tcp/443"]);
+  assert.equal(row.allPorts, false);
+});
+
+test("a rule row with no port shows the words all ports", () => {
+  // FR-editor-17.
+  const state = createAccessState();
+  state.setBase(accessBody());
+
+  const row = rowFor(ruleListModel(state.base(), state.rules()), "jbones", "internet");
+  assert.deepEqual(row.chips, []);
+  assert.equal(row.allPorts, true);
+  assert.equal(row.portsLabel, "all ports");
+});
+
+test("the rule list holds no row for a denied path", () => {
+  // FR-editor-21. The row exists for an allowed path alone, therefore the absence of a row
+  // is the refusal and the list draws no second state.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  const model = ruleListModel(state.base(), state.rules());
+
+  assert.equal(rowFor(model, "jbones", "homelab"), undefined);
+  assert.equal(rowFor(model, "homelab", "internet"), undefined);
+  assert.equal(model.rows.length, 2);
+});
+
+test("editing the ports of a row marks that row as staged and raises the staged count", () => {
+  // FR-editor-18 and FR-editor-19.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  assert.equal(rowFor(ruleListModel(state.base(), state.rules()), "jbones", "host").staged, false);
+
+  state.setRules(setRulePorts(state.rules(), "jbones", "host", ["tcp/22", "tcp/443"]));
+
+  assert.equal(state.count(), 1);
+  assert.equal(rowFor(ruleListModel(state.base(), state.rules()), "jbones", "host").staged, true);
+});
+
+test("a rule that the daemon does not hold is marked as staged", () => {
+  // FR-editor-18. The matrix stages the path and the list marks the row.
+  const state = createAccessState();
+  state.setBase(accessBody());
+  state.setRules(toggleSquare(state.rules(), "jbones", "homelab"));
+
+  const row = rowFor(ruleListModel(state.base(), state.rules()), "jbones", "homelab");
+  assert.equal(row.staged, true);
+  assert.equal(row.allPorts, true);
+});
+
+test("deleting a row marks the deletion as staged and raises the staged count", () => {
+  // FR-editor-20.
+  const state = createAccessState();
+  state.setBase(accessBody());
+
+  state.setRules(deleteRule(state.rules(), "jbones", "host"));
+
+  assert.equal(state.count(), 1);
+  assert.deepEqual(state.difference().removed.map((rule) => rule.to), ["host"]);
+  assert.equal(rowFor(ruleListModel(state.base(), state.rules()), "jbones", "host"), undefined);
+});
+
+test("the rule list sends no request to the daemon", async () => {
+  // FR-editor-23. The port edit and the deletion both write through setRules alone.
+  const sent = [];
+  const request = async (...args) => {
+    sent.push(args);
+    return {};
+  };
+
+  const state = createAccessState({ request });
+  state.setBase(accessBody());
+  state.setRules(setRulePorts(state.rules(), "jbones", "host", ["tcp/443"]));
+  state.setRules(deleteRule(state.rules(), "jbones", "internet"));
+
+  assert.equal(sent.length, 0);
+  assert.equal(state.count(), 2);
+});
+
+test("every control of a rule row reaches focus by keyboard", () => {
+  // A button and a text field both reach focus with no tabindex attribute.
+  const state = createAccessState();
+  state.setBase(accessBody());
+
+  for (const row of ruleListModel(state.base(), state.rules()).rows) {
+    assert.deepEqual(row.controls.map((one) => one.id), ["ports", "delete"]);
+    for (const one of row.controls) {
+      assert.ok(one.kind === "input" || one.kind === "button");
+      assert.ok(one.label.length > 0);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The port format
+// ---------------------------------------------------------------------------
+
+test("the port field takes a list that the comma separates", () => {
+  // The daemon holds a port list, and one text field carries it. The console splits on the
+  // comma and it removes the space around each entry.
+  assert.deepEqual(parsePorts("tcp/22, tcp/443"), { ports: ["tcp/22", "tcp/443"], error: null });
+  assert.deepEqual(parsePorts("udp/1-1024"), { ports: ["udp/1-1024"], error: null });
+});
+
+test("an empty port field allows every port", () => {
+  // FR-access-9. An empty port list allows every port and every protocol.
+  assert.deepEqual(parsePorts(""), { ports: [], error: null });
+  assert.deepEqual(parsePorts("   "), { ports: [], error: null });
+});
+
+test("entering the port 22 shows an error that names the expected format", () => {
+  // FR-editor-22, and the edge case "A port entry is 22".
+  const result = parsePorts("22");
+  assert.equal(result.ports, null);
+  assert.equal(result.error, 'invalid port "22": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>');
+});
+
+test("the rule list rejects tcp/0, tcp/65536, and tcp/22-21", () => {
+  // FR-access-10. A port number is between 1 and 65535, and the second number is not lower
+  // than the first.
+  assert.equal(parsePorts("tcp/0").error, 'invalid port "tcp/0": a port number is between 1 and 65535');
+  assert.equal(parsePorts("tcp/65536").error, 'invalid port "tcp/65536": a port number is between 1 and 65535');
+  assert.equal(parsePorts("tcp/22-21").error, 'invalid port "tcp/22-21": the second number is lower than the first');
+  for (const text of ["tcp/0", "tcp/65536", "tcp/22-21"]) {
+    assert.equal(parsePorts(text).ports, null);
+  }
+});
+
+test("the console repeats the port rule that internal/access holds", async () => {
+  // The daemon rejects the same entry with the same three messages, therefore the console
+  // states what PUT /api/access states rather than a second grammar.
+  const rules = await readFile(new URL("../../access/rules.go", import.meta.url), "utf8");
+  assert.match(rules, /\^\(tcp\|udp\)\/\(\[0-9\]\{1,5\}\)\(\?:-\(\[0-9\]\{1,5\}\)\)\?\$/);
+  assert.match(rules, /the form is tcp\/<n>, udp\/<n>, tcp\/<n>-<m>, or udp\/<n>-<m>/);
+  assert.match(rules, /a port number is between 1 and 65535/);
+  assert.match(rules, /the second number is lower than the first/);
+});
+
+test("the port field rejects the whole entry and it corrects no value", () => {
+  // CLAUDE.md: reject a bad value; never correct it silently. One bad entry rejects the
+  // list, therefore no good entry of that list reaches the staged rule set.
+  const result = parsePorts("tcp/22, 443");
+  assert.equal(result.ports, null);
+  assert.match(result.error, /invalid port "443"/);
+});
+
+test("the connector of a rule row is dotted", async () => {
+  // FR-editor-16, and the brand rule that an allowed path is a dotted line.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ac-conn\{[^}]*dotted/);
+});
+
+test("a port chip renders in the mono typeface", async () => {
+  // A port is a machine value, therefore the chip takes the mono class of the brand.
+  const source = await readFile(new URL("../static/access.js", import.meta.url), "utf8");
+  assert.match(source, /ac-ports/);
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ac-ports\{/);
 });
 
 // ---------------------------------------------------------------------------

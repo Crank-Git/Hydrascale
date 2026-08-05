@@ -341,6 +341,123 @@ export function hoverMarks(from, to) {
   return { row: from, column: to };
 }
 
+/** The words that a rule with no port shows. FR-editor-17. */
+export const ALL_PORTS = "all ports";
+
+/** portPattern matches one port entry: a protocol, one port, and an optional second port.
+ *  internal/access/rules.go holds the same pattern, and the daemon rejects with the same
+ *  three messages, therefore the console repeats one rule rather than a second grammar. */
+const portPattern = /^(tcp|udp)\/([0-9]{1,5})(?:-([0-9]{1,5}))?$/;
+
+/** portFailure returns the message of a bad port entry, and null for a good entry.
+ *  entry is one item of the port list of a rule, in the form tcp/22 or udp/1-1024.
+ *  The three messages repeat internal/access/rules.go word for word. FR-access-10. */
+function portFailure(entry) {
+  const match = portPattern.exec(entry);
+  if (match === null) {
+    return `invalid port ${JSON.stringify(entry)}: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>`;
+  }
+  const range = `invalid port ${JSON.stringify(entry)}: a port number is between 1 and 65535`;
+  const low = Number(match[2]);
+  if (low < 1 || low > 65535) {
+    return range;
+  }
+  if (match[3] !== undefined) {
+    const high = Number(match[3]);
+    if (high < 1 || high > 65535) {
+      return range;
+    }
+    if (high < low) {
+      return `invalid port ${JSON.stringify(entry)}: the second number is lower than the first`;
+    }
+  }
+  return null;
+}
+
+/**
+ * parsePorts returns the port list that one port field holds.
+ *
+ * text is the text of the field. The comma separates the entries, and parsePorts removes
+ * the space around each entry. An empty field returns an empty port list, which allows
+ * every port and every protocol. FR-access-9.
+ * parsePorts returns {ports: null, error: "<message>"} for a bad entry, therefore one bad
+ * entry rejects the whole field and the console corrects no value. FR-editor-22.
+ */
+export function parsePorts(text) {
+  const entries = String(text)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+  for (const entry of entries) {
+    const failure = portFailure(entry);
+    if (failure !== null) {
+      return { ports: null, error: failure };
+    }
+  }
+  return { ports: entries, error: null };
+}
+
+/**
+ * setRulePorts returns the staged rule set in which one path holds the given ports.
+ *
+ * rules is the staged rule set, the pair from and to names the path, and ports is the port
+ * list that parsePorts returned. setRulePorts sends nothing. FR-editor-19.
+ */
+export function setRulePorts(rules, from, to, ports) {
+  const key = `${from} ${to}`;
+  return rules.map(normalizeRule).map((rule) => {
+    if (ruleKey(rule) !== key) {
+      return rule;
+    }
+    return { from: rule.from, to: rule.to, ports: ports.slice() };
+  });
+}
+
+/**
+ * deleteRule returns the staged rule set with no rule for one path.
+ *
+ * rules is the staged rule set, and the pair from and to names the path. deleteRule sends
+ * nothing, therefore the deletion counts as one staged edit. FR-editor-20.
+ */
+export function deleteRule(rules, from, to) {
+  const key = `${from} ${to}`;
+  return rules.map(normalizeRule).filter((rule) => ruleKey(rule) !== key);
+}
+
+/**
+ * ruleListModel returns one row per rule of the staged rule set.
+ *
+ * base is the answer of the daemon and staged is the staged rule set. A row exists for an
+ * allowed path alone, therefore the list holds no row for a path that no rule allows.
+ * FR-editor-21.
+ * A row that the daemon does not hold, and a row whose ports differ from the ports of the
+ * daemon, both carry staged: true. FR-editor-18.
+ */
+export function ruleListModel(base, staged) {
+  const held = new Map(((base && base.rules) || []).map((rule) => [ruleKey(rule), rule]));
+  return {
+    rows: (staged || []).map(normalizeRule).map((rule) => {
+      const before = held.get(ruleKey(rule));
+      const empty = rule.ports.length === 0;
+      return {
+        from: rule.from,
+        to: rule.to,
+        // Every allowed path of this product is a dotted line, and the row is one.
+        connector: "dotted",
+        chips: rule.ports.slice(),
+        allPorts: empty,
+        portsLabel: empty ? ALL_PORTS : rule.ports.join(", "),
+        text: rule.ports.join(", "),
+        staged: !before || !samePorts(before, rule),
+        controls: [
+          { id: "ports", kind: "input", label: `The ports of ${rule.from} to ${rule.to}` },
+          { id: "delete", kind: "button", label: `Delete the rule ${rule.from} to ${rule.to}` },
+        ],
+      };
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The drawing. Everything below this line needs a document.
 // ---------------------------------------------------------------------------
@@ -495,6 +612,135 @@ function drawMatrix(model) {
   return card;
 }
 
+/**
+ * The draft of one port field.
+ *
+ * The poll draws the view again every few seconds. The draft holds the text that the
+ * operator entered and the message of a refused entry, therefore a poll interrupts no
+ * edit. The draft is null while no operator edits a port field.
+ */
+let portDraft = null; // null, or {key, text, error, focused}
+
+/** stagePorts stages the ports of one path and it draws the view again. */
+function stagePorts(from, to, ports) {
+  portDraft = null;
+  state.setRules(setRulePorts(state.rules(), from, to, ports));
+  redraw();
+}
+
+/** stageDelete stages the deletion of one rule and it draws the view again. */
+function stageDelete(from, to) {
+  portDraft = null;
+  state.setRules(deleteRule(state.rules(), from, to));
+  redraw();
+}
+
+/**
+ * drawRuleRow draws one row of the rule list: the source, the dotted connector, the
+ * destination, the ports, the port field, and the delete control.
+ *
+ * The port field states the message of the daemon for a bad entry and it stages nothing,
+ * therefore the console corrects no value. FR-editor-22.
+ */
+function drawRuleRow(row) {
+  const key = `${row.from} ${row.to}`;
+  const draft = portDraft && portDraft.key === key ? portDraft : null;
+
+  const line = el("div", row.staged ? "ac-rule staged" : "ac-rule");
+  line.append(el("span", "ac-end mono", row.from));
+  line.append(el("span", "ac-conn"));
+  line.append(el("span", "ac-end mono", row.to));
+
+  if (row.allPorts) {
+    line.append(el("span", "ac-noports mono", row.portsLabel));
+  } else {
+    const ports = el("div", "ac-ports");
+    for (const port of row.chips) {
+      ports.append(chip(port));
+    }
+    line.append(ports);
+  }
+
+  if (row.staged) {
+    line.append(chip("staged"));
+  }
+
+  const field = el("input", "field ac-portfield");
+  field.type = "text";
+  field.value = draft ? draft.text : row.text;
+  field.placeholder = ALL_PORTS;
+  field.setAttribute("aria-label", row.controls[0].label);
+  const message = el("span", "ns-error", draft ? draft.error || "" : "");
+  if (draft && draft.error) {
+    field.setAttribute("aria-invalid", "true");
+  }
+
+  field.addEventListener("focus", () => {
+    portDraft = { key, text: field.value, error: draft ? draft.error : null, focused: true };
+  });
+  field.addEventListener("input", () => {
+    portDraft = { key, text: field.value, error: null, focused: true };
+    message.textContent = "";
+    field.removeAttribute("aria-invalid");
+  });
+  field.addEventListener("blur", () => {
+    // A poll removes this element and it draws a new one. The removed element reports the
+    // loss of the focus, so the draft keeps the focus of the new element.
+    if (field.isConnected && portDraft && portDraft.key === key) {
+      portDraft.focused = false;
+    }
+  });
+  field.addEventListener("change", () => {
+    const result = parsePorts(field.value);
+    if (result.error) {
+      // The view draws nothing again here, so that the field keeps the focus and the text
+      // of the operator.
+      portDraft = { key, text: field.value, error: result.error, focused: true };
+      message.textContent = result.error;
+      field.setAttribute("aria-invalid", "true");
+      return;
+    }
+    stagePorts(row.from, row.to, result.ports);
+  });
+
+  const remove = el("button", "btn ac-del", "Delete");
+  remove.type = "button";
+  remove.setAttribute("aria-label", row.controls[1].label);
+  remove.addEventListener("click", () => stageDelete(row.from, row.to));
+
+  line.append(field);
+  line.append(remove);
+
+  const holder = el("div", "ac-ruleline");
+  holder.append(line);
+  holder.append(message);
+  return { holder, field, restore: Boolean(draft && draft.focused) };
+}
+
+/**
+ * drawRules draws the rule list. FR-editor-16 to FR-editor-22.
+ *
+ * The list draws one row per rule of the staged rule set. A path that no rule allows takes
+ * no row, therefore the absence of the row is the refusal.
+ */
+function drawRules(model) {
+  const card = el("div", "card ac-rules");
+  card.append(el("span", "label", "Rules"));
+  card.append(el("p", "note", "One row per rule. The port field takes a list that the comma separates, in the form tcp/22, udp/1-1024."));
+
+  const list = el("div", "ac-rulelist");
+  const restore = [];
+  for (const row of model.rows) {
+    const drawn = drawRuleRow(row);
+    list.append(drawn.holder);
+    if (drawn.restore) {
+      restore.push(drawn.field);
+    }
+  }
+  card.append(list);
+  return { card, restore };
+}
+
 /** openModeDialog opens the dialog that states what the mode change does. */
 function openModeDialog() {
   dialog = { sending: false, error: null };
@@ -596,6 +842,19 @@ function draw(section, snapshot) {
   const matrix = matrixModel(base, state.rules());
   if (matrix.rows.length > 0) {
     section.append(drawMatrix(matrix));
+  }
+
+  // A rule set with no rule draws no list, because the empty statement above already names
+  // the matrix as the first step.
+  const list = ruleListModel(base, state.rules());
+  if (list.rows.length > 0) {
+    const rules = drawRules(list);
+    section.append(rules.card);
+    // The field is in the document now, therefore the view returns the focus that the poll
+    // took from the operator.
+    for (const field of rules.restore) {
+      field.focus();
+    }
   }
 
   if (dialog) {
