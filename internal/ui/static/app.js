@@ -38,7 +38,8 @@ export const POLL_INTERVAL_KEY = "hydrascale.poll-interval";
 export const CONSOLE_HEADER = "X-Hydrascale-Console";
 
 /**
- * VIEWS is the navigation, in order. FR-console-12 names the five entries.
+ * VIEWS is the navigation, in order. FR-console-12 names five entries, and FR-policy-22
+ * adds the policy view as the sixth.
  *
  * Each entry states the heading of the view, the sentence under it, the empty state, and
  * the sentence that the shell draws until the view itself lands. FR-console-17 states
@@ -66,6 +67,13 @@ export const VIEWS = [
     lead: "The local rules that this host enforces between the tailnets, the host, and the internet.",
     empty: "No tailnet is configured. Add one, and this view shows the paths that the host allows.",
     pending: "This view shows the paths that the host allows, and it edits them. The view arrives with the access editor of issue #147.",
+  },
+  {
+    id: "policy",
+    heading: "Policy",
+    lead: "The access policy that each control server holds. A policy change affects every device in the tailnet, not only this host.",
+    empty: "The daemon declares no tailnet. Add one, and this view lists it with its control server kind and its credential state.",
+    pending: "This view lists every tailnet with its control server kind and its credential state, and it shows the policy document of a selection.",
   },
   {
     id: "activity",
