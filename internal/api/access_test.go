@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -402,6 +403,51 @@ func TestTheStatusResponseCarriesTheAccessModeAndTheRuleCount(t *testing.T) {
 	}
 	if got.Access.Rules != 2 {
 		t.Errorf("access.rules = %d, want 2", got.Access.Rules)
+	}
+}
+
+// displacedWriter is a chain writer that reports the jump rule of FORWARD at position 4.
+// It runs no command on the host.
+type displacedWriter struct{}
+
+func (displacedWriter) Apply(ctx context.Context, c access.Compiled) (access.Result, error) {
+	return access.Result{Jumps: []access.Placement{
+		{Parent: access.ParentForward, Position: 4, Above: []string{"ts-forward", "DOCKER-USER", "DOCKER-FORWARD"}},
+		{Parent: access.ParentInput, Position: 1},
+	}}, nil
+}
+
+func (displacedWriter) Teardown(ctx context.Context) error { return nil }
+
+func TestTheStatusResponseCarriesThePositionOfTheJumpRule(t *testing.T) {
+	cfgPath := writeAccessConfig(t, &access.RuleSet{Mode: access.ModeEnforce}, "alpha")
+	r := newTestReconciler(cfgPath)
+	r.SetChainWriter(displacedWriter{})
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	code, payload := callAccess(t, client, http.MethodGet, "/api/status", "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+
+	var got struct {
+		Access *struct {
+			JumpPosition int `json:"jump_position"`
+		} `json:"access"`
+	}
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("decode the body %s: %v", payload, err)
+	}
+	if got.Access == nil {
+		t.Fatalf("the status body %s holds no access field", payload)
+	}
+	if got.Access.JumpPosition != 4 {
+		t.Errorf("access.jump_position = %d, want 4", got.Access.JumpPosition)
 	}
 }
 

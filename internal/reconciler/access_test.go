@@ -11,6 +11,7 @@ import (
 
 	"hydrascale/internal/access"
 	"hydrascale/internal/config"
+	"hydrascale/internal/execx"
 	"hydrascale/internal/namespaces"
 )
 
@@ -20,14 +21,24 @@ type fakeChainWriter struct {
 	applied  []access.Compiled
 	teardown int
 	err      error
+	// jumps holds the placement that Apply reports. A writer with no placement reports
+	// the jump rule at the head of each parent chain.
+	jumps []access.Placement
 }
 
-func (w *fakeChainWriter) Apply(ctx context.Context, c access.Compiled) (bool, error) {
+func (w *fakeChainWriter) Apply(ctx context.Context, c access.Compiled) (access.Result, error) {
 	w.applied = append(w.applied, c)
 	if w.err != nil {
-		return false, w.err
+		return access.Result{}, w.err
 	}
-	return true, nil
+	jumps := w.jumps
+	if jumps == nil {
+		jumps = []access.Placement{
+			{Parent: access.ParentForward, Position: 1},
+			{Parent: access.ParentInput, Position: 1},
+		}
+	}
+	return access.Result{Wrote: true, Jumps: jumps}, nil
 }
 
 func (w *fakeChainWriter) Teardown(ctx context.Context) error {
@@ -210,17 +221,17 @@ func TestReconcileBoundsTheChainWriteWithinOneSecond(t *testing.T) {
 // 1 second because of the rule engine.
 type deadlineWriter struct{ t *testing.T }
 
-func (w *deadlineWriter) Apply(ctx context.Context, c access.Compiled) (bool, error) {
+func (w *deadlineWriter) Apply(ctx context.Context, c access.Compiled) (access.Result, error) {
 	w.t.Helper()
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		w.t.Error("Apply received a context with no deadline")
-		return false, nil
+		return access.Result{}, nil
 	}
 	if left := time.Until(deadline); left > time.Second {
 		w.t.Errorf("the deadline is %v away, want one second at most", left)
 	}
-	return false, nil
+	return access.Result{}, nil
 }
 
 func (w *deadlineWriter) Teardown(ctx context.Context) error { return nil }
@@ -322,3 +333,171 @@ func TestReconcileRecordsNoEventForANamespaceThatDoesNotForward(t *testing.T) {
 
 // errWrite is the failure that a chain write returns in a test.
 var errWrite = errors.New("iptables-restore --noflush: exit status 1")
+
+// fillers holds the target of each rule that another service writes into FORWARD. The
+// security audit measured these three rules above the rules of the daemon on the test
+// host.
+var fillers = []string{"ts-forward", "DOCKER-USER", "DOCKER-FORWARD"}
+
+// chainListing returns the output of `iptables -S <parent>` where the jump rule into the
+// chain sits at the position. The position counts from 1. A position of 0 returns a
+// listing that holds every filler rule and no jump rule.
+func chainListing(parent, chain string, position int) string {
+	var b strings.Builder
+	b.WriteString("-P " + parent + " DROP\n")
+
+	above := len(fillers)
+	if position > 0 {
+		above = position - 1
+	}
+	for i := 0; i < above; i++ {
+		b.WriteString("-A " + parent + " -j " + fillers[i] + "\n")
+	}
+	if position > 0 {
+		b.WriteString("-A " + parent + " -j " + chain + "\n")
+	}
+	return b.String()
+}
+
+// hostWriter returns a Recorder and the chain Writer of the daemon, which runs every
+// command through that Recorder. forward is the position of the jump rule in FORWARD, and
+// the jump rule in INPUT always heads its chain.
+func hostWriter(t *testing.T, forward int) (*execx.Recorder, *access.Writer) {
+	t.Helper()
+
+	rec := execx.NewRecorder(t)
+	absent := execx.Result{
+		Output: []byte("iptables: No chain/target/match by that name.\n"),
+		Err:    errors.New("exit status 1"),
+	}
+	rec.Script(absent, "iptables", "-S", access.ChainForward)
+	rec.Script(absent, "iptables", "-S", access.ChainOut)
+	rec.Script(execx.Result{}, "iptables-restore", "--noflush")
+	rec.Script(execx.Result{Output: []byte(chainListing(access.ParentForward, access.ChainForward, forward))},
+		"iptables", "-S", access.ParentForward)
+	rec.Script(execx.Result{Output: []byte(chainListing(access.ParentInput, access.ChainOut, 1))},
+		"iptables", "-S", access.ParentInput)
+	rec.Script(execx.Result{}, "iptables", "-I", access.ParentForward, "1", "-j", access.ChainForward)
+
+	return rec, &access.Writer{Runner: rec}
+}
+
+// jumpEvents returns every access.jump_displaced event that the Reconciler recorded.
+func jumpEvents(r *Reconciler) []Event {
+	var found []Event
+	for _, e := range r.Events() {
+		if e.Type == "access.jump_displaced" {
+			found = append(found, e)
+		}
+	}
+	return found
+}
+
+func TestTheReconcilerRecordsAnEventWhenAnotherRuleDisplacesTheJumpRule(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	_, w := hostWriter(t, 4)
+	r.SetChainWriter(w)
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := jumpEvents(r)
+	if len(got) != 1 {
+		t.Fatalf("the Reconciler recorded %d access.jump_displaced events, want 1: %+v", len(got), r.Events())
+	}
+	if !strings.Contains(got[0].Message, "4") {
+		t.Errorf("the message %q names no position", got[0].Message)
+	}
+	for _, target := range fillers {
+		if !strings.Contains(got[0].Message, target) {
+			t.Errorf("the message %q names no rule %s above the jump rule", got[0].Message, target)
+		}
+	}
+}
+
+func TestTheReconcilerRecordsNoEventWhenTheJumpRuleHeadsTheForwardChain(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	_, w := hostWriter(t, 1)
+	r.SetChainWriter(w)
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if got := jumpEvents(r); len(got) != 0 {
+		t.Errorf("the Reconciler recorded %d events for a jump rule at position 1: %+v", len(got), got)
+	}
+}
+
+func TestTheReconcilerAddsTheJumpRuleAndRecordsAnEventWhenForwardHoldsNone(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	rec, w := hostWriter(t, 0)
+	r.SetChainWriter(w)
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	want := execx.Call{Name: "iptables", Args: []string{"-I", access.ParentForward, "1", "-j", access.ChainForward}}
+	found := 0
+	for _, c := range rec.Calls() {
+		if c.String() == want.String() {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Errorf("the Reconciler wrote the jump rule %d times, want 1", found)
+	}
+	if got := jumpEvents(r); len(got) != 1 {
+		t.Fatalf("the Reconciler recorded %d events for an absent jump rule, want 1: %+v", len(got), r.Events())
+	}
+}
+
+func TestTheReconcilerRecordsTheDisplacementOncePerChangeOfPosition(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	rec, w := hostWriter(t, 4)
+	r.SetChainWriter(w)
+
+	for i := 0; i < 3; i++ {
+		if err := r.Reconcile(); err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+	}
+	if got := jumpEvents(r); len(got) != 1 {
+		t.Fatalf("the Reconciler recorded %d events for three ticks at one position, want 1", len(got))
+	}
+
+	rec.Script(execx.Result{Output: []byte(chainListing(access.ParentForward, access.ChainForward, 2))},
+		"iptables", "-S", access.ParentForward)
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := jumpEvents(r)
+	if len(got) != 2 {
+		t.Fatalf("the Reconciler recorded %d events for two positions, want 2", len(got))
+	}
+	if !strings.Contains(got[1].Message, "2") {
+		t.Errorf("the message %q names no position", got[1].Message)
+	}
+}
+
+func TestTheReconcilerReportsThePositionOfTheJumpRule(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	_, w := hostWriter(t, 4)
+	r.SetChainWriter(w)
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if got := r.AccessJumpPosition(access.ParentForward); got != 4 {
+		t.Errorf("AccessJumpPosition(%q) = %d, want 4", access.ParentForward, got)
+	}
+}
