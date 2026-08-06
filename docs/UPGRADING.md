@@ -47,11 +47,12 @@ carries the Linux daemon alone.
 on the host reaches `http://127.0.0.1:9443` and drives the daemon. Give a local account on
 this host the trust that root needs.
 
-Three controls limit the exposure:
+Four controls reduce the risk:
 
 1. The listener binds a loopback address only. The daemon refuses any other address.
 2. Every mutating route requires the header `X-Hydrascale-Console: 1`.
 3. The daemon answers HTTP 403 when the `Origin` header names another origin.
+4. The daemon records one event for every mutating request, and the Activity view shows it.
 
 Control 2 and control 3 stop a hostile web page. Neither control stops a local account.
 
@@ -160,7 +161,7 @@ another tailnet stops for the length of step 9 and step 10. To avoid that interv
 9. Confirm the event `access.migrated` in the journal.
 10. Set `access.mode: observe` in `/etc/hydrascale/config.yaml`.
 11. Apply the mode with `sudo systemctl reload hydrascale`.
-12. Wait 90 seconds.
+12. Wait about 20 seconds.
 13. Read the state with `sudo hydrascale status`.
 14. Use the host for a day.
 15. Read the would-deny log lines with the command below.
@@ -200,19 +201,24 @@ access:
 
 The Access view of the console shows the same rule set, stages an edit, and applies it.
 
-## `hydrascale status` reports `down` for up to 90 seconds
+## `hydrascale status` reports `down` for about 20 seconds
 
-A tailnet needs up to 90 seconds after a restart of the service before `hydrascale status`
-reports `healthy` and `running`. An earlier read reports `down` and `degraded`. That is
-the normal state of a tailnet that still authenticates, and it is not a failure.
+A tailnet needs about 20 seconds after a restart of the service before `hydrascale status`
+reports `healthy` and `running`. An earlier read reports `down` and `degraded`. That is a
+normal state after a restart, and it is not a failure.
 
-Wait 90 seconds, then read the state again:
+Issue #223 measured the interval after it removed the serial wait: **17 seconds on the
+first restart, and 21 to 22 seconds on each of eight further restarts.** The earlier wait
+was the deadline of `refresh_dns`, which expired once for each tailnet. It was never the
+time that a tailnet needs to authenticate.
+
+Wait 30 seconds, then read the state again:
 
 ```bash
-sleep 90 && sudo hydrascale status
+sleep 30 && sudo hydrascale status
 ```
 
-A tailnet that still reports `down` after 90 seconds has a real failure. Read the events:
+A tailnet that still reports `down` after 60 seconds has a real failure. Read the events:
 
 ```bash
 sudo journalctl -u hydrascale -n 50
@@ -237,17 +243,68 @@ Continue at step 12 of the upgrade procedure.
 
 ## To roll back
 
-**Warning — read "`hydrascale status` reports `down` for up to 90 seconds" before you roll
-back.** A tailnet that reports `down` within 90 seconds of a restart needs more time
-rather than a rollback.
+**Warning — version 0.10 needs longer than version 1.0 to report `healthy`.** Version 0.10
+holds the serial `refresh_dns` wait that issue #223 removed from version 1.0. This project
+measured version 0.10 before issue #223 and not after it. That earlier measurement is up
+to 90 seconds for two tailnets, and a host with more tailnets takes longer. A tailnet that
+reports `down` inside that interval needs more time rather than a further action.
+
+**Warning — a rollback loses every path of every namespace.** Version 0.9 and version 0.10
+write the two `FORWARD` rules of a namespace at the moment they create the veth pair. A
+rollback keeps the namespaces, so that setup path never runs and the two rules never
+return. A restart repairs nothing, for the same reason. Step 8 to step 10 below write the
+rules again.
+
+**Warning — `hydrascale status` reports `healthy` while a namespace reaches nothing.**
+Confirm a path with `ping` rather than with a status. Issue #172 measured this on the test
+host on 2026-08-05:
+
+```
+$ sudo iptables -S FORWARD
+-P FORWARD DROP
+-A FORWARD -j ts-forward
+-A FORWARD -j DOCKER-USER
+-A FORWARD -j DOCKER-FORWARD
+
+$ sudo ip netns exec ns-havoc ping -c1 -W3 1.1.1.1
+1 packets transmitted, 0 received, 100% packet loss
+```
+
+> Both tailnets kept their peer list, and `hydrascale status` reported `healthy` and
+> `running` for each. **The daemon reported health while no namespace could reach
+> anything.**
 
 1. Stop the service with `sudo systemctl stop hydrascale`.
 2. Download the version 0.10 archive from the GitHub Releases page.
 3. Install the version 0.10 binary over `/usr/local/bin/hydrascale`.
 4. Restore the configuration file from `/etc/hydrascale/config.yaml.pre-v1.backup`.
 5. Start the service with `sudo systemctl start hydrascale`.
-6. Wait 90 seconds.
+6. Wait for each tailnet to report `healthy` and `running`, rather than for a fixed count
+   of seconds.
 7. Read the state with `sudo hydrascale status`.
+8. Read the `FORWARD` chain and the host veth devices.
+9. Write the two `FORWARD` rules for each host veth device.
+10. Confirm a path out of each namespace.
+
+Step 8 reads the chain and the devices:
+
+```bash
+sudo iptables -S FORWARD
+ip -brief addr show type veth
+```
+
+Step 9 writes the two rules. Run both commands for each host veth device:
+
+```bash
+sudo iptables -A FORWARD -o <veth> -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo iptables -A FORWARD -i <veth> -j ACCEPT
+```
+
+Step 10 confirms the path. Run the command for each tailnet:
+
+```bash
+sudo ip netns exec ns-<id> ping -c1 -W3 1.1.1.1
+```
 
 Version 0.10 ignores the keys `access`, `console`, and `dns`, so a restore of the copy is
 optional. Restore the copy when you want the file to match the running version.
