@@ -259,6 +259,16 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 .ev-kind{color:var(--text-secondary); flex:none; min-width:112px; font-size:var(--fs-micro)}
 .ev p{margin:0; font-size:var(--fs-sm); color:var(--text-body); min-width:0}
 
+/* The Recent activity panel of the overview is 320 pixels wide, and the card takes 24
+   pixels of padding on each side. A time of 58 pixels and a type of 148 pixels leave the
+   message about 60 pixels there, and the message then wraps to one word for each line.
+   The row of that panel therefore wraps: the time and the type take the first line, and
+   the message takes the whole width of the card below them. The row keeps the baseline
+   alignment, because a wrapped flex container aligns the items of each line on their own.
+   The activity view is wider and keeps the one-line row. See issue #236. */
+.ev-stack{flex-wrap:wrap; row-gap:var(--sp-1)}
+.ev-stack p{flex:1 0 100%}
+
 /* The affirmative action is the one thing that takes the accent, in every view. The
    overview empty state, the namespace add flow, and the removal dialog all use this one
    rule, so no view holds a second accent use. See FR-console-40. */
