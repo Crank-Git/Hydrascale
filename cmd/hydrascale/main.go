@@ -22,6 +22,7 @@ import (
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/routing"
+	"hydrascale/internal/secrets"
 	"hydrascale/internal/tui"
 )
 
@@ -423,6 +424,17 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
+			// The daemon starts when the secrets file is absent or unreadable. Upstream
+			// policy control is then unavailable. The message names the reason and it
+			// never holds a credential value. See FR-fix-17.
+			if store, err := secrets.Load(cfg.SecretsFile); err != nil {
+				fmt.Fprintf(os.Stderr, "Secrets file refused: %v (starting without upstream policy control)\n", err)
+			} else if len(store.Tailnets) == 0 {
+				fmt.Printf("No credential in %s; upstream policy control is unavailable\n", cfg.SecretsFile)
+			} else {
+				fmt.Printf("Read credentials for %d tailnets from %s\n", len(store.Tailnets), cfg.SecretsFile)
+			}
+
 			// Start DNS forwarder (retained for graceful shutdown)
 			bindAddr := cfg.Resolver.BindAddress
 			if bindAddr == "" {
@@ -481,15 +493,33 @@ func serveCmd() *cobra.Command {
 				}
 			}
 
+			// The migration runs before the first reconcile, so the daemon applies the
+			// preserving rule set on the first cycle after the upgrade from version 0.9.
+			if err := r.MigrateAccess(); err != nil {
+				cancel()
+				return fmt.Errorf("migrate the access block: %w", err)
+			}
+
 			// Start API server
 			apiServer := api.NewServer(api.DefaultSocketPath, r)
 			apiServer.SetSocketGroup(cfg.SocketGroup)
 			apiServer.SetVersion(version)
+			if fwdErr == nil {
+				apiServer.SetForwarder(forwarder)
+			}
 			go func() {
 				if err := apiServer.Start(); err != nil {
 					fmt.Fprintf(os.Stderr, "API server start error: %v\n", err)
 				}
 			}()
+
+			// The console listener is part of the start. A refused bind address and a
+			// port that is in use both stop the daemon, because the operator asked for a
+			// console and a daemon that runs without one hides the failure.
+			if err := apiServer.StartConsole(cfg.ConsoleEnabled(), cfg.ConsoleBindAddress()); err != nil {
+				cancel()
+				return fmt.Errorf("start the console listener: %w", err)
+			}
 
 			// Handle SIGHUP in a goroutine
 			go func() {

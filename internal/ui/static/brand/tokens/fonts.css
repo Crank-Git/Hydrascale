@@ -1,0 +1,40 @@
+/* The console self-hosts the two brand typefaces, because the console makes no request to
+   another host. Each src reads a path of this origin, and go:embed puts every file in the
+   daemon binary. brand/fonts/OFL.txt holds the licence of both families.
+
+   Space Grotesk 2.000 comes from github.com/floriankarsten/space-grotesk at tag 2.0.0,
+   commit 7220f5d04813fe83babe76d4fd23e02275021280, file
+   fonts/woff2/SpaceGrotesk[wght].woff2.
+   Space Mono 1.003 comes from github.com/googlefonts/spacemono at commit
+   329858c2c4dbd3476f972a4ae00624b018cf4b81, files fonts/webfonts/SpaceMono-Regular.woff2
+   and fonts/webfonts/SpaceMono-Bold.woff2. Both families carry the SIL Open Font License
+   version 1.1. The `## Changelog` section of docs/specs/spec.md records the same.
+
+   The Space Grotesk file is a variable font: one file carries every weight from 300 to
+   700, so the console loads 48 KiB rather than four static files. Space Mono publishes no
+   variable font, so the console loads the two weights it uses. The console sets no
+   italic, which .claude/rules/console-brand.md requires, so no italic file ships. */
+
+@font-face{
+  font-family:'Space Grotesk';
+  src:url('/brand/fonts/SpaceGrotesk[wght].woff2') format('woff2-variations');
+  font-weight:300 700;
+  font-style:normal;
+  font-display:swap;
+}
+
+@font-face{
+  font-family:'Space Mono';
+  src:url('/brand/fonts/SpaceMono-Regular.woff2') format('woff2');
+  font-weight:400;
+  font-style:normal;
+  font-display:swap;
+}
+
+@font-face{
+  font-family:'Space Mono';
+  src:url('/brand/fonts/SpaceMono-Bold.woff2') format('woff2');
+  font-weight:700;
+  font-style:normal;
+  font-display:swap;
+}

@@ -1,0 +1,52 @@
+/* Hydrascale, 2026 rebrand. Warm near-black, one acid accent, three states.
+   Dark only — this is an operator console, not a content site. */
+:root{
+  color-scheme:dark;
+
+  /* surfaces — warm, brown-grey, four steps and no more */
+  --ink:#0d0c0b;        /* page */
+  --s1:#141312;         /* card */
+  --s2:#1c1a18;         /* raised / hover */
+  --s3:#24211e;         /* input, inset, track */
+
+  /* lines */
+  --line:#262320;       /* structural edge */
+  --line-soft:#1a1816;  /* row divider */
+
+  /* text — three steps */
+  --tx:#eceae6;
+  --mu:#8d867d;
+  --dim:#5b544c;
+
+  /* accent: action and selection only */
+  --lime:#c8ff2e;
+  --lime-ink:#101208;
+  --lime-soft:color-mix(in srgb, var(--lime) 14%, transparent);
+
+  /* state — never used for actions */
+  --ok:#7ddc8f;
+  --warn:#f0a63c;
+  --crit:#ff5f52;
+
+  /* semantic aliases */
+  --surface-page:var(--ink);
+  --surface-card:var(--s1);
+  --surface-raised:var(--s2);
+  --surface-inset:var(--s3);
+  --border-default:var(--line);
+  --border-soft:var(--line-soft);
+  --text-body:var(--tx);
+  --text-secondary:var(--mu);
+  --text-tertiary:var(--dim);
+  --accent:var(--lime);
+  --accent-ink:var(--lime-ink);
+  --status-ok:var(--ok);
+  --status-warn:var(--warn);
+  --status-crit:var(--crit);
+
+  /* blueprint: the dotted-edge language of the ACL views */
+  --edge:#3a352f;             /* an allowed path at rest */
+  --edge-active:var(--lime);  /* the selected namespace's paths */
+  --edge-deny:#332b28;
+  --scrim:color-mix(in srgb, #060605 72%, transparent);
+}

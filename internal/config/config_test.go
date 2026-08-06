@@ -254,8 +254,8 @@ func TestResolveAuthKey_Neither(t *testing.T) {
 
 func TestAuthKeyEnvVar(t *testing.T) {
 	cases := map[string]string{
-		"personal":  "HYDRASCALE_AUTHKEY_PERSONAL",
-		"corp-prod": "HYDRASCALE_AUTHKEY_CORP_PROD",
+		"personal":   "HYDRASCALE_AUTHKEY_PERSONAL",
+		"corp-prod":  "HYDRASCALE_AUTHKEY_CORP_PROD",
 		"home-lab-1": "HYDRASCALE_AUTHKEY_HOME_LAB_1",
 	}
 	for in, want := range cases {
@@ -416,6 +416,38 @@ tailnets:
 	_, err := LoadConfig(tmp)
 	if err == nil {
 		t.Fatal("expected error for invalid global control_url")
+	}
+}
+
+func TestLoadConfig_dns_allow_unprotected_defaults_to_false(t *testing.T) {
+	tmp := writeTemp(t, `
+version: 2
+tailnets:
+  - id: test
+`)
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.DNS.AllowUnprotected {
+		t.Error("dns.allow_unprotected = true, want false")
+	}
+}
+
+func TestLoadConfig_reads_dns_allow_unprotected(t *testing.T) {
+	tmp := writeTemp(t, `
+version: 2
+dns:
+  allow_unprotected: true
+tailnets:
+  - id: test
+`)
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.DNS.AllowUnprotected {
+		t.Error("dns.allow_unprotected = false, want true")
 	}
 }
 

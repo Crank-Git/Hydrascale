@@ -15,7 +15,8 @@ Design lives in `docs/specs/`. Read `docs/specs/spec.md` and the relevant
 
 ## Stack
 
-- Go 1.24, standard library first. Six direct dependencies, vendored in `/vendor`.
+- Go 1.26.5, standard library first. Seven direct dependencies. The build reaches the Go
+  module proxy, and `go.sum` pins the hash of each dependency.
 - Bubble Tea and Lip Gloss for the terminal interface.
 - The console is a static single-page application with no build step. `go:embed` places
   `internal/ui/static` in the binary.
@@ -34,6 +35,7 @@ Design lives in `docs/specs/`. Read `docs/specs/spec.md` and the relevant
 | `internal/api` | The HTTP server on the control socket and on loopback. |
 | `internal/ui` | The console: `static/` plus its Go handlers and tests. |
 | `internal/policy` | The Tailscale and Headscale policy clients. |
+| `internal/session` | The reader of the sessions that the host holds now. |
 | `internal/tui` | The terminal interface. |
 | `internal/execx` | The command runner interface that tests replace. |
 
@@ -46,7 +48,20 @@ go test -race ./...            # what continuous integration runs
 go vet ./...                   # vet
 gofmt -l .                     # must print nothing
 govulncheck ./...              # dependency check
+node --version                 # the test suite needs node
 ```
+
+The test suite needs `node` as well as the Go tools.
+`TestTheConsoleJavaScriptTestsPass` in `internal/ui/shell_test.go` runs the console
+JavaScript tests of `internal/ui/jstest` with `node --test`. The console has no build step
+and `internal/ui/package.json` names no dependency, so `node` alone is enough. The test
+reads the count from the run and fails when the count falls below the constant
+`minimumConsoleJavaScriptTests`, so no document records the count.
+
+A developer machine that holds no `node` skips these tests. A gate that holds no `node`
+fails, because a silent loss of these tests reads exactly like success. The environment
+variable `CI` marks a gate, and GitHub Actions sets it. The test host gate exports
+`HYDRASCALE_GATE`, which marks a gate the same way.
 
 Run the daemon on the test host rather than on a developer machine. Use the
 `verify-on-phobos` skill; it builds, deploys, and rolls back.
@@ -62,8 +77,12 @@ call is untestable and it is rejected in review.
 ### iptables
 
 The daemon owns the chains `HYDRASCALE-FWD` and `HYDRASCALE-OUT`, and one jump rule into
-each of `FORWARD` and `INPUT`. It writes no other rule. It appends the jump rather than
-inserting it at position 1, so an operator firewall rule keeps its position.
+each of `FORWARD` and `INPUT`. It writes no other rule. It inserts the jump at position 1,
+which the operator decided on 2026-08-05. The position is not stable, because
+`ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` each take position 1 after the daemon
+starts. The reconciler therefore reads the position on each tick, records the event
+`access.jump_displaced` when the position changes, and writes the jump rule again when the
+parent chain holds none. It moves no rule of the operator.
 
 ### Errors
 

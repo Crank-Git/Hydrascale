@@ -1,0 +1,14 @@
+/* Fast, small, and only on things the user touched. */
+:root{
+  --dur-1:90ms;   /* @kind other */
+  --dur-2:160ms;  /* @kind other */
+  --dur-3:280ms;  /* @kind other */ /* path draw / panel reveal */
+  --ease:cubic-bezier(.2,.7,.3,1); /* @kind other */
+}
+@media (prefers-reduced-motion: reduce){
+  :root{
+    --dur-1:0ms;  /* @kind other */
+    --dur-2:0ms;  /* @kind other */
+    --dur-3:0ms;  /* @kind other */
+  }
+}

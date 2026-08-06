@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/*]
+    branches: [dev, main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
 
 jobs:
   test:
@@ -12,15 +12,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Repository hygiene
+        run: scripts/check-hygiene.sh
+
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26.5'
 
       - name: Build
         run: go build ./...
+
+      - name: Format
+        run: |
+          # A developer machine holds an untracked vendor/ after go mod vendor, and gofmt
+          # walks it. The filter keeps the same command correct on that machine.
+          unformatted=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt reports that these files are not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
 
       - name: Vet
         run: go vet ./...
 
       - name: Test with race detector
-        run: go test -race -v ./...
+        # The runner image ubuntu-latest provides node, and TestTheConsoleJavaScriptTestsPass
+        # in internal/ui runs the console JavaScript tests of internal/ui/jstest with it.
+        # A later image that drops node fails this step rather than skipping those tests,
+        # because GitHub Actions sets CI. See issue 181. The console has no build step and
+        # internal/ui/package.json names no dependency, so the workflow installs nothing.
+        run: |
+          node --version
+          go test -race -v ./...
+
+      - name: Vulnerability check
+        run: |
+          # govulncheck exits non-zero only when a reported vulnerability affects a
+          # called function, so a vulnerability in an uncalled dependency passes.
+          # The version is pinned, because a new release of the tool must not fail the
+          # build at an unpredictable moment. The pinned version needs Go 1.25 or later,
+          # and the workflow installs the version that go.mod names, which is later.
+          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...

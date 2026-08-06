@@ -24,7 +24,11 @@
       "Bash(gh issue edit:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
-      "Bash(scripts/check-hygiene.sh)"
+      "Bash(scripts/check-hygiene.sh)",
+      "Bash(git push:*)",
+      "Bash(node:*)",
+      "Bash(npx:*)",
+      "Bash(ssh phobos@192.168.1.221 ~/gate.sh:*)"
     ]
   },
   "hooks": {

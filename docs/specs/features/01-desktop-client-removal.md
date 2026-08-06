@@ -2,8 +2,8 @@
 id: desktop-client-removal
 feature: Desktop client removal and repository hygiene
 epic: "Epic 1: Desktop client removal and repository hygiene"
-status: planned
-issues: []
+status: built
+issues: [55, 56, 57, 58, 59, 60, 61]
 mockups: []
 ---
 
@@ -102,12 +102,28 @@ The script fails when a tracked file matches any of these:
 | Pattern | Reason |
 |---|---|
 | A file larger than 2 MB that is not under `internal/ui/static/brand/`. | A binary or a build artifact. |
-| `TODOS.md`, `HYPERPLAN.md`, `CLAUDE.md`, `AGENTS.md`. | A private development note. |
-| A path under `.claude/`, `.gstack/`, `.omc/`, `.sisyphus/`, `.openagent/`. | Tool state. |
+| `TODOS.md`, `HYPERPLAN.md`, `AGENTS.md`. | A private development note. |
+| A path under `.gstack/`, `.omc/`, `.sisyphus/`, `.openagent/`. | Tool state. |
 | A file that holds a credential shaped like a real one. | A secret. The exact patterns are below. |
-| A file that contains `Claude Code`, `claude.ai`, or `Generated with Claude`. | A private tooling reference. |
 
-The last pattern excludes the script itself, because the script names the pattern.
+The secret search excludes the script itself, because the script names every pattern.
+
+### The script names no tracked file and no tooling reference
+
+Risk R8 in `docs/specs/spec.md` records that the operator tracks `docs/specs/`,
+`CLAUDE.md`, and `.claude/`. The script therefore names none of the three. It keeps
+`TODOS.md`, `HYPERPLAN.md`, and `AGENTS.md`, because the repository tracks none of them.
+
+The script holds no content rule for `Claude Code`, `claude.ai`, or `Generated with
+Claude`. The tracked `CLAUDE.md` file and the tracked `.claude/` files contain those
+strings. A content rule that rejects them fails on every run, and this feature set
+requires the script to exit zero on the repository as it stands. The tracked-file
+decision and the content rule cannot both hold, so the content rule goes.
+
+A commit message in this repository carries a `Co-Authored-By` line that names the model.
+A commit message is not a tracked file, so no rule in the script reaches it. The
+non-goals in `docs/specs/spec.md` forbid a history rewrite. The hygiene rules therefore
+cover tracked files only.
 
 ### The secret patterns must not match a placeholder
 

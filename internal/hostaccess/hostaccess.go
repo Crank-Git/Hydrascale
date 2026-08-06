@@ -1,10 +1,14 @@
 package hostaccess
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log"
 	"sync"
 
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/execx"
 )
 
 // DNSForwarder routes DNS queries by domain suffix to per-tailnet upstreams.
@@ -15,6 +19,10 @@ type DNSForwarder interface {
 
 // Manager coordinates host access features: routes, DNS, and namespace setup.
 type Manager struct {
+	// Runner runs every command that the Manager sends to the host. A test replaces
+	// Runner with an execx.Recorder and asserts the exact argument list.
+	Runner execx.Runner
+
 	mu          sync.Mutex
 	dnsMode     string // "hosts" or "resolved"
 	hostsPath   string
@@ -35,6 +43,7 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
 		infraSubnet = "10.200.0.0/16"
 	}
 	m := &Manager{
+		Runner:         execx.OSRunner{},
 		dnsMode:        dnsMode,
 		hostsPath:      hostsPath,
 		infraSubnet:    infraSubnet,
@@ -44,6 +53,22 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
 		m.resolved = NewResolvedManager()
 	}
 	return m
+}
+
+// runner returns the command runner. A Manager with no Runner runs on the host.
+func (m *Manager) runner() execx.Runner {
+	if m.Runner == nil {
+		return execx.OSRunner{}
+	}
+	return m.Runner
+}
+
+// run runs one command on the host and returns its combined output. Every command carries
+// a deadline, because a command that does not return blocks the reconcile cycle.
+func (m *Manager) run(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), hostCommandTimeout)
+	defer cancel()
+	return m.runner().Run(ctx, name, args...)
 }
 
 // SetForwarder wires a DNS forwarder for per-tailnet MagicDNS routing.
@@ -67,15 +92,20 @@ func (m *Manager) Sync(tailnetID string, status *daemon.TailscaleStatus, vethGW,
 	m.activeTailnets[tailnetID] = peers
 	m.mu.Unlock()
 
-	if err := SyncHostRoutes(peers, m.infraSubnet); err != nil {
+	if err := m.SyncHostRoutes(peers); err != nil {
 		log.Printf("host-access: route sync failed for %s: %v", tailnetID, err)
 	}
 
-	m.syncDNS()
+	if err := m.syncDNS(); err != nil {
+		log.Printf("host-access: %v", err)
+	}
 }
 
 // Teardown removes all host access state for a tailnet.
-func (m *Manager) Teardown(tailnetID string) {
+// A step that fails does not stop the remaining steps. Teardown collects every failure and
+// returns the failures together. The reconciler calls Teardown when it removes a tailnet,
+// because the host resolves a name of that tailnet until the DNS sync runs again.
+func (m *Manager) Teardown(tailnetID string) error {
 	m.mu.Lock()
 	peers, exists := m.activeTailnets[tailnetID]
 	if exists {
@@ -83,15 +113,22 @@ func (m *Manager) Teardown(tailnetID string) {
 	}
 	m.mu.Unlock()
 
+	var errs []error
 	if exists {
-		RemoveAllHostRoutes(peers.VethHost, m.infraSubnet)
+		if err := m.RemoveAllHostRoutes(peers.VethHost); err != nil {
+			errs = append(errs, fmt.Errorf("remove the host routes of %s: %w", tailnetID, err))
+		}
 	}
-
-	m.syncDNS()
+	if err := m.syncDNS(); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // TeardownAll removes all host access state. Called during shutdown.
-func (m *Manager) TeardownAll() {
+// A step that fails does not stop the remaining steps. TeardownAll collects every failure
+// and returns the failures together.
+func (m *Manager) TeardownAll() error {
 	m.mu.Lock()
 	tailnets := make(map[string]TailnetPeers, len(m.activeTailnets))
 	for k, v := range m.activeTailnets {
@@ -100,18 +137,28 @@ func (m *Manager) TeardownAll() {
 	m.activeTailnets = make(map[string]TailnetPeers)
 	m.mu.Unlock()
 
-	for _, peers := range tailnets {
-		RemoveAllHostRoutes(peers.VethHost, m.infraSubnet)
+	var errs []error
+	for id, peers := range tailnets {
+		if err := m.RemoveAllHostRoutes(peers.VethHost); err != nil {
+			errs = append(errs, fmt.Errorf("remove the host routes of %s: %w", id, err))
+		}
 	}
 
-	m.syncDNS()
+	if err := m.syncDNS(); err != nil {
+		errs = append(errs, err)
+	}
 
 	if m.resolved != nil {
-		m.resolved.DeregisterAll()
+		if err := m.resolved.DeregisterAll(); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	return errors.Join(errs...)
 }
 
-func (m *Manager) syncDNS() {
+// syncDNS writes the names of every active tailnet where the host resolver reads them.
+// syncDNS returns the failure of the hosts file write or of the resolved registration.
+func (m *Manager) syncDNS() error {
 	m.mu.Lock()
 	allV4 := make(map[string]string)
 	allV6 := make(map[string]string)
@@ -136,15 +183,16 @@ func (m *Manager) syncDNS() {
 	fwd := m.forwarder
 	m.mu.Unlock()
 
+	var err error
 	switch m.dnsMode {
 	case "hosts":
-		if err := UpdateHostsFile(m.hostsPath, allV4, allV6); err != nil {
-			log.Printf("host-access: failed to update hosts file: %v", err)
+		if e := UpdateHostsFile(m.hostsPath, allV4, allV6); e != nil {
+			err = fmt.Errorf("host-access: failed to update hosts file: %w", e)
 		}
 	case "resolved":
 		if m.resolved != nil {
-			if err := m.resolved.RegisterDomains(domains); err != nil {
-				log.Printf("host-access: resolved registration failed: %v", err)
+			if e := m.resolved.RegisterDomains(domains); e != nil {
+				err = fmt.Errorf("host-access: resolved registration failed: %w", e)
 			}
 		}
 	}
@@ -152,4 +200,5 @@ func (m *Manager) syncDNS() {
 	if fwd != nil {
 		fwd.SetDomainRoutes(domainRoutes)
 	}
+	return err
 }

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"hydrascale/internal/access"
 )
 
 // validIDPattern restricts tailnet IDs to safe characters.
@@ -24,11 +26,17 @@ var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 // CLI and the service always read the same file.
 const DefaultConfigPath = "/etc/hydrascale/config.yaml"
 
+// DefaultSecretsPath is the default location of the secrets file.
+// The daemon reads a credential from this file at mode 0600 and owner root.
+const DefaultSecretsPath = "/etc/hydrascale/secrets.yaml"
+
 // Tailnet represents a single Tailscale tailnet configuration.
 type Tailnet struct {
-	ID         string `yaml:"id"`
-	ExitNode   string `yaml:"exit_node,omitempty"`
-	AuthKey    string `yaml:"auth_key,omitempty"`
+	ID       string `yaml:"id"`
+	ExitNode string `yaml:"exit_node,omitempty"`
+	// AuthKey carries the tag json:"-", because GET /api/status encodes this struct and
+	// returned the key to every caller of the control socket. See SA-1.
+	AuthKey    string `yaml:"auth_key,omitempty" json:"-"`
 	HostAccess *bool  `yaml:"host_access,omitempty"`
 	ControlURL string `yaml:"control_url,omitempty"`
 }
@@ -36,6 +44,13 @@ type Tailnet struct {
 // HostDNSConfig holds DNS configuration for host access.
 type HostDNSConfig struct {
 	Mode string `yaml:"mode,omitempty"` // "hosts" (default) or "resolved"
+}
+
+// DNSConfig holds the DNS protection settings.
+type DNSConfig struct {
+	// AllowUnprotected lets a namespace start when the overlay mount on /etc fails.
+	// The default is false, so a host that cannot mount OverlayFS fails loudly.
+	AllowUnprotected bool `yaml:"allow_unprotected,omitempty"`
 }
 
 // Mesh is a stub for forward compatibility with Phase 2 mesh mode.
@@ -66,12 +81,38 @@ type Config struct {
 	Mesh        Mesh             `yaml:"mesh,omitempty"`
 	EventLog    string           `yaml:"event_log,omitempty"`
 	HostDNS     HostDNSConfig    `yaml:"host_dns,omitempty"`
+	DNS         DNSConfig        `yaml:"dns,omitempty"`
 	InfraSubnet string           `yaml:"infra_subnet,omitempty"` // Default: 10.200.0.0/16
 	// SocketGroup, when set, makes the API control socket group-accessible:
 	// the daemon chowns /var/lib/hydrascale + api.sock to root:<group> with
 	// group-traversable/rw modes. Add a trusted user to that group to let it
 	// reach the API (e.g. an SSH-forwarded remote GUI) without being root.
 	SocketGroup string `yaml:"socket_group,omitempty"`
+	// SecretsFile names the root-only credential store. LoadConfig applies
+	// DefaultSecretsPath when the key is absent.
+	SecretsFile string `yaml:"secrets_file,omitempty"`
+	// ProbeTarget is the address that each namespace sends one packet to, so that the
+	// status response reports measured reachability. An empty value selects
+	// reach.DefaultTarget, which is public. An operator who accepts no packet to a third
+	// party declares an address inside a tailnet here. An address on the local network
+	// reports unreachable, because the default rule set denies every private destination.
+	ProbeTarget string `yaml:"probe_target,omitempty"`
+	// Access holds the local rule set. The field is a pointer, because a nil value means
+	// that the file holds no access key, which is what the version 0.9 migration detects.
+	Access *access.RuleSet `yaml:"access,omitempty"`
+	// Console holds the console listener settings. Every key has a default, so a version
+	// 0.9 file that holds no console key serves the console on the loopback address.
+	Console ConsoleConfig `yaml:"console,omitempty"`
+}
+
+// AccessMode returns the mode that the daemon applies the local rule set in.
+// AccessMode returns access.ModeEnforce when the file holds no access key, and when the
+// access block holds no mode key.
+func (c *Config) AccessMode() string {
+	if c.Access == nil {
+		return access.ModeEnforce
+	}
+	return c.Access.EffectiveMode()
 }
 
 // TailnetHostAccess returns whether host access is enabled for a specific tailnet,
@@ -134,6 +175,17 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
+	// Validate the local rule set against the tailnets that this file declares.
+	if cfg.Access != nil {
+		ids := make([]string, 0, len(cfg.Tailnets))
+		for _, tn := range cfg.Tailnets {
+			ids = append(ids, tn.ID)
+		}
+		if err := cfg.Access.Validate(ids); err != nil {
+			return nil, fmt.Errorf("invalid access block: %w", err)
+		}
+	}
+
 	// Validate global control_url
 	if err := ValidateControlURL(cfg.ControlURL); err != nil {
 		return nil, fmt.Errorf("global %w", err)
@@ -142,6 +194,19 @@ func LoadConfig(path string) (*Config, error) {
 	// Validate DNS bind address
 	if err := ValidateBindAddress(cfg.Resolver.BindAddress); err != nil {
 		return nil, err
+	}
+
+	// Validate the console bind address. The loader reads the effective value, so a file
+	// that holds no console key gets the loopback default rather than an error.
+	if err := ValidateConsoleBindAddress(cfg.ConsoleBindAddress()); err != nil {
+		return nil, err
+	}
+
+	// The daemon passes the probe target to `ping` inside a namespace, therefore the file
+	// declares an address and never a name. A name needs a resolver inside the namespace,
+	// and a failed lookup would report a broken path.
+	if cfg.ProbeTarget != "" && net.ParseIP(cfg.ProbeTarget) == nil {
+		return nil, fmt.Errorf("invalid probe_target %q: declare an IP address", cfg.ProbeTarget)
 	}
 
 	// Auto-migrate v1 to v2
@@ -162,6 +227,10 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Reconciler.Interval == 0 {
 		cfg.Reconciler.Interval = 10 * time.Second
+	}
+
+	if cfg.SecretsFile == "" {
+		cfg.SecretsFile = DefaultSecretsPath
 	}
 
 	// Validate and default infra_subnet
@@ -189,6 +258,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Version:     2,
 		InfraSubnet: "10.200.0.0/16",
+		SecretsFile: DefaultSecretsPath,
 		Tailnets:    []Tailnet{},
 		Resolver: ResolverConfig{
 			Mode: "unified",
@@ -221,6 +291,48 @@ func ValidateBindAddress(addr string) error {
 	return nil
 }
 
+// isLoopbackHost reports whether host holds a loopback IP address.
+// host is the host component of a URL, with an optional port.
+// isLoopbackHost rejects a name such as localhost, because a name resolves to an address
+// that the operator can change.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// ValidateResolverMode checks that mode is empty or a mode that the resolver runs.
+// An empty value keeps the current mode. The resolver runs the mode unified only
+// (internal/dns/forwarder.go:233-236).
+func ValidateResolverMode(mode string) error {
+	if mode == "" || mode == "unified" {
+		return nil
+	}
+	return fmt.Errorf("invalid resolver mode %q: the daemon runs the mode unified only", mode)
+}
+
+// SafeStateDir returns the state directory of a tailnet under base, and it reports
+// whether the daemon can operate on that directory.
+// SafeStateDir rejects an identifier that IsValidID rejects, and it rejects a directory
+// that is not a direct child of base. A caller that gets false must change nothing.
+func SafeStateDir(base, id string) (string, bool) {
+	if !IsValidID(id) {
+		return "", false
+	}
+	dir := filepath.Join(base, id)
+	if filepath.Dir(dir) != filepath.Clean(base) {
+		return "", false
+	}
+	return dir, true
+}
+
 // AuthKeyEnvVar returns the environment variable name that overrides the auth
 // key for a tailnet: HYDRASCALE_AUTHKEY_<ID>, where <ID> is uppercased with
 // dashes replaced by underscores (e.g. "corp-prod" -> HYDRASCALE_AUTHKEY_CORP_PROD).
@@ -239,6 +351,9 @@ func ResolveAuthKey(tailnetID string, configKey string) string {
 }
 
 // ValidateControlURL checks that a control URL is empty or a valid https URL with a host.
+// ValidateControlURL also accepts the http scheme when the host is a loopback address,
+// because a Headscale server on the same host carries no traffic across a network.
+// Every caller uses this one function, so the control API and the loader apply one rule.
 func ValidateControlURL(raw string) error {
 	if raw == "" {
 		return nil
@@ -247,8 +362,11 @@ func ValidateControlURL(raw string) error {
 	if err != nil {
 		return fmt.Errorf("invalid control_url %q: %w", raw, err)
 	}
+	if u.Scheme == "http" && isLoopbackHost(u.Host) {
+		return nil
+	}
 	if u.Scheme != "https" {
-		return fmt.Errorf("control_url %q must use https scheme", raw)
+		return fmt.Errorf("control_url %q must use https scheme, unless the host is a loopback address", raw)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("control_url %q has no host", raw)

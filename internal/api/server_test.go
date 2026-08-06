@@ -7,16 +7,20 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/execx"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/routing"
+	"hydrascale/internal/session"
 )
 
 // --- Mock implementations for testing ---
@@ -70,17 +74,28 @@ type mockDaemon struct {
 	healthy      map[string]bool
 	statusResult *daemon.TailscaleStatus // returned by GetStatus; nil = daemon starting
 	statusErr    error                   // returned by GetStatus; non-nil = error
+	unprotected  map[string]daemon.UnprotectedRecord
 }
 
 func newMockDaemon() *mockDaemon {
-	return &mockDaemon{healthy: make(map[string]bool)}
+	return &mockDaemon{
+		healthy:     make(map[string]bool),
+		unprotected: make(map[string]daemon.UnprotectedRecord),
+	}
 }
 
-func (m *mockDaemon) Start(tailnetID, nsName string) error {
+func (m *mockDaemon) Start(tailnetID, nsName string, allowUnprotected bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.healthy[tailnetID] = true
 	return nil
+}
+
+func (m *mockDaemon) UnprotectedDNS(tailnetID string) (daemon.UnprotectedRecord, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec, ok := m.unprotected[tailnetID]
+	return rec, ok
 }
 
 func (m *mockDaemon) Stop(nsName, tailnetID string) error {
@@ -102,7 +117,9 @@ func (m *mockDaemon) GetSocketPath(tailnetID string) string {
 
 func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error { return nil }
 
-func (m *mockDaemon) RefreshDNSConfig(tailnetID, nsName string) error { return nil }
+func (m *mockDaemon) RefreshDNSConfigIfReady(tailnetID, nsName string) (bool, error) {
+	return true, nil
+}
 
 func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
 	m.mu.Lock()
@@ -142,11 +159,46 @@ func newTestReconciler(cfgPath string) *reconciler.Reconciler {
 	return reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
 }
 
+// maxSocketPathLen is the size of sun_path on Linux. bind returns EINVAL for a longer
+// path.
+const maxSocketPathLen = 108
+
+// tempSocketPath returns a socket path under a new temporary directory, and it removes
+// that directory when the test ends. The name parameter is the socket file name.
+// tempSocketPath fails the test when it cannot create the directory, and when the path
+// reaches the sun_path limit.
+//
+// t.TempDir builds the directory name from the test name, and this project writes a long
+// test name as a sentence, so a t.TempDir socket path passes 108 bytes and bind fails.
+func tempSocketPath(t *testing.T, name string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "hs")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("RemoveAll %s: %v", dir, err)
+		}
+	})
+	path := filepath.Join(dir, name)
+	if len(path) >= maxSocketPathLen {
+		t.Fatalf("socket path %s measures %d bytes, and the limit is %d", path, len(path), maxSocketPathLen)
+	}
+	return path
+}
+
 // startTestServer starts a Server on a temp socket and returns the server, client, and cleanup func.
 func startTestServer(t *testing.T, r *reconciler.Reconciler) (*Server, *Client, func()) {
 	t.Helper()
-	socketPath := filepath.Join(t.TempDir(), "test-api.sock")
+	socketPath := tempSocketPath(t, "test-api.sock")
 	srv := NewServer(socketPath, r)
+	// GET /api/access reads the sessions of the host. The test server holds a Recorder
+	// that reports none, therefore a test that states no session runs no host command. A
+	// test that states a session calls SetSessionReader with its own Recorder.
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{}, "ss", "-H", "-tna")
+	srv.SetSessionReader(session.NewReaderWith(rec))
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -228,8 +280,7 @@ func TestReconcileEndpoint(t *testing.T) {
 }
 
 func TestStaleSocketCleanup(t *testing.T) {
-	dir := t.TempDir()
-	socketPath := filepath.Join(dir, "stale.sock")
+	socketPath := tempSocketPath(t, "stale.sock")
 
 	// Create a plain file at the socket path to simulate a stale socket.
 	// net.Dial("unix", ...) on a regular file returns "connection refused".
@@ -356,8 +407,7 @@ func TestMethodNotAllowed(t *testing.T) {
 }
 
 func TestServerShutdownCleanup(t *testing.T) {
-	dir := t.TempDir()
-	socketPath := filepath.Join(dir, "shutdown-test.sock")
+	socketPath := tempSocketPath(t, "shutdown-test.sock")
 	cfgPath := writeTestConfig(t)
 	r := newTestReconciler(cfgPath)
 	srv := NewServer(socketPath, r)
@@ -387,7 +437,7 @@ func TestServerShutdownCleanup(t *testing.T) {
 func TestReconcileEndpointError(t *testing.T) {
 	// Use a non-existent config path so Reconcile() returns an error.
 	r := reconciler.New("/nonexistent/config.yaml", newMockNS(), newMockDaemon(), &mockRouting{}, time.Second, nil, "10.200.0.0/16")
-	socketPath := filepath.Join(t.TempDir(), "err-api.sock")
+	socketPath := tempSocketPath(t, "err-api.sock")
 	srv := NewServer(socketPath, r)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -598,6 +648,31 @@ func TestApplySocketGroup_UnknownGroup(t *testing.T) {
 	}
 }
 
+func TestApplySocketGroup_RootGroup(t *testing.T) {
+	t.Run("refuses a group with group id 0 and names the reason", func(t *testing.T) {
+		g, err := user.LookupGroupId("0")
+		if err != nil {
+			t.Skipf("this host holds no group with group id 0: %v", err)
+		}
+		err = applySocketGroup("/tmp/hydrascale-test.sock", g.Name)
+		if err == nil {
+			t.Fatalf("applySocketGroup(%q) returned no error", g.Name)
+		}
+		if !strings.Contains(err.Error(), "group id 0") {
+			t.Errorf("message = %q, want it to contain %q", err.Error(), "group id 0")
+		}
+	})
+}
+
+func TestSocketGroupLog(t *testing.T) {
+	line := socketGroupLog("/var/lib/hydrascale/api.sock", "hydrascale", os.FileMode(0660))
+	for _, want := range []string{"/var/lib/hydrascale/api.sock", "hydrascale", "0660"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("line = %q, want it to contain %q", line, want)
+		}
+	}
+}
+
 func TestAddTailnet_PersistsControlURLAndHostAccess(t *testing.T) {
 	cfgPath := writeTestConfig(t) // start empty
 	r := reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
@@ -660,7 +735,7 @@ func TestAddTailnet_RejectsInvalidControlURL(t *testing.T) {
 // TestTailnetDetailClient_HTTP500 verifies that Client.TailnetDetail returns an
 // error when the server responds with a non-200, non-404 status code.
 func TestTailnetDetailClient_HTTP500(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "fake-api.sock")
+	socketPath := tempSocketPath(t, "fake-api.sock")
 
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -700,4 +775,18 @@ func TestDetailEndpoint_BackwardsCompatMock(t *testing.T) {
 	if detail.Error == "" {
 		t.Error("expected Error set for default mock (nil status)")
 	}
+}
+
+// The name of this test is long on purpose. A t.TempDir socket path carries the test
+// name, so a return to t.TempDir makes this test fail.
+func TestTempSocketPath_returns_a_path_below_the_sun_path_limit_for_a_long_test_name(t *testing.T) {
+	socketPath := tempSocketPath(t, "limit-api.sock")
+	if len(socketPath) >= maxSocketPathLen {
+		t.Fatalf("socket path %s measures %d bytes, and the limit is %d", socketPath, len(socketPath), maxSocketPathLen)
+	}
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ln.Close()
 }

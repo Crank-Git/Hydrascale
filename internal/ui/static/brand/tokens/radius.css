@@ -1,0 +1,9 @@
+/* Soft, generous, consistent. Nothing is square except the matrix grid. */
+:root{
+  --r-xs:6px;
+  --r-sm:9px;    /* buttons, chips, inputs */
+  --r:12px;      /* rows, small cards */
+  --r-lg:16px;   /* cards */
+  --r-xl:20px;   /* panels, dialogs */
+  --r-pill:999px;
+}

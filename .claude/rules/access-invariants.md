@@ -16,15 +16,28 @@ These rules exist because version 1.0 fixes a defect that broke each of them. Re
 The daemon writes rules into `HYDRASCALE-FWD` and `HYDRASCALE-OUT`. It writes one jump
 rule into `FORWARD` and one into `INPUT`. It writes no other rule anywhere.
 
-**Append the jump rule. Never insert it at position 1.** Version 0.9 ran
-`iptables -I FORWARD 1 …`, which placed the daemon's rule above every rule the operator's
-own firewall had written. An operator who wants Hydrascale to run first can move the jump
-themselves.
+**Insert the jump rule at position 1, and report a displacement.** The operator decided
+this on 2026-08-05: "I guess 1, but we need to make sure we catch if this is an issue."
+The position is not stable, because `ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` each
+take position 1 after the daemon starts. The reconciler reads the position on each tick
+and records `access.jump_displaced` when the position changes. It moves no rule of the
+operator.
+
+The jump at position 1 sends every forwarded packet of the host into `HYDRASCALE-FWD`,
+therefore the chain opens with `! -i vh+ ! -o vh+ -j RETURN`. The daemon filters a packet
+that involves a namespace device, and it returns every other forwarded packet.
 
 ## Deny is the default
 
 A local rule allows. There is no deny rule. The last rule in `HYDRASCALE-FWD` drops in
-`enforce` mode and returns in `observe` mode.
+`enforce` mode and accepts in `observe` mode.
+
+**The `observe` tail accepts; it does not return.** A `RETURN` rule gives the packet back
+to `FORWARD`, whose policy is `DROP` on a host that runs Docker, therefore the packet
+dies one chain later and the mode drops what it promises to keep. Issue #238 measured
+this. The same holds for `HYDRASCALE-OUT` and the policy of `INPUT`. The chain opens with
+`! -i vh+ ! -o vh+ -j RETURN` and the `HYDRASCALE-OUT` tail matches one namespace device,
+therefore the `ACCEPT` applies to the traffic of the daemon alone.
 
 A rule that matches a source only, with no destination match and no output interface
 match, allows everything. That was the version 0.9 defect. Match the output interface.

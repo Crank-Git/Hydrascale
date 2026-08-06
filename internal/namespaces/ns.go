@@ -1,15 +1,19 @@
 package namespaces
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+
+	"hydrascale/internal/execx"
 )
 
 // Manager defines the interface for network namespace operations.
@@ -24,11 +28,50 @@ type Manager interface {
 }
 
 // RealManager implements Manager using real system calls.
-type RealManager struct{}
+// Runner runs every command that RealManager sends to the host. A test replaces Runner
+// with an execx.Recorder and asserts the exact argument list.
+type RealManager struct {
+	Runner execx.Runner
+}
 
-// NewRealManager returns a new RealManager.
+// NewRealManager returns a new RealManager that runs each command on the host.
 func NewRealManager() *RealManager {
-	return &RealManager{}
+	return &RealManager{Runner: execx.OSRunner{}}
+}
+
+// runner returns the command runner. A RealManager with no Runner runs on the host.
+func (m *RealManager) runner() execx.Runner {
+	if m.Runner == nil {
+		return execx.OSRunner{}
+	}
+	return m.Runner
+}
+
+// run executes name with args and returns the combined output.
+// run returns an error when the command fails to start or exits non-zero.
+func (m *RealManager) run(name string, args ...string) ([]byte, error) {
+	return m.runner().Run(context.Background(), name, args...)
+}
+
+// ruleAbsent reports whether the output of an iptables delete states that the rule is not
+// present. iptables exits non-zero for that state, and a teardown treats it as success,
+// because an operator who already removed the rule reached the wanted result.
+func ruleAbsent(output []byte) bool {
+	text := string(output)
+	return strings.Contains(text, "does a matching rule exist") ||
+		strings.Contains(text, "No chain/target/match by that name")
+}
+
+// deleteRule runs one iptables delete and returns the failure.
+// deleteRule returns nil when the command succeeds and when the rule is absent. Any other
+// failure carries the command line and the output, because the operator needs the rule
+// that stays on the host.
+func (m *RealManager) deleteRule(name string, args ...string) error {
+	out, err := m.run(name, args...)
+	if err == nil || ruleAbsent(out) {
+		return nil
+	}
+	return fmt.Errorf("%s %s: %v (%s)", name, strings.Join(args, " "), err, out)
 }
 
 // GetName returns the namespace name for a given tailnet ID.
@@ -41,31 +84,6 @@ func (m *RealManager) GetTailnetID(nsName string) string {
 	return GetTailnetFromNamespace(nsName)
 }
 
-// Create creates a new network namespace for the given tailnet ID.
-func (m *RealManager) Create(tailnetID string, infraSubnet string) error {
-	return CreateNamespace(tailnetID, infraSubnet)
-}
-
-// Delete deletes the network namespace with the given name.
-func (m *RealManager) Delete(nsName string, infraSubnet string) error {
-	return DeleteNamespace(nsName, infraSubnet)
-}
-
-// SetupVeth creates a veth pair between host and namespace for DNS routing.
-func (m *RealManager) SetupVeth(nsName string, index int, infraSubnet string) error {
-	return SetupVeth(nsName, index, infraSubnet)
-}
-
-// TeardownVeth removes the veth pair for a namespace.
-func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
-	return TeardownVeth(nsName, infraSubnet)
-}
-
-// List returns a list of all Hydrascale network namespaces.
-func (m *RealManager) List() ([]string, error) {
-	return ListNamespaces()
-}
-
 // GetNamespaceName returns the namespace name for a given tailnet ID.
 // Format: ns-<tailnet-id> as per HYPERPLAN.md specification.
 func GetNamespaceName(tailnetID string) string {
@@ -75,10 +93,15 @@ func GetNamespaceName(tailnetID string) string {
 // CreateNamespace creates a new network namespace for the given tailnet ID.
 // After creating the namespace, it sets up a veth pair for DNS routing.
 func CreateNamespace(tailnetID string, infraSubnet string) error {
+	return NewRealManager().Create(tailnetID, infraSubnet)
+}
+
+// Create creates a new network namespace for the given tailnet ID.
+// After creating the namespace, it sets up a veth pair for DNS routing.
+func (m *RealManager) Create(tailnetID string, infraSubnet string) error {
 	namespaceName := GetNamespaceName(tailnetID)
 
-	cmd := exec.Command("ip", "netns", "add", namespaceName)
-	output, err := cmd.CombinedOutput()
+	output, err := m.run("ip", "netns", "add", namespaceName)
 	if err != nil {
 		return fmt.Errorf("failed to create namespace %q: %v (%s)", namespaceName, err, output)
 	}
@@ -87,9 +110,9 @@ func CreateNamespace(tailnetID string, infraSubnet string) error {
 
 	// Set up veth pair for DNS routing
 	index := VethIndex(namespaceName)
-	if err := SetupVeth(namespaceName, index, infraSubnet); err != nil {
+	if err := m.SetupVeth(namespaceName, index, infraSubnet); err != nil {
 		// Best effort cleanup: delete the namespace if veth setup fails
-		_ = exec.Command("ip", "netns", "del", namespaceName).Run()
+		_, _ = m.run("ip", "netns", "del", namespaceName)
 		return fmt.Errorf("failed to setup veth for namespace %q: %v", namespaceName, err)
 	}
 
@@ -99,30 +122,59 @@ func CreateNamespace(tailnetID string, infraSubnet string) error {
 // DeleteNamespace deletes the network namespace with the given name.
 // Tears down the veth pair before deleting the namespace.
 func DeleteNamespace(namespaceName string, infraSubnet string) error {
-	// Tear down veth pair first (best effort - namespace deletion will clean up anyway)
-	if err := TeardownVeth(namespaceName, infraSubnet); err != nil {
-		log.Printf("Warning: veth teardown for %s: %v", namespaceName, err)
+	return NewRealManager().Delete(namespaceName, infraSubnet)
+}
+
+// Delete deletes the network namespace with the given name.
+// Delete tears down the veth pair before it deletes the namespace.
+// A step that fails does not stop the remaining steps. Delete collects every failure and
+// returns the failures together.
+func (m *RealManager) Delete(namespaceName string, infraSubnet string) error {
+	var errs []error
+
+	if err := m.TeardownVeth(namespaceName, infraSubnet); err != nil {
+		errs = append(errs, fmt.Errorf("tear down the veth pair of %s: %w", namespaceName, err))
 	}
 
-	cmd := exec.Command("ip", "netns", "del", namespaceName)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to delete namespace %q: %s", namespaceName, output)
+	if output, err := m.run("ip", "netns", "del", namespaceName); err != nil {
+		errs = append(errs, fmt.Errorf("failed to delete namespace %q: %s", namespaceName, output))
 	}
 
 	// Clean up /etc/netns/<ns>/ (resolv.conf override and the directory itself).
 	netnsDir := filepath.Join("/etc/netns", namespaceName)
-	_ = os.Remove(filepath.Join(netnsDir, "resolv.conf"))
-	_ = os.Remove(netnsDir)
+	if err := removeIfPresent(filepath.Join(netnsDir, "resolv.conf")); err != nil {
+		errs = append(errs, err)
+	}
+	if err := removeIfPresent(netnsDir); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
 
 	log.Printf("Deleted namespace: %s", namespaceName)
 	return nil
 }
 
+// removeIfPresent removes path and returns the failure.
+// removeIfPresent returns nil when the path does not exist, because a teardown that runs
+// twice reaches the wanted result on the second run.
+func removeIfPresent(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
+}
+
 // ListNamespaces returns a list of all network namespaces (excluding default).
 func ListNamespaces() ([]string, error) {
-	cmd := exec.Command("ip", "netns", "list")
-	output, err := cmd.Output()
+	return NewRealManager().List()
+}
+
+// List returns a list of all network namespaces (excluding default).
+func (m *RealManager) List() ([]string, error) {
+	output, err := m.run("ip", "netns", "list")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list namespaces: %v", err)
 	}
@@ -204,6 +256,14 @@ func VethIPs(infraSubnet string, index int) (hostIP, nsIP, hostGW, nsGW string, 
 // Namespace side: vn<hash> with IP from infraSubnet
 // MagicDNS (100.100.100.100) is reached via the DNS forwarder, not a host route.
 func SetupVeth(nsName string, index int, infraSubnet string) error {
+	return NewRealManager().SetupVeth(nsName, index, infraSubnet)
+}
+
+// SetupVeth creates a veth pair between host and namespace for DNS routing.
+// Host side: vh<hash> with IP from infraSubnet
+// Namespace side: vn<hash> with IP from infraSubnet
+// MagicDNS (100.100.100.100) is reached via the DNS forwarder, not a host route.
+func (m *RealManager) SetupVeth(nsName string, index int, infraSubnet string) error {
 	hostVeth, nsVeth := VethNames(nsName)
 	hostIP, nsIP, hostGW, _, err := VethIPs(infraSubnet, index)
 	if err != nil {
@@ -211,101 +271,110 @@ func SetupVeth(nsName string, index int, infraSubnet string) error {
 	}
 
 	// Create veth pair
-	cmd := exec.Command("ip", "link", "add", hostVeth, "type", "veth", "peer", "name", nsVeth)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("ip", "link", "add", hostVeth, "type", "veth", "peer", "name", nsVeth); err != nil {
 		return fmt.Errorf("failed to create veth pair: %v (%s)", err, out)
 	}
 
 	// Move namespace side into the namespace
-	cmd = exec.Command("ip", "link", "set", nsVeth, "netns", nsName)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("ip", "link", "set", nsVeth, "netns", nsName); err != nil {
 		return fmt.Errorf("failed to move %s into namespace %s: %v (%s)", nsVeth, nsName, err, out)
 	}
 
 	// Assign IP to host side
-	cmd = exec.Command("ip", "addr", "add", hostIP, "dev", hostVeth)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("ip", "addr", "add", hostIP, "dev", hostVeth); err != nil {
 		return fmt.Errorf("failed to assign IP to %s: %v (%s)", hostVeth, err, out)
 	}
 
 	// Bring up host side
-	cmd = exec.Command("ip", "link", "set", hostVeth, "up")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("ip", "link", "set", hostVeth, "up"); err != nil {
 		return fmt.Errorf("failed to bring up %s: %v (%s)", hostVeth, err, out)
 	}
 
 	// Assign IP to namespace side
-	cmd = exec.Command("ip", "netns", "exec", nsName, "ip", "addr", "add", nsIP, "dev", nsVeth)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("ip", "netns", "exec", nsName, "ip", "addr", "add", nsIP, "dev", nsVeth); err != nil {
 		return fmt.Errorf("failed to assign IP to %s in namespace: %v (%s)", nsVeth, err, out)
 	}
 
 	// Bring up namespace side
-	cmd = exec.Command("ip", "netns", "exec", nsName, "ip", "link", "set", nsVeth, "up")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("ip", "netns", "exec", nsName, "ip", "link", "set", nsVeth, "up"); err != nil {
 		return fmt.Errorf("failed to bring up %s in namespace: %v (%s)", nsVeth, err, out)
 	}
 
 	// Add default route inside namespace so tailscaled can reach the internet
-	cmd = exec.Command("ip", "netns", "exec", nsName, "ip", "route", "add", "default", "via", hostGW, "dev", nsVeth)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("ip", "netns", "exec", nsName, "ip", "route", "add", "default", "via", hostGW, "dev", nsVeth); err != nil {
 		return fmt.Errorf("failed to add default route in namespace %s: %v (%s)", nsName, err, out)
 	}
 
 	// Enable IP forwarding on host for this veth
-	cmd = exec.Command("sysctl", "-w", "net.ipv4.conf."+hostVeth+".forwarding=1")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := m.run("sysctl", "-w", "net.ipv4.conf."+hostVeth+".forwarding=1"); err != nil {
 		return fmt.Errorf("failed to enable forwarding on %s: %v (%s)", hostVeth, err, out)
 	}
 
-	// Add iptables FORWARD rules so namespace traffic isn't dropped (e.g. by Docker's DROP policy)
-	// Use -C (check) before -I (insert) to avoid duplicates and errors on retry.
-	if exec.Command("iptables", "-C", "FORWARD", "-i", hostVeth, "-j", "ACCEPT").Run() != nil {
-		cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-i", hostVeth, "-j", "ACCEPT")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to add FORWARD rule for %s: %v (%s)", hostVeth, err, out)
-		}
-	}
-	if exec.Command("iptables", "-C", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run() != nil {
-		cmd = exec.Command("iptables", "-I", "FORWARD", "1", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to add FORWARD return rule for %s: %v (%s)", hostVeth, err, out)
-		}
-	}
+	// SetupVeth writes no FORWARD rule. Version 0.9 wrote `-i vh<hash> -j ACCEPT`, which
+	// tested the input interface alone and therefore accepted a packet to every
+	// destination. That rule is the finding SA-8 and the finding SA-9. internal/access now
+	// owns every forward rule, in the chain HYDRASCALE-FWD.
 
-	// Add iptables masquerade so namespace traffic can reach the internet
-	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE").Run() != nil {
-		cmd = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to add masquerade rule for %s: %v (%s)", nsIP, err, out)
-		}
+	// The masquerade rule gives the namespace a path to the internet. The reconciler runs
+	// EnsureForwardPath on every tick, so a namespace that loses the rule gets it back.
+	if _, err := m.EnsureForwardPath(nsName, index, infraSubnet); err != nil {
+		return err
 	}
 
 	log.Printf("Set up veth pair for namespace %s with IPs from %s", nsName, infraSubnet)
 	return nil
 }
 
+// EnsureForwardPath writes each host rule of the forward path of the namespace that the
+// host does not hold, and it returns the rules that it wrote.
+// nsName is the name of the namespace, index is the veth index of the namespace, and
+// infraSubnet is the subnet that holds every veth pair.
+// The forward path of a namespace is the masquerade rule in the nat table. SetupVeth
+// writes that rule only when it creates the veth pair, therefore an operator firewall that
+// reloads removes the rule of a namespace that keeps running, and no setup path returns
+// it. The reconciler runs EnsureForwardPath on every tick, which costs one command for
+// each namespace.
+// EnsureForwardPath returns an error when the write fails.
+func (m *RealManager) EnsureForwardPath(nsName string, index int, infraSubnet string) ([]string, error) {
+	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := m.run("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err == nil {
+		return nil, nil
+	}
+	if out, err := m.run("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err != nil {
+		return nil, fmt.Errorf("add the masquerade rule of %s: %v (%s)", nsName, err, out)
+	}
+	return []string{"nat POSTROUTING -s " + nsIP + " -j MASQUERADE"}, nil
+}
+
 // TeardownVeth removes the veth pair for a namespace.
 // Deleting the host side automatically removes the peer.
 func TeardownVeth(nsName string, infraSubnet string) error {
+	return NewRealManager().TeardownVeth(nsName, infraSubnet)
+}
+
+// TeardownVeth removes the veth pair for a namespace.
+// Deleting the host side automatically removes the peer.
+// A step that fails does not stop the remaining steps. TeardownVeth collects every failure
+// and returns the failures together. A rule that survives its namespace is a path that the
+// operator did not declare.
+func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
 	hostVeth, _ := VethNames(nsName)
 
-	// Remove iptables rules (best effort)
-	index := VethIndex(nsName)
-	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
-	if err == nil {
-		delFwd1 := exec.Command("iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
-		_ = delFwd1.Run()
-		delFwd2 := exec.Command("iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-		_ = delFwd2.Run()
-		delNat := exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
-		_ = delNat.Run()
-	}
+	// PlanRemoval names the same rules, so the console dialog and this teardown never
+	// disagree about what the removal deletes.
+	errs := m.teardownVethRules(nsName, infraSubnet)
 
 	// Delete the veth pair (deleting one end removes both)
-	cmd := exec.Command("ip", "link", "del", hostVeth)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to delete veth %s: %v (%s)", hostVeth, err, out)
+	if out, err := m.run("ip", "link", "del", hostVeth); err != nil {
+		errs = append(errs, fmt.Errorf("failed to delete veth %s: %v (%s)", hostVeth, err, out))
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		return err
 	}
 
 	log.Printf("Tore down veth pair for namespace %s", nsName)
@@ -318,6 +387,15 @@ func TeardownVeth(nsName string, infraSubnet string) error {
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
 // All rules are idempotent (check before insert).
 func SetupHostAccess(nsName string, index int, infraSubnet string) error {
+	return NewRealManager().SetupHostAccess(nsName, index, infraSubnet)
+}
+
+// SetupHostAccess adds namespace-side iptables rules for host access:
+// - Masquerade on tailscale0 so host traffic is forwarded to peers
+// - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
+// - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
+// All rules are idempotent (check before insert).
+func (m *RealManager) SetupHostAccess(nsName string, index int, infraSubnet string) error {
 	_, nsVeth := VethNames(nsName)
 	_, nsIPRange, _, _, err := VethIPs(infraSubnet, index)
 	if err != nil {
@@ -325,25 +403,22 @@ func SetupHostAccess(nsName string, index int, infraSubnet string) error {
 	}
 
 	// Masquerade on tailscale0
-	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE").Run() != nil {
-		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE")
-		if out, err := cmd.CombinedOutput(); err != nil {
+	if _, err := m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE"); err != nil {
+		if out, err := m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE"); err != nil {
 			log.Printf("host-access: failed to add tailscale0 masquerade in %s: %v (%s)", nsName, err, out)
 		}
 	}
 
 	// DNS DNAT UDP
-	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run() != nil {
-		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53")
-		if out, err := cmd.CombinedOutput(); err != nil {
+	if _, err := m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"); err != nil {
+		if out, err := m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"); err != nil {
 			log.Printf("host-access: failed to add DNS DNAT (UDP) in %s: %v (%s)", nsName, err, out)
 		}
 	}
 
 	// DNS DNAT TCP
-	if exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run() != nil {
-		cmd := exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53")
-		if out, err := cmd.CombinedOutput(); err != nil {
+	if _, err := m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-C", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"); err != nil {
+		if out, err := m.run("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-A", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"); err != nil {
 			log.Printf("host-access: failed to add DNS DNAT (TCP) in %s: %v (%s)", nsName, err, out)
 		}
 	}
@@ -428,20 +503,187 @@ func resolveHostUpstreams() []string {
 	return []string{"1.1.1.1"}
 }
 
-// TeardownHostAccess removes namespace-side host access iptables rules and resolv.conf.
-func TeardownHostAccess(nsName string, index int, infraSubnet string) {
+// TeardownHostAccess removes the three namespace-side host access iptables rules.
+// TeardownHostAccess returns the failed deletes together, and it treats a rule that is
+// already absent as success.
+//
+// TeardownHostAccess keeps /etc/netns/<ns>/resolv.conf. Every namespace needs that file,
+// host access does not create it, and Delete removes it with the namespace. See issue #22.
+func TeardownHostAccess(nsName string, index int, infraSubnet string) error {
+	return NewRealManager().TeardownHostAccess(nsName, index, infraSubnet)
+}
+
+// TeardownHostAccess removes the three namespace-side host access iptables rules.
+// TeardownHostAccess returns the failed deletes together, and it treats a rule that is
+// already absent as success.
+func (m *RealManager) TeardownHostAccess(nsName string, index int, infraSubnet string) error {
 	_, nsVeth := VethNames(nsName)
 	_, nsIPRange, _, _, err := VethIPs(infraSubnet, index)
 	if err != nil {
-		log.Printf("host-access: failed to get veth IPs for teardown: %v", err)
-		return
+		return fmt.Errorf("host-access: veth IPs for %s: %w", nsName, err)
 	}
 
-	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE").Run()
-	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run()
-	exec.Command("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53").Run()
+	return errors.Join(
+		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE"),
+		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
+		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
+	)
+}
 
-	resolvPath := filepath.Join("/etc/netns", nsName, "resolv.conf")
-	os.Remove(resolvPath)
-	os.Remove(filepath.Join("/etc/netns", nsName))
+// hostVethPattern matches a host-side veth device name that VethNames returns.
+// ReapStaleRules removes a rule that names such a device only, so an operator rule on
+// another interface keeps its place.
+var hostVethPattern = regexp.MustCompile(`^vh[0-9a-f]{12}$`)
+
+// ReapStaleRules removes each FORWARD rule that names a host veth device that is gone, and
+// it returns the number of rules that it removed.
+// ReapStaleRules returns the failed deletes together. The daemon runs it at start, because
+// a rule that outlives its namespace lets traffic through a device name that a later
+// namespace can take.
+func (m *RealManager) ReapStaleRules() (int, error) {
+	live, err := m.liveDevices()
+	if err != nil {
+		return 0, err
+	}
+
+	out, err := m.run("iptables", "-S", "FORWARD")
+	if err != nil {
+		return 0, fmt.Errorf("iptables -S FORWARD: %v (%s)", err, out)
+	}
+
+	var errs []error
+	removed := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "-A" || fields[1] != "FORWARD" {
+			continue
+		}
+		if !namesAMissingDevice(fields, live) {
+			continue
+		}
+		args := append([]string{"-D", "FORWARD"}, fields[2:]...)
+		if err := m.deleteRule("iptables", args...); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed++
+	}
+	return removed, errors.Join(errs...)
+}
+
+// legacyRuleForms holds the two FORWARD rules that version 0.9 wrote for each host veth
+// device. The first element of each form is the position of the device name.
+// RemoveLegacyForwardRules matches the whole form, so an operator rule that names the same
+// device but carries another match keeps its place.
+var legacyRuleForms = [][]string{
+	{"-i", "", "-j", "ACCEPT"},
+	{"-o", "", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+}
+
+// RemoveLegacyForwardRules removes each FORWARD rule that version 0.9 wrote for a host veth
+// device, and it returns the number of rules that it removed.
+// RemoveLegacyForwardRules returns the failed deletes together. The daemon runs it at
+// start, because a host that upgrades keeps the rules of the version that it ran, and the
+// rule `-i vh<hash> -j ACCEPT` is the finding SA-8 and the finding SA-9.
+func (m *RealManager) RemoveLegacyForwardRules() (int, error) {
+	out, err := m.run("iptables", "-S", "FORWARD")
+	if err != nil {
+		return 0, fmt.Errorf("iptables -S FORWARD: %v (%s)", err, out)
+	}
+
+	var errs []error
+	removed := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "-A" || fields[1] != "FORWARD" {
+			continue
+		}
+		if !isLegacyForwardRule(fields[2:]) {
+			continue
+		}
+		args := append([]string{"-D", "FORWARD"}, fields[2:]...)
+		if err := m.deleteRule("iptables", args...); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed++
+	}
+	return removed, errors.Join(errs...)
+}
+
+// isLegacyForwardRule reports whether the rule arguments equal one form that version 0.9
+// wrote, with a host veth device name in the position of the device.
+func isLegacyForwardRule(args []string) bool {
+	for _, form := range legacyRuleForms {
+		if len(args) != len(form) {
+			continue
+		}
+		match := true
+		for i := range form {
+			if i == 1 {
+				match = match && hostVethPattern.MatchString(args[i])
+				continue
+			}
+			if args[i] != form[i] {
+				match = false
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// NamespaceForwarding returns the value of net.ipv4.ip_forward inside the namespace.
+// nsName is the name of the namespace.
+// The finding SA-48 states that the containment of a packet inside the second namespace is
+// a kernel default, not a rule. The daemon reads the value, so that a change of the default
+// becomes an event that the operator sees.
+// NamespaceForwarding returns an error when the command fails.
+func (m *RealManager) NamespaceForwarding(nsName string) (string, error) {
+	out, err := m.run("ip", "netns", "exec", nsName, "sysctl", "-n", "net.ipv4.ip_forward")
+	if err != nil {
+		return "", fmt.Errorf("read net.ipv4.ip_forward in %s: %v (%s)", nsName, err, out)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// namesAMissingDevice reports whether the rule matches an input interface or an output
+// interface that is a host veth device that live does not hold.
+func namesAMissingDevice(fields []string, live map[string]bool) bool {
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] != "-i" && fields[i] != "-o" {
+			continue
+		}
+		device := fields[i+1]
+		if hostVethPattern.MatchString(device) && !live[device] {
+			return true
+		}
+	}
+	return false
+}
+
+// liveDevices returns the name of each network device that the host holds.
+// A line of `ip -o link show` reads "7: vh0123@if6: <BROADCAST> mtu 1500 ...", so the
+// device name is the second field without the trailing colon and without the peer suffix.
+func (m *RealManager) liveDevices() (map[string]bool, error) {
+	out, err := m.run("ip", "-o", "link", "show")
+	if err != nil {
+		return nil, fmt.Errorf("ip -o link show: %v (%s)", err, out)
+	}
+
+	live := make(map[string]bool)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimSuffix(fields[1], ":")
+		if at := strings.Index(name, "@"); at >= 0 {
+			name = name[:at]
+		}
+		live[name] = true
+	}
+	return live, nil
 }
