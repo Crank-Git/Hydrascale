@@ -37,3 +37,30 @@ test("a row whose type is access.jump_displaced renders the whole type", async (
   const source = await readFile(new URL("../static/overview.js", import.meta.url), "utf8");
   assert.match(source, /element\("span", "ev-kind mono", event\.Type\)/);
 });
+
+test("the row of the recent activity panel puts its message on a line of its own", async () => {
+  // Issue #236. The panel is 320 pixels wide. A time of 58 pixels and a type of 148
+  // pixels leave the message about 60 pixels, and the message then wraps to one word for
+  // each line. The row therefore wraps: the time and the type take the first line, and
+  // the message takes the whole width of the card below them.
+  const source = await readFile(new URL("../static/overview.js", import.meta.url), "utf8");
+  assert.match(source, /element\("div", "ev ev-stack"\)/);
+
+  const stack = await ruleBody(".ev-stack");
+  assert.match(stack, /flex-wrap:\s*wrap/);
+
+  const message = await ruleBody(".ev-stack p");
+  assert.match(message, /flex:\s*1 0 100%/);
+});
+
+test("the activity view keeps the one-line row, because it is wider than the panel", async () => {
+  // Issue #236. The two-line row belongs to the 320 pixel panel of the overview. The
+  // activity view holds the whole width of the page, therefore its row stays on one line
+  // and the writer of the view adds no ev-stack class.
+  const source = await readFile(new URL("../static/panels.js", import.meta.url), "utf8");
+  assert.match(source, /'<div class="ev">'/);
+  assert.doesNotMatch(source, /ev-stack/);
+
+  const row = await ruleBody(".ev");
+  assert.doesNotMatch(row, /flex-wrap/);
+});

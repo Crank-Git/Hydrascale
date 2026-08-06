@@ -157,7 +157,7 @@ function drawActivity(section, events) {
 
   const list = element("div", "events");
   for (const event of recent) {
-    const row = element("div", "ev");
+    const row = element("div", "ev ev-stack");
     row.append(element("time", "mono", clockTime(Date.parse(event.Time))));
     row.append(element("span", "ev-kind mono", event.Type));
     const message = event.TailnetID
