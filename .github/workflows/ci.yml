@@ -10,12 +10,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Both actions below are pinned to a major version whose action.yml declares
+      # "using: node24". This workflow runs on a pull request, therefore it proves the
+      # two actions that .github/workflows/release.yml also holds.
+      - uses: actions/checkout@v7
 
       - name: Repository hygiene
         run: scripts/check-hygiene.sh
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26.5'
 
