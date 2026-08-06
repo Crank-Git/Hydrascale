@@ -172,9 +172,10 @@ sudo hydrascale serve
 sudo hydrascale status
 ```
 
-A tailnet needs up to 90 seconds after a start of the daemon before `hydrascale status`
-reports `healthy` and `running`. An earlier read reports `down` and `degraded`, which is
-the normal state of a tailnet that still authenticates.
+A tailnet needs about 20 seconds after a start of the daemon before `hydrascale status`
+reports `healthy` and `running`. An earlier read reports `down` and `degraded`, which is a
+normal state after a start. A tailnet that still reports `down` after 60 seconds has a
+real failure.
 
 ## The console
 
@@ -269,7 +270,13 @@ tailnet stops the load, and the error names every failure together.
 ### The two modes
 
 `enforce` drops a packet that no rule allows. `observe` writes a kernel log line for that
-packet and drops nothing. Read the lines of the mode `observe` with:
+packet and then accepts it.
+
+The tail of each daemon chain accepts in the mode `observe`, therefore the mode drops no
+packet of a namespace. A packet that the tail accepts reaches no later chain, and
+`ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` do not see it.
+
+Read the lines of the mode `observe` with:
 
 ```bash
 journalctl -u hydrascale | grep hydrascale-would-deny
@@ -281,8 +288,14 @@ The mode `observe` rate-limits the log to 60 packets each minute.
 configuration file holds no `access` key, the daemon writes one. It copies the file to
 `<config>.pre-v1.backup` first. The rule set it writes holds one rule per tailnet, from that
 tailnet to `internet`, in the mode `enforce`. No tailnet reaches another tailnet, and the
-host reaches no tailnet. Set `access.mode: observe` before the first start of version 1.0,
-read the log for a day, then add the rules the log names.
+host reaches no tailnet.
+
+**Warning — an `access` block that the operator writes by hand suppresses the migration.**
+The daemon detects the migration by the presence of the `access` key. That operator
+therefore gets no preserving rule set and no copy at `<config>.pre-v1.backup`. To start
+version 1.0 in the mode `observe`, write `mode: observe` and one rule per tailnet to
+`internet` together. [docs/UPGRADING.md](docs/UPGRADING.md), section "To upgrade with no
+enforcement at all", holds that order and the steps after it.
 
 The Access view of the console shows the rule set, stages an edit, and applies it. The
 reconciler writes the changed rule set on the next tick.
@@ -371,13 +384,26 @@ The console writes the same values through `PUT /api/policy/{id}/credentials`.
 ### A Tailscale credential
 
 The daemon authenticates to the Tailscale API with an OAuth client. Create the client in
-the Tailscale admin console, under **Settings → Keys → OAuth clients**.
+the Tailscale admin console:
+
+1. Open `https://login.tailscale.com/admin/settings/trust-credentials`.
+2. Select the button **Credential**.
+3. Select **OAuth**.
+4. Select the scopes.
+5. Select **Generate credential**.
+
+**Warning — the admin console shows the client secret one time only.** Copy the secret
+into the secrets file before you leave the page.
 
 **A policy write needs three scopes, not one.** Give the client the scopes:
 
 - `policy_file`
 - `devices:posture_attributes`
 - `devices:core:read`
+
+The admin console grants `devices:core:read` and `devices:posture_attributes` on its own
+when the operator selects the policy file scope at write. The source of the path is
+`https://tailscale.com/kb/1215/oauth-clients`, retrieved on 2026-08-05.
 
 `https://tailscale.com/kb/1623/`, "Trust credentials", section `Scopes`, states verbatim:
 
@@ -813,8 +839,10 @@ namespace goes through the default interface of the host and reaches the interne
 ### Docker
 
 Docker sets the policy of the `FORWARD` chain to `DROP`, which stops the traffic between a
-namespace and the host. The daemon detects this and adds an `ACCEPT` rule per namespace in
-the `FORWARD` chain. The operator writes no iptables rule by hand.
+namespace and the host. The daemon sends every forwarded packet into `HYDRASCALE-FWD`
+before that policy applies, so a local rule that allows the path keeps it open. Version 0.9
+wrote an `ACCEPT` rule per namespace into `FORWARD`, and version 1.0 removes those rules at
+the start. The operator writes no iptables rule by hand.
 
 The daemon inserts its jump rule at position 1 of `FORWARD` and of `INPUT`. That position is
 not stable, because `ts-forward`, `DOCKER-USER`, and `DOCKER-FORWARD` each take position 1
@@ -1023,12 +1051,12 @@ sudo journalctl -u hydrascale | grep hydrascale-would-deny
 ```
 
 **`hydrascale status` reports `down` and `degraded` after a restart**
-A tailnet needs up to 90 seconds after a start of the daemon to authenticate. Wait 90
-seconds and read the state again:
+A tailnet needs about 20 seconds after a start of the daemon to reach `healthy` and
+`running`. Wait 30 seconds and read the state again:
 ```bash
-sleep 90 && sudo hydrascale status
+sleep 30 && sudo hydrascale status
 ```
-A tailnet that still reports `down` after 90 seconds has a real failure. Read the events:
+A tailnet that still reports `down` after 60 seconds has a real failure. Read the events:
 ```bash
 sudo journalctl -u hydrascale -n 50
 ```
@@ -1076,12 +1104,12 @@ sudo mkdir -p /var/lib/hydrascale/state
 ```
 
 **Docker stops the traffic of a namespace**
-The daemon adds the `FORWARD` `ACCEPT` rules, but another rule can come first. Read the
-chain:
+The daemon writes its jump rule at position 1 of `FORWARD`, but another rule can come
+first. Read the chain:
 ```bash
 sudo iptables -L FORWARD -v
 ```
-Look for a `DROP` rule before the `ACCEPT` rules of Hydrascale, and remove it or move it.
+Look for a `DROP` rule before the jump rule of Hydrascale, and remove it or move it.
 
 **The infra subnet collides with a route**
 When `10.200.0.0/16` overlaps a route on the host, the veth setup fails or the traffic goes
