@@ -243,9 +243,11 @@ Continue at step 12 of the upgrade procedure.
 
 ## To roll back
 
-**Warning — read "`hydrascale status` reports `down` for about 20 seconds" before you roll
-back.** A tailnet that reports `down` within 60 seconds of a restart needs more time
-rather than a rollback.
+**Warning — version 0.10 needs longer than version 1.0 to report `healthy`.** Version 0.10
+holds the serial `refresh_dns` wait that issue #223 removed from version 1.0. This project
+measured version 0.10 before issue #223 and not after it. That earlier measurement is up
+to 90 seconds for two tailnets, and a host with more tailnets takes longer. A tailnet that
+reports `down` inside that interval needs more time rather than a further action.
 
 **Warning — a rollback loses every path of every namespace.** Version 0.9 and version 0.10
 write the two `FORWARD` rules of a namespace at the moment they create the veth pair. A
@@ -277,7 +279,8 @@ $ sudo ip netns exec ns-havoc ping -c1 -W3 1.1.1.1
 3. Install the version 0.10 binary over `/usr/local/bin/hydrascale`.
 4. Restore the configuration file from `/etc/hydrascale/config.yaml.pre-v1.backup`.
 5. Start the service with `sudo systemctl start hydrascale`.
-6. Wait about 20 seconds.
+6. Wait for each tailnet to report `healthy` and `running`, rather than for a fixed count
+   of seconds.
 7. Read the state with `sudo hydrascale status`.
 8. Read the `FORWARD` chain and the host veth devices.
 9. Write the two `FORWARD` rules for each host veth device.
