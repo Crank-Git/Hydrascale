@@ -106,6 +106,13 @@ type Reconciler struct {
 	// a host that keeps its chain adds no event on the next tick.
 	jumpPositions map[string]int
 
+	// dnsRefreshPending holds true for a tailnet that waits for the DNS refresh, and
+	// dnsRefreshReported holds true for a tailnet whose wait the reconciler recorded once.
+	// The restart path plans the refresh, and the refresh runs only against a tailscaled in
+	// the Running state, therefore the reconciler keeps the action planned across ticks.
+	dnsRefreshPending  map[string]bool
+	dnsRefreshReported map[string]bool
+
 	// hostAccessRules holds true for a tailnet whose namespace carries the host access
 	// rules, and false for a tailnet whose rules the reconciler removed. A tailnet with no
 	// entry is a tailnet the reconciler has not seen since it started, so the first cycle
@@ -304,6 +311,8 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		lastErrors:         make(map[string]string),
 		unprotected:        make(map[string]string),
 		jumpPositions:      make(map[string]int),
+		dnsRefreshPending:  make(map[string]bool),
+		dnsRefreshReported: make(map[string]bool),
 		hostAccessRules:    make(map[string]bool),
 		reachability:       make(map[string]reach.Result),
 		teardownHostAccess: namespaces.TeardownHostAccess,
@@ -460,8 +469,15 @@ func (r *Reconciler) Diff(desired map[string]config.Tailnet, actual map[string]*
 			// resolv.conf. Without this, dig @100.100.100.100 returns SERVFAIL
 			// for every query until someone manually runs `tailscale set`.
 			actions = append(actions, Action{Type: ActionStartDaemon, TailnetID: id, NsName: ns})
+			r.setDNSRefreshPending(id, true)
 			actions = append(actions, Action{Type: ActionRefreshDNS, TailnetID: id, NsName: ns})
 		} else {
+			// The refresh runs only against a tailscaled in the Running state, and the
+			// process reports healthy before it reaches that state. A tailnet that still
+			// waits therefore keeps the action on this branch, until the refresh runs.
+			if r.dnsRefreshWaits(id) {
+				actions = append(actions, Action{Type: ActionRefreshDNS, TailnetID: id, NsName: ns})
+			}
 			// Daemon healthy, sync routes
 			actions = append(actions, Action{Type: ActionSyncRoutes, TailnetID: id, NsName: ns})
 			// Sync host access if enabled for this tailnet
@@ -549,6 +565,45 @@ func (r *Reconciler) hostAccessRulesPresent(tailnetID string) bool {
 	return !seen || present
 }
 
+// dnsRefreshWaits reports whether the DNS refresh of the tailnet waits for the Running
+// state of tailscaled.
+func (r *Reconciler) dnsRefreshWaits(tailnetID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dnsRefreshPending[tailnetID]
+}
+
+// setDNSRefreshPending records whether the DNS refresh of the tailnet waits for the Running
+// state of tailscaled.
+// A change of the state clears the report state, therefore the reconciler records one event
+// for one wait and a repeated tick adds no event.
+func (r *Reconciler) setDNSRefreshPending(tailnetID string, pending bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.dnsRefreshPending[tailnetID] != pending {
+		delete(r.dnsRefreshReported, tailnetID)
+	}
+	if pending {
+		r.dnsRefreshPending[tailnetID] = true
+		return
+	}
+	delete(r.dnsRefreshPending, tailnetID)
+}
+
+// reportDNSRefreshWait records the event dns.refresh_waits one time for one wait, so that
+// the operator reads that the refresh of the tailnet is still open.
+func (r *Reconciler) reportDNSRefreshWait(tailnetID string) {
+	r.mu.Lock()
+	reported := r.dnsRefreshReported[tailnetID]
+	r.dnsRefreshReported[tailnetID] = true
+	r.mu.Unlock()
+	if reported {
+		return
+	}
+	r.emit("dns.refresh_waits", tailnetID,
+		"tailscaled is not in the Running state, therefore the refresh runs on a later tick")
+}
+
 // setHostAccessRules records whether the namespace of the tailnet carries the host access
 // rules.
 func (r *Reconciler) setHostAccessRules(tailnetID string, present bool) {
@@ -600,6 +655,7 @@ func (r *Reconciler) executeAction(action Action) error {
 			errs = append(errs, fmt.Errorf("delete the namespace %s: %w", action.NsName, err))
 		}
 		r.setHostAccessRules(action.TailnetID, false)
+		r.setDNSRefreshPending(action.TailnetID, false)
 		// The host access manager keeps the names of the tailnet in the /etc/hosts block
 		// until it removes the tailnet, so the host resolves a name on a tailnet that it
 		// no longer joins. See issue #69.
@@ -649,7 +705,18 @@ func (r *Reconciler) executeAction(action Action) error {
 	case ActionAuthDaemon:
 		return r.dm.AuthorizeDaemon(action.TailnetID, action.NsName, action.AuthKey, action.ControlURL)
 	case ActionRefreshDNS:
-		return r.dm.RefreshDNSConfig(action.TailnetID, action.NsName)
+		// The call reads the state one time and it waits for no deadline, therefore one
+		// tailnet holds no other tailnet. See issue #223.
+		refreshed, err := r.dm.RefreshDNSConfigIfReady(action.TailnetID, action.NsName)
+		if err != nil {
+			return err
+		}
+		if !refreshed {
+			r.reportDNSRefreshWait(action.TailnetID)
+			return nil
+		}
+		r.setDNSRefreshPending(action.TailnetID, false)
+		return nil
 	case ActionSyncRoutes:
 		socketPath := r.dm.GetSocketPath(action.TailnetID)
 		routes, err := r.rt.PollStatus(action.NsName, socketPath)
@@ -713,6 +780,15 @@ func (r *Reconciler) Reconcile() error {
 	// no loss, and the operator never learns that a rule went away.
 	r.probeReachability(desired, actual)
 
+	// Runs before Apply, because the shutdown removes both chains and the policy of the
+	// FORWARD chain is DROP. A namespace that holds no chain reaches no control server,
+	// therefore tailscaled never reaches the Running state and the DNS refresh of the tick
+	// finds no daemon to refresh. Issue #223 names the defect. The compiler reads the
+	// configuration file and not the live host, so a namespace that this tick creates gets
+	// its rules on this tick.
+	r.applyAccess()
+	r.ensureForwardPath(desired, actual)
+
 	actions := r.Diff(desired, actual)
 	if len(actions) > 0 {
 		r.emit("reconcile_apply", "", fmt.Sprintf("%d actions", len(actions)))
@@ -723,10 +799,6 @@ func (r *Reconciler) Reconcile() error {
 	// all succeeded, and an unprotected namespace must keep its error.
 	r.checkDNSProtection(desired)
 
-	// Runs after Apply, because a new namespace gets its rules on the same cycle that
-	// creates it.
-	r.applyAccess()
-	r.ensureForwardPath(desired, actual)
 	r.checkNamespaceForwarding(desired)
 
 	if len(actions) == 0 {

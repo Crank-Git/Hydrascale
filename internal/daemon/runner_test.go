@@ -6,6 +6,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"hydrascale/internal/execx"
 )
@@ -167,6 +168,108 @@ func TestGetStatusRunsTheStatusCommandThroughTheRunner(t *testing.T) {
 	}
 	if len(rec.Calls()) != 1 {
 		t.Errorf("GetStatus ran %d commands, want 1", len(rec.Calls()))
+	}
+}
+
+// refreshSocket creates the state directory and the socket file of the tailnet corp under
+// base, and it returns the path of the socket.
+func refreshSocket(t *testing.T, base string) string {
+	t.Helper()
+
+	stateDir := filepath.Join(base, "corp")
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		t.Fatalf("create the state directory: %v", err)
+	}
+	socketPath := filepath.Join(stateDir, "tailscaled.sock")
+	if err := os.WriteFile(socketPath, nil, 0600); err != nil {
+		t.Fatalf("create the socket file: %v", err)
+	}
+	return socketPath
+}
+
+func TestTheDNSRefreshWaitsForNoDeadlineWhenTheBackendStateIsNotRunning(t *testing.T) {
+	base := t.TempDir()
+	socketPath := refreshSocket(t, base)
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(`{"BackendState":"NeedsLogin"}`)},
+		"ip", "netns", "exec", "ns-corp",
+		"tailscale", "--socket="+socketPath, "status", "--json")
+
+	m := &RealManager{Runner: rec, Starter: rec, StateDir: base}
+
+	start := time.Now()
+	done, err := m.RefreshDNSConfigIfReady("corp", "ns-corp")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("RefreshDNSConfigIfReady: %v", err)
+	}
+	if done {
+		t.Error("the refresh reports a refresh, and the backend state is NeedsLogin")
+	}
+	if elapsed > time.Second {
+		t.Errorf("the refresh took %v, and it must read the state one time", elapsed)
+	}
+	if len(rec.Calls()) != 1 {
+		t.Errorf("the refresh ran %d commands, want 1:\n%v", len(rec.Calls()), rec.Calls())
+	}
+}
+
+func TestTheDNSRefreshRunsNoCommandWhenTheSocketIsAbsent(t *testing.T) {
+	base := t.TempDir()
+
+	rec := execx.NewRecorder(t)
+	m := &RealManager{Runner: rec, Starter: rec, StateDir: base}
+
+	done, err := m.RefreshDNSConfigIfReady("corp", "ns-corp")
+	if err != nil {
+		t.Fatalf("RefreshDNSConfigIfReady: %v", err)
+	}
+	if done {
+		t.Error("the refresh reports a refresh, and the socket is absent")
+	}
+	if len(rec.Calls()) != 0 {
+		t.Errorf("the refresh ran %d commands, want 0:\n%v", len(rec.Calls()), rec.Calls())
+	}
+}
+
+func TestTheDNSRefreshFlipsAcceptDNSWhenTheBackendStateIsRunning(t *testing.T) {
+	base := t.TempDir()
+	socketPath := refreshSocket(t, base)
+
+	want := []execx.Call{
+		{Name: "ip", Args: []string{"netns", "exec", "ns-corp",
+			"tailscale", "--socket=" + socketPath, "status", "--json"}},
+		{Name: "ip", Args: []string{"netns", "exec", "ns-corp",
+			"tailscale", "--socket=" + socketPath, "set", "--accept-dns=false"}},
+		{Name: "ip", Args: []string{"netns", "exec", "ns-corp",
+			"tailscale", "--socket=" + socketPath, "set", "--accept-dns=true"}},
+	}
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(`{"BackendState":"Running"}`)}, want[0].Name, want[0].Args...)
+	rec.Script(execx.Result{}, want[1].Name, want[1].Args...)
+	rec.Script(execx.Result{}, want[2].Name, want[2].Args...)
+
+	m := &RealManager{Runner: rec, Starter: rec, StateDir: base}
+
+	done, err := m.RefreshDNSConfigIfReady("corp", "ns-corp")
+	if err != nil {
+		t.Fatalf("RefreshDNSConfigIfReady: %v", err)
+	}
+	if !done {
+		t.Error("the refresh reports no refresh, and the backend state is Running")
+	}
+
+	got := rec.Calls()
+	if len(got) != len(want) {
+		t.Fatalf("the refresh ran %d commands, want %d:\n%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].String() != want[i].String() {
+			t.Errorf("command %d = %q, want %q", i, got[i].String(), want[i].String())
+		}
 	}
 }
 
