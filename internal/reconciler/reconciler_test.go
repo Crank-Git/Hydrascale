@@ -131,6 +131,13 @@ type mockDaemon struct {
 	statusErr    error                   // returned by GetStatus; non-nil = error
 	unprotected  map[string]daemon.UnprotectedRecord
 	allowedStart map[string]bool // tailnetID -> the allowUnprotected value of the last Start
+
+	refreshReady map[string]bool  // tailnetID -> tailscaled is in the Running state
+	refreshErr   map[string]error // tailnetID -> the error that the refresh returns
+	refreshCalls []string         // the tailnet of each refresh call, in order
+
+	// log records the order of the calls of a test that observes two doubles.
+	log *callLog
 }
 
 func newMockDaemon() *mockDaemon {
@@ -139,12 +146,47 @@ func newMockDaemon() *mockDaemon {
 		startErr:     make(map[string]error),
 		unprotected:  make(map[string]daemon.UnprotectedRecord),
 		allowedStart: make(map[string]bool),
+		refreshReady: make(map[string]bool),
+		refreshErr:   make(map[string]error),
 	}
+}
+
+// callLog records the name of each call that a test observes, in order. Two doubles share
+// one log, therefore a test reads the order of the calls across both.
+type callLog struct {
+	mu    sync.Mutex
+	names []string
+}
+
+func (l *callLog) add(name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.names = append(l.names, name)
+}
+
+func (l *callLog) recorded() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.names...)
+}
+
+// indexOf returns the position of the name in the log, and -1 for a name that the log does
+// not hold.
+func indexOf(names []string, name string) int {
+	for i, got := range names {
+		if got == name {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *mockDaemon) Start(tailnetID, nsName string, allowUnprotected bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.log != nil {
+		m.log.add("start_daemon:" + tailnetID)
+	}
 	m.allowedStart[tailnetID] = allowUnprotected
 	if err, ok := m.startErr[tailnetID]; ok && err != nil {
 		return err
@@ -187,8 +229,24 @@ func (m *mockDaemon) AuthorizeDaemon(tailnetID, nsName, authKey, controlURL stri
 	return nil
 }
 
-func (m *mockDaemon) RefreshDNSConfig(tailnetID, nsName string) error {
-	return nil
+// RefreshDNSConfigIfReady reports a refresh for a tailnet that refreshReady names, and it
+// reports no refresh for every other tailnet. A tailnet with no entry stands for a
+// tailscaled that is not in the Running state.
+func (m *mockDaemon) RefreshDNSConfigIfReady(tailnetID, nsName string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshCalls = append(m.refreshCalls, tailnetID)
+	if err, ok := m.refreshErr[tailnetID]; ok && err != nil {
+		return false, err
+	}
+	return m.refreshReady[tailnetID], nil
+}
+
+// refreshed returns the tailnets whose DNS refresh the reconciler asked for, in order.
+func (m *mockDaemon) refreshed() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.refreshCalls...)
 }
 
 func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*daemon.TailscaleStatus, error) {

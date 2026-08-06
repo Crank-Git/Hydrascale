@@ -21,12 +21,17 @@ type fakeChainWriter struct {
 	applied  []access.Compiled
 	teardown int
 	err      error
+	// log records the order of the calls of a test that observes two doubles.
+	log *callLog
 	// jumps holds the placement that Apply reports. A writer with no placement reports
 	// the jump rule at the head of each parent chain.
 	jumps []access.Placement
 }
 
 func (w *fakeChainWriter) Apply(ctx context.Context, c access.Compiled) (access.Result, error) {
+	if w.log != nil {
+		w.log.add("access.write")
+	}
 	w.applied = append(w.applied, c)
 	if w.err != nil {
 		return access.Result{}, w.err
