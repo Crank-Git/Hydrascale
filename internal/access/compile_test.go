@@ -286,7 +286,7 @@ func TestObserveTail(t *testing.T) {
 	// observeSet holds one rule, so that the chain carries an allow rule and a tail.
 	observeSet := RuleSet{Mode: ModeObserve, Rules: []Rule{{From: "alpha", To: "beta"}}}
 
-	t.Run("ends the forward chain with a log rule and a return rule", func(t *testing.T) {
+	t.Run("ends the forward chain with a log rule and an accept rule", func(t *testing.T) {
 		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
 		if err != nil {
 			t.Fatalf("Compile returned %v, want no error", err)
@@ -294,7 +294,7 @@ func TestObserveTail(t *testing.T) {
 		got := lines(compiled.Forward)
 		want := []string{
 			"-A HYDRASCALE-FWD -m limit --limit 60/minute -j LOG --log-prefix hydrascale-would-deny: ",
-			"-A HYDRASCALE-FWD -j RETURN",
+			"-A HYDRASCALE-FWD -j ACCEPT",
 		}
 		if len(got) < 2 {
 			t.Fatalf("the forward chain holds %d rules, want at least 2", len(got))
@@ -302,21 +302,36 @@ func TestObserveTail(t *testing.T) {
 		equalLines(t, compiled.Forward[len(compiled.Forward)-2:], want)
 	})
 
-	t.Run("ends the out chain with a log rule and a return rule for each namespace device", func(t *testing.T) {
+	t.Run("ends the out chain with a log rule and an accept rule for each namespace device", func(t *testing.T) {
 		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
 		if err != nil {
 			t.Fatalf("Compile returned %v, want no error", err)
 		}
 		want := []string{
 			"-A HYDRASCALE-OUT -i vh0a0a0a0a0a0a -m limit --limit 60/minute -j LOG --log-prefix hydrascale-would-deny: ",
-			"-A HYDRASCALE-OUT -i vh0a0a0a0a0a0a -j RETURN",
+			"-A HYDRASCALE-OUT -i vh0a0a0a0a0a0a -j ACCEPT",
 			"-A HYDRASCALE-OUT -i vh0b0b0b0b0b0b -m limit --limit 60/minute -j LOG --log-prefix hydrascale-would-deny: ",
-			"-A HYDRASCALE-OUT -i vh0b0b0b0b0b0b -j RETURN",
+			"-A HYDRASCALE-OUT -i vh0b0b0b0b0b0b -j ACCEPT",
 		}
 		if len(compiled.Out) < 4 {
 			t.Fatalf("the out chain holds %d rules, want at least 4", len(compiled.Out))
 		}
 		equalLines(t, compiled.Out[len(compiled.Out)-4:], want)
+	})
+
+	// The mode observe must drop nothing, which issue #238 measured. A RETURN rule gives
+	// the packet back to a parent chain whose policy is DROP on a host that runs Docker.
+	t.Run("holds no return rule in the tail of either chain", func(t *testing.T) {
+		compiled, err := Compile(observeSet, testTopology(), ObserveTail)
+		if err != nil {
+			t.Fatalf("Compile returned %v, want no error", err)
+		}
+		tails := append(lines(compiled.Forward[len(compiled.Forward)-2:]), lines(compiled.Out[len(compiled.Out)-4:])...)
+		for _, line := range tails {
+			if strings.Contains(line, "RETURN") {
+				t.Errorf("tail rule %q holds RETURN, want ACCEPT in the mode %s", line, ModeObserve)
+			}
+		}
 	})
 
 	t.Run("holds no drop rule in either chain", func(t *testing.T) {
@@ -385,6 +400,25 @@ func TestTailForMode(t *testing.T) {
 			t.Fatalf("TailForMode returned %v, want no error", err)
 		}
 		equalLines(t, tail, lines(ObserveTail))
+	})
+
+	t.Run("closes the tail of the mode enforce with a drop rule", func(t *testing.T) {
+		tail, err := TailForMode(ModeEnforce)
+		if err != nil {
+			t.Fatalf("TailForMode returned %v, want no error", err)
+		}
+		equalLines(t, tail, []string{"-j DROP"})
+	})
+
+	t.Run("closes the tail of the mode observe with an accept rule", func(t *testing.T) {
+		tail, err := TailForMode(ModeObserve)
+		if err != nil {
+			t.Fatalf("TailForMode returned %v, want no error", err)
+		}
+		equalLines(t, tail, []string{
+			"-m limit --limit 60/minute -j LOG --log-prefix hydrascale-would-deny: ",
+			"-j ACCEPT",
+		})
 	})
 
 	t.Run("rejects a mode that the daemon does not run and names both accepted values", func(t *testing.T) {
