@@ -63,8 +63,10 @@ default is deny.
   `access.jump_position`.
 - **FR-access-3** — The daemon owns every rule in `HYDRASCALE-FWD` and no rule outside
   it, other than the single jump.
-- **FR-access-4** — The last rule in `HYDRASCALE-FWD` returns to `FORWARD` when
-  `access.mode` is `observe`, and it drops when `access.mode` is `enforce`.
+- **FR-access-4** — The last rule in `HYDRASCALE-FWD` accepts when `access.mode` is
+  `observe`, and it drops when `access.mode` is `enforce`.
+- **FR-access-4a** — The last rule in `HYDRASCALE-OUT`, for each namespace device,
+  accepts when `access.mode` is `observe`, and it drops when `access.mode` is `enforce`.
 - **FR-access-5** — The daemon creates the chain `HYDRASCALE-OUT` for traffic that a
   namespace sends to the host itself, and it jumps to it from `INPUT`.
 
@@ -100,8 +102,11 @@ default is deny.
 - **FR-access-19** — `access.mode` accepts `enforce` and `observe`, and it defaults to
   `enforce`.
 - **FR-access-20** — In `observe` mode, the daemon logs each packet that it would drop,
-  through an iptables `LOG` rule with the prefix `hydrascale-would-deny: `, and it drops
-  nothing.
+  through an iptables `LOG` rule with the prefix `hydrascale-would-deny: `, and it then
+  accepts that packet.
+- **FR-access-20a** — In `observe` mode, the policy of `FORWARD` and the policy of
+  `INPUT` receive no packet that a namespace device carries, because the tail of each
+  daemon chain accepts before the packet leaves the chain.
 - **FR-access-21** — When the configuration contains no `access` block, the daemon
   writes the rule set that preserves the reachability of version 0.9 on first start.
 - **FR-access-22** — The preserving rule set contains one rule per tailnet, from that
@@ -137,7 +142,7 @@ default is deny.
 ### The operator checks before enforcement
 
 1. The operator sets `access.mode: observe` and restarts the service.
-2. The daemon writes the chain with a `LOG` rule and no drop.
+2. The daemon writes the chain with a `LOG` rule and an `ACCEPT` rule, and no drop.
 3. The operator uses the host normally for a day.
 4. The operator reads `journalctl -k | grep hydrascale-would-deny`. The `LOG` target
    writes to the kernel log, therefore the unit journal holds no such line.
@@ -256,6 +261,7 @@ chains that the file does not name. The behaviour is documented in
 | A tailnet is removed while a rule names it. | The daemon drops the rules that name the removed tailnet and records an event. It does not refuse to start. |
 | Two tailnets use overlapping peer address ranges. | The rules match on the veth device rather than on the address, so overlap does not matter. This is why the compiler uses interfaces. |
 | The operator sets `access.mode: observe` on a busy host. | The `LOG` rule can fill the journal. The compiler adds `-m limit --limit 60/minute` to the `LOG` rule. |
+| The operator sets `access.mode: observe` on a host that runs Docker. | The tail accepts, therefore the packet reaches no later chain of `FORWARD`, and `ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` do not see it. Version 0.9 wrote `ACCEPT` rules into `FORWARD` and had the same behaviour. The mode `enforce` is the default and it does not change. |
 | IPv6 traffic. | Version 1.0 writes IPv4 rules only. The daemon logs at start that IPv6 forwarding is not filtered, so the gap is stated rather than hidden. |
 
 ## Acceptance criteria
@@ -280,6 +286,8 @@ chains that the file does not name. The behaviour is documented in
       the `internet` rule and fails without it.
 - [ ] On the test host, `observe` mode writes `hydrascale-would-deny` lines to the kernel
       log and drops nothing. `journalctl -k | grep hydrascale-would-deny` reads them.
+- [ ] On the test host in `observe` mode, a path that no rule allows carries traffic and
+      the policy counter of `FORWARD` does not rise.
 - [ ] On the test host, the daemon re-adds the jump rule after `iptables -F FORWARD`.
 - [ ] On the test host, `iptables -I FORWARD 1 -j ACCEPT` displaces the jump rule, and
       the daemon records `access.jump_displaced` within one tick.

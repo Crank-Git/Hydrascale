@@ -30,7 +30,14 @@ that involves a namespace device, and it returns every other forwarded packet.
 ## Deny is the default
 
 A local rule allows. There is no deny rule. The last rule in `HYDRASCALE-FWD` drops in
-`enforce` mode and returns in `observe` mode.
+`enforce` mode and accepts in `observe` mode.
+
+**The `observe` tail accepts; it does not return.** A `RETURN` rule gives the packet back
+to `FORWARD`, whose policy is `DROP` on a host that runs Docker, therefore the packet
+dies one chain later and the mode drops what it promises to keep. Issue #238 measured
+this. The same holds for `HYDRASCALE-OUT` and the policy of `INPUT`. The chain opens with
+`! -i vh+ ! -o vh+ -j RETURN` and the `HYDRASCALE-OUT` tail matches one namespace device,
+therefore the `ACCEPT` applies to the traffic of the daemon alone.
 
 A rule that matches a source only, with no destination match and no output interface
 match, allows everything. That was the version 0.9 defect. Match the output interface.

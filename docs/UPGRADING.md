@@ -133,7 +133,15 @@ Step 16 of the upgrade procedure below writes such a rule. The example there car
 `jbones` to `havoc`.
 
 The mode `observe` finds that path before the mode `enforce` denies it. The mode `observe`
-writes a kernel log line for a packet that no rule allows, and it drops nothing.
+writes a kernel log line for a packet that no rule allows, and it then accepts that
+packet. The path stays open for the length of the observation.
+
+The tail of each daemon chain accepts in the mode `observe`, therefore the policy of
+`FORWARD` and the policy of `INPUT` receive no packet that a namespace device carries.
+Version 0.9 wrote `ACCEPT` rules into `FORWARD`, so the mode `observe` restores the
+reachability of version 0.9. A packet that the tail accepts reaches no later chain, and
+`ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` do not see it. The mode `enforce` is the
+default and it does not change.
 
 ## The upgrade procedure
 
@@ -162,6 +170,10 @@ another tailnet stops for the length of step 9 and step 10. To avoid that interv
 19. Confirm that the log names no further path.
 20. Set `access.mode: enforce` in `/etc/hydrascale/config.yaml`.
 21. Apply the mode with `sudo systemctl reload hydrascale`.
+
+Step 11 to step 20 run in the mode `observe`, which drops no packet of a namespace.
+Step 14 therefore keeps every path of the host open for that day, and the log names each
+path that the mode `enforce` denies at step 21.
 
 Step 15 reads the paths that the mode `enforce` denies:
 

@@ -33,11 +33,16 @@ const LogPrefix = "hydrascale-would-deny: "
 // line for every packet that no rule allows.
 const logLimit = "60/minute"
 
-// ObserveTail logs a packet that no rule allows and returns it to the calling chain.
-// The tail holds no DROP rule, therefore the mode observe denies nothing.
+// ObserveTail logs a packet that no rule allows and then accepts it.
+// The tail accepts rather than returns, because a RETURN rule gives the packet back to
+// FORWARD or to INPUT, whose policy is DROP on a host that runs Docker. Issue #238
+// measured that loss: the mode observe wrote the would-deny line and the policy of
+// FORWARD dropped the same packet one chain later.
+// The chain opens with ! -i vh+ ! -o vh+ -j RETURN and the out tail matches one namespace
+// device, therefore the ACCEPT applies to the traffic of the daemon alone.
 var ObserveTail = Tail{
 	{"-m", "limit", "--limit", logLimit, "-j", "LOG", "--log-prefix", LogPrefix},
-	{"-j", "RETURN"},
+	{"-j", "ACCEPT"},
 }
 
 // TailForMode returns the rules that close each chain in the named mode.
