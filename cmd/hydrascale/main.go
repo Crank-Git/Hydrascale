@@ -40,6 +40,15 @@ var version = "dev"
 var systemdUnit string
 
 func main() {
+	if err := rootCommand().Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// rootCommand returns the root command with every sub-command attached.
+// A test reads it to check that the binary holds a sub-command.
+func rootCommand() *cobra.Command {
 	var rootCmd = &cobra.Command{
 		Use:     "hydrascale",
 		Version: version,
@@ -75,12 +84,10 @@ reconciles toward it. GitOps for tailnets.`,
 	rootCmd.AddCommand(envCmd())
 	rootCmd.AddCommand(installCmd())
 	rootCmd.AddCommand(uninstallCmd())
+	rootCmd.AddCommand(skillsCmd())
 	rootCmd.AddCommand(versionCmd())
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func versionCmd() *cobra.Command {
@@ -387,7 +394,7 @@ func listCmd() *cobra.Command {
 func switchCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "switch <id>",
-		Short: "Switch default namespace",
+		Short: "Print the namespace name for a tailnet (changes no state)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tailnetID := args[0]
@@ -407,8 +414,19 @@ func switchCmd() *cobra.Command {
 				return fmt.Errorf("tailnet %s not found", tailnetID)
 			}
 
+			// A child process cannot move its parent shell into a namespace.
+			// The command therefore prints the routing forms rather than a state change.
+			// Both forms reach runInNamespace, which runs ip netns exec, so both need
+			// root. See FR-skills-1, FR-skills-2, and FR-skills-37.
 			nsName := namespaces.GetNamespaceName(tailnetID)
-			fmt.Printf("Switched to tailnet %s (namespace: %s)\n", tailnetID, nsName)
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"The tailnet %s uses the namespace %s.\n"+
+					"This command changes no state. The shell of the operator stays on the host network.\n"+
+					"Two routing forms send work to this tailnet:\n"+
+					"  sudo hydrascale exec %s -- <command>\n"+
+					"  sudo hydrascale tailscale %s -- <arguments>\n"+
+					"Both forms run ip netns exec, which needs root.\n",
+				tailnetID, nsName, tailnetID, tailnetID)
 			return nil
 		},
 	}
@@ -756,26 +774,44 @@ func envCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "env <tailnet-id>",
 		Short: "Print shell environment for running commands in a tailnet namespace",
-		Long: `Print shell commands that configure the environment for a tailnet namespace.
-Use with eval to set up your shell:
+		Long: `Print the shell lines for a tailnet namespace.
+An environment variable does not move the shell into the namespace. A command reaches the
+tailnet through hydrascale exec.
 
-  eval $(hydrascale env personal)
-  curl http://my-tailscale-host:8080
+hydrascale exec runs ip netns exec, which needs root. The function hstn calls sudo, so an
+account that holds no root permission runs it.
 
-Or use with any command:
-  hydrascale exec personal -- curl http://my-tailscale-host:8080`,
+The output holds three exports and a shell function named hstn. The function hstn runs one
+command in the namespace of the tailnet:
+
+  eval "$(hydrascale env personal)"
+  hstn curl http://my-tailscale-host:8080
+
+The direct form needs no function:
+  sudo hydrascale exec personal -- curl http://my-tailscale-host:8080`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tailnetID := args[0]
 			nsName := namespaces.GetNamespaceName(tailnetID)
 			socketPath := daemon.SocketPath(tailnetID)
 
-			fmt.Printf("export HYDRASCALE_TAILNET=%s\n", tailnetID)
-			fmt.Printf("export HYDRASCALE_NAMESPACE=%s\n", nsName)
-			fmt.Printf("export TAILSCALE_SOCKET=%s\n", socketPath)
-			fmt.Printf("# Run commands in this namespace with:\n")
-			fmt.Printf("#   sudo ip netns exec %s <command>\n", nsName)
-			fmt.Printf("# Or use: hydrascale exec %s -- <command>\n", tailnetID)
+			// A script reads the three exports, so the command keeps them. No export
+			// moves the shell into the namespace, so the command also prints the
+			// function hstn. See FR-skills-5 through FR-skills-7.
+			//
+			// The function calls sudo, because ip netns exec needs root. sudo runs a
+			// binary and never sees a shell function. sudo hstn therefore adds no
+			// root permission. Issue #263 measured the failure.
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "export HYDRASCALE_TAILNET=%s\n", tailnetID)
+			fmt.Fprintf(out, "export HYDRASCALE_NAMESPACE=%s\n", nsName)
+			fmt.Fprintf(out, "export TAILSCALE_SOCKET=%s\n", socketPath)
+			fmt.Fprintf(out, "# An environment variable does not move the shell into the namespace.\n")
+			fmt.Fprintf(out, "# hydrascale exec runs ip netns exec, which needs root.\n")
+			fmt.Fprintf(out, "# The function hstn calls sudo, so an account that holds no root permission runs it.\n")
+			fmt.Fprintf(out, "# The function hstn runs one command in the namespace:\n")
+			fmt.Fprintf(out, "#   hstn curl http://my-tailscale-host:8080\n")
+			fmt.Fprintf(out, "hstn() { sudo hydrascale exec %s -- \"$@\"; }\n", tailnetID)
 			return nil
 		},
 	}

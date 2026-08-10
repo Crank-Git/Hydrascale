@@ -13,18 +13,22 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Each action below is pinned to a major version whose action.yml declares
+      # "using: node24". The earlier majors declared "using: node20", and the runner
+      # writes a deprecation annotation for each one. A runner that removes Node.js 20
+      # fails this workflow at a tag, which is a real release and not a pull request.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.26.5'
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           # The version is pinned, because "latest" makes the release depend on the

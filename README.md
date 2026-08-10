@@ -41,6 +41,7 @@ loopback address.
 - [Remote access](#remote-access)
 - [Networking](#networking)
 - [Command line](#command-line)
+- [Agent skills](#agent-skills)
 - [Environment variables](#environment-variables)
 - [Control API](#control-api)
 - [Daemon mode](#daemon-mode)
@@ -856,17 +857,19 @@ parent chain holds none.
 hydrascale add <id>                   Add a tailnet to the config and reconcile
 hydrascale apply                      Reconcile once
 hydrascale diff                       Show what a reconcile would change
-hydrascale env <tailnet-id>           Print the shell environment of a tailnet namespace
-hydrascale exec <tailnet-id> -- <cmd> Run a command inside the namespace of a tailnet
+hydrascale env <tailnet-id>           Print the exports and the shell function hstn for a tailnet
+hydrascale exec <tailnet-id> -- <cmd> Run a command inside the namespace of a tailnet (needs root)
 hydrascale init                       Run the first-run wizard
 hydrascale install                    Install the daemon as a systemd service
 hydrascale list                       List the configured tailnets
 hydrascale ping <tailnet-id> <target> Ping a peer from inside the namespace of a tailnet
 hydrascale remove <id>                Remove a tailnet from the config and reconcile
 hydrascale serve                      Run the daemon and the control loop
+hydrascale skills install             Write the agent skills to the skill directory
+hydrascale skills list                List the name and the description of each skill
 hydrascale ssh  <tailnet-id> <target> Open an SSH session to a peer through a namespace
 hydrascale status                     Show the declared state and the live state
-hydrascale switch <id>                Switch the default namespace of the tailscale command
+hydrascale switch <id>                Print the namespace name for a tailnet (changes no state)
 hydrascale tailscale <tailnet-id> -- <args>
                                       Run a tailscale command inside the namespace of a tailnet
 hydrascale tui                        Open the terminal interface, which needs a running daemon
@@ -889,6 +892,37 @@ sudo ip netns exec ns-personal tailscale --socket=/var/lib/hydrascale/state/pers
 # After
 sudo hydrascale ping personal Mars
 ```
+
+## Agent skills
+
+A skill is one Markdown file that states how a coding agent performs one task. The binary
+holds the skill set, so a host needs no checkout of this repository.
+
+Write the skills to the skill directory of the operator:
+
+```bash
+hydrascale skills install
+```
+
+The command writes each skill to `$HOME/.claude/skills/<name>/SKILL.md`. Run it as the
+account that runs the coding agent. Run it without `sudo`. The command keeps a file that
+exists. Pass `--force` to write that file. Pass `--dry-run` to print each path and write no
+file. `hydrascale skills list` prints the name and the description of each skill.
+
+The binary holds two skills:
+
+- **`hydrascale-setup`** reads the Hydrascale state of a host and reports it. It runs the
+  five commands that change no state: `status`, `list`, `diff`, `env`, and `version`. It
+  prints every command that changes the host, with the precondition and the risk, and it
+  runs none of them.
+- **`tailnet-exec`** sends a command into the namespace of one tailnet rather than to the
+  host network. It states the five routing forms: `exec`, `tailscale`, `ping`, `ssh`, and
+  `wrap`. It reads the tailnet identifier from `hydrascale list`.
+
+`skills/tailnet-exec/SKILL.md` and `skills/hydrascale-setup/SKILL.md` hold the source of
+the two skills. A test reads each file, extracts each `hydrascale <command>` string, and
+fails when the command tree of the binary holds no such command. A skill therefore states
+no command that a later release removed.
 
 ## Environment variables
 

@@ -29,6 +29,8 @@ features:
     file: features/08-upstream-policy.md
   - id: docs-and-release
     file: features/09-docs-and-release.md
+  - id: agent-skills
+    file: features/10-agent-skills.md
 ---
 
 # Hydrascale v1.0
@@ -91,6 +93,9 @@ the operator what is allowed.
 | control server kind | noun | The type of control server that one tailnet joins: `tailscale` or `headscale`. | provider, backend, flavour, type |
 | credential state | noun | The condition where a tailnet holds a complete credential, or holds none. | credential status, auth state |
 | write availability | noun | The condition where the daemon can write the policy of one tailnet to its control server. | writable, editable, permission |
+| coding agent | noun | The program that reads a skill and runs a command for the operator, such as Claude Code. | AI, assistant, LLM, bot, harness |
+| skill | noun | One Markdown file that a coding agent loads, which states how the agent performs one task. | prompt, instruction file, plugin, rule |
+| routing form | noun | One command that sends work into the namespace of a named tailnet, such as `hydrascale exec`. | wrapper, prefix, invocation |
 
 ## Goals
 
@@ -149,6 +154,9 @@ version 1.0.
 | Console access editor | `features/07-console-access-editor.md` | Epic 7 | `mockups/03-acl-editor.html` |
 | Upstream policy control | `features/08-upstream-policy.md` | Epic 8 | `mockups/04-upstream-policy.html` |
 | Documentation and release | `features/09-docs-and-release.md` | Epic 9 | none |
+| Agent skills | `features/10-agent-skills.md` | Epic 10 | none |
+
+Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0.
 
 ## Architecture & stack
 
@@ -156,7 +164,7 @@ version 1.0.
 
 | Component | Path | Purpose |
 |---|---|---|
-| Command line interface | `cmd/hydrascale` | `init`, `apply`, `serve`, `install`, `uninstall`, `tui`. |
+| Command line interface | `cmd/hydrascale` | `init`, `apply`, `serve`, `install`, `uninstall`, `tui`, `skills`. |
 | Reconciler | `internal/reconciler` | The control loop that drives the host toward the configuration. |
 | Namespace manager | `internal/namespaces` | Namespace creation, the veth pair, and the iptables rules. |
 | Rule engine | `internal/access` (new) | The local rule model, and the iptables chain that enforces it. |
@@ -514,6 +522,17 @@ contributor. The terminal interface uses the brand palette. The upgrade note tel
 version 0.9 operator what changed. The tag `v1.0.0` builds and the binary runs on the
 test host.
 
+### Epic 10: Agent skills
+
+Goal: a coding agent sends a command to the tailnet that the operator names, and it stops
+before a command that disconnects the host.
+Covers: `features/10-agent-skills.md`.
+Depends on: Epic 9, because this epic follows the release of version 1.0.
+Exit criteria: `hydrascale switch` states that it changes no state. The help of
+`hydrascale env` states no procedure that fails. The repository holds two skills under
+`skills/`. `hydrascale skills install` writes them to the skill directory of the
+operator. A test fails when a skill names a command that the command tree does not hold.
+
 ## Milestones
 
 | Milestone | Epics | What is shippable |
@@ -523,6 +542,7 @@ test host.
 | M3 — Enforced isolation | 5 | The daemon enforces reachability. The command line interface and the configuration are the only way to change it. |
 | M4 — Console | 6, 7 | The operator sees and edits local rules in a browser. This is the headline of version 1.0. |
 | M5 — Upstream and release | 8, 9 | Upstream policy control works and version 1.0 ships. |
+| M6 — Agent skills | 10 | A coding agent routes a command to the named tailnet. This follows version 1.0. |
 
 M2 is the point at which the release is worth cutting even if nothing else lands. The
 security and DNS work must not wait behind the console.
@@ -706,6 +726,13 @@ security and DNS work must not wait behind the console.
 | 2026-08-05 | 1 | Issue #230. **A console screenshot is captured from a static server and a synthetic API body, and no daemon runs.** The daemon does not build on macOS, therefore the capture serves `internal/ui/static` from a local static server and fulfils every `/api/**` request with a value that the capture itself writes. The image holds no value of a real tailnet by construction. Issue #211 rewrote the answer of a live daemon instead, which needs the test host and a tunnel. The Overview view is the head image of the README again, because issue #226 closed the defect that held it back. The event list of the capture holds `access.jump_displaced`, which is the longest type that the daemon emits, so the image is the proof of that fix. |
 | 2026-08-05 | 1 | Issue #238. **The tail of the mode `observe` now accepts, where it returned before.** The project manager measured the loss on the test host with `v1.0.0-rc.1`: `sudo ip netns exec ns-jbones ping -c2 -W2 10.200.0.86` returned `2 packets transmitted, 0 received`, the kernel wrote the `hydrascale-would-deny` line for that packet, and the policy counter of `FORWARD` rose from `18877` to `18880` for three packets. `RETURN` gives the packet back to `FORWARD`, whose policy is `DROP` on a host that runs Docker, therefore the host dropped what the daemon promised to keep. **FR-access-4** and **FR-access-20** now name `ACCEPT`, and **FR-access-4a** and **FR-access-20a** state the same for `HYDRASCALE-OUT` and for the policy of `INPUT`. `TailForMode` serves both chains, so both tails accept; an `ACCEPT` on the forward tail alone would leave the same defect on a host whose `INPUT` policy is `DROP`. The `ACCEPT` ends the traversal of `FORWARD`, therefore `ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` do not see an accepted packet. Version 0.9 wrote `ACCEPT` rules into `FORWARD` and had the same behaviour, so the mode `observe` restores version 0.9 rather than inventing a behaviour. The mode `enforce` is the default and it does not change. |
 | 2026-08-05 | 1 | Issue #240. **The operator documents now match the daemon.** `docs/UPGRADING.md` gains a rollback warning and three steps that write the two `FORWARD` rules of each namespace again, because version 0.9 and version 0.10 write those rules at the moment they create the veth pair and a rollback keeps the namespaces. Issue #172 measured the loss, and `hydrascale status` reported `healthy` while no namespace reached anything. Both documents now name about 20 seconds as the wait after a restart, and 60 seconds as the point of a real failure, which issue #223 measured as 17 seconds once and 21 to 22 seconds across eight further restarts. **The rollback section carries no second count**, because a rollback starts version 0.10, which holds the serial `refresh_dns` wait that issue #223 removed, and this project measured version 0.10 before that fix and not after it. Step 6 of the rollback waits for `healthy` and `running` rather than for a fixed count of seconds. The `README.md` no longer tells the operator to write `access.mode: observe` alone, because `internal/config/migrate.go:72` returns early when `cfg.Access != nil` and a hand-written block suppresses the migration. The `README.md` now states the current path to the Tailscale OAuth client, `https://login.tailscale.com/admin/settings/trust-credentials`, and it states that the tail of the mode `observe` accepts. The Docker section of the `README.md` described the `FORWARD` `ACCEPT` rule per namespace that version 1.0 removes, which contradicted `docs/UPGRADING.md`, so it now names the jump into `HYDRASCALE-FWD`. |
+| 2026-08-05 | 1 | Issue #243. **The three GitHub Actions move to the majors that declare `using: node24`.** `.github/workflows/ci.yml` and `.github/workflows/release.yml` now hold `actions/checkout@v7`, `actions/setup-go@v7`, and `goreleaser/goreleaser-action@v7`. The earlier majors `actions/checkout@v4`, `actions/setup-go@v5`, and `goreleaser/goreleaser-action@v6` each declare `using: node20` in their own `action.yml`, which is the field that produced the deprecation annotation of the `v1.0.0` release run. The version stays a major tag, because the repository already pinned a major tag and a patch tag adds an update for each patch. The GoReleaser command line tool keeps the pin `version: v2.17.1`, because this change moves the action alone. **The release workflow runs on a tag alone, therefore this change proves `actions/checkout` and `actions/setup-go` through `ci.yml` and it does not prove `goreleaser/goreleaser-action@v7`.** The next release proves that action. The `action.yml` of `goreleaser/goreleaser-action@v7` declares the inputs `distribution`, `version`, and `args`, which the release workflow supplies, and the release notes of `v7.0.0` name the Node.js 24 move as the one breaking change. |
+| 2026-08-10 | 1 | Epic 10 built in part. The dependency of issue #249 on issue #248 is removed. FR-skills-10 to FR-skills-15 name no `hydrascale env` behaviour, so the skill `tailnet-exec` needs only the correction of `hydrascale switch` that issue #247 makes. |
+| 2026-08-10 | 1 | Epic 10 built in part. **The batch ships five of six issues.** Issue #248 holds at `status:blocked`, because one of its acceptance criteria needs a live tailnet and the test host at `192.168.1.221` does not answer. The five members stand alone, therefore the batch ships without it. The defect that #248 records stays in the product until that issue closes. |
+| 2026-08-10 | 1 | Epic 10 built in part. The gate for this batch cross-compiles each test binary to `linux/arm64` and runs it on a Linux host, because `internal/daemon/daemon.go:244` names `Pdeathsig` and six packages therefore fail to build on macOS. `go test -race ./...` does not cross-compile, so the batch pull request on `ubuntu-latest` is the only run of the race detector. |
+| 2026-08-10 | 1 | Epic 10 corrected. **FR-skills-6 pinned a form that does not work.** The function `hstn` ran `hydrascale exec <id> -- "$@"`. That command calls `ip netns exec`, which needs root, so the function failed for an account that holds no root permission. The deferred criterion of issue #248 caught it on the test host: "`eval "$(hydrascale env <id>)"` followed by `hstn curl http://<peer>:8080` reaches the peer through the namespace of `<id>`." FR-skills-6 now names `sudo hydrascale exec <id> -- "$@"`, and FR-skills-36 requires the printed comment to state that the command needs root. A test that reads printed bytes cannot observe a permission failure, therefore issue #263 runs the function against a live peer. |
+| 2026-08-10 | 1 | Epic 10 corrected. **`hydrascale switch` is the fourth place that omitted the root privilege, and the last one.** The command printed `hydrascale exec <id> -- <command>` and `hydrascale tailscale <id> -- <arguments>`. `runTailscaleInNamespace` at `cmd/hydrascale/main.go:616` calls `runInNamespace`, which runs `ip netns exec`, so both forms need root. Issue #261 corrected the cheat sheet of `hydrascale init`, issue #263 corrected the function `hstn` of `hydrascale env`, and issue #265 corrected the `README.md`. Issue #267 corrects the last one. **FR-skills-2** now names the two `sudo` forms, and the new **FR-skills-37** requires the printed line `Both forms run ip netns exec, which needs root.` The four corrections came one at a time, because each reader found one printed form and no reader read every printed form together. |
+| 2026-08-10 | 1 | Epic 10 built. **One omission appeared in four places.** `hydrascale exec` runs `ip netns exec`, which needs root, and only `skills/tailnet-exec/SKILL.md` stated it. Issue #261 corrected the cheat sheet of `hydrascale init`, issue #263 corrected `hydrascale env`, issue #265 corrected `README.md`, and issue #267 corrected `hydrascale switch`. The specification propagated the defect, because FR-skills-2 and FR-skills-6 each pinned a form that holds no `sudo`. A test that reads printed bytes passes on a form that fails on the host, therefore the test host caught this and the test suite did not. |
 
 ## Issue map
 
@@ -725,6 +752,8 @@ fix.
 | Epic 7: Console access editor | #147 | #148 #149 #150 #151 #152 | `features/07-console-access-editor.md` |
 | Epic 8: Upstream policy control | #153 | #154 #155 #156 #157 #158 #159 | `features/08-upstream-policy.md` |
 | Epic 9: Documentation and release | #160 | #161 #162 #163 #164 #165 | `features/09-docs-and-release.md` |
+| Epic 10: Agent skills | #246 | #247 #248 #249 #250 #251 #252 | `features/10-agent-skills.md` |
+| Epic 10 follow-up: the root privilege | none | #261 #263 #265 #267 | `features/10-agent-skills.md` |
 
 ### Requirement coverage
 
@@ -740,8 +769,16 @@ fix.
 | console-access-editor | FR-editor-1 to 33 | #148 #149 #150 #151 #152 |
 | upstream-policy | FR-policy-1 to 28 | #154 #155 #156 #157 #158 #159 |
 | docs-and-release | FR-docs-1 to 27 | #161 #162 #163 #164 #165 |
+| agent-skills | FR-skills-1 to 4 | #247 |
+| agent-skills | FR-skills-5 to 7 | #248 |
+| agent-skills | FR-skills-8 to 15, 20 | #249 |
+| agent-skills | FR-skills-8, 9, 16 to 20 | #250 |
+| agent-skills | FR-skills-21 to 29 | #251 |
+| agent-skills | FR-skills-30 to 35 | #252 |
+| agent-skills | FR-skills-6, 36 | #263 |
+| agent-skills | FR-skills-2, 37 | #267 |
 
-Every one of the 238 requirements in these ten features is cited by at least one issue.
+Every one of the 239 requirements in these ten features is cited by at least one issue.
 
 **FR-access-2 is covered and reversed.** The requirement states that the daemon appends the
 jump rule into `FORWARD`. The operator decided on 2026-08-05 that the daemon keeps the
