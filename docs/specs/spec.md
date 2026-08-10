@@ -731,6 +731,7 @@ security and DNS work must not wait behind the console.
 | 2026-08-10 | 1 | Epic 10 built in part. **The batch ships five of six issues.** Issue #248 holds at `status:blocked`, because one of its acceptance criteria needs a live tailnet and the test host at `192.168.1.221` does not answer. The five members stand alone, therefore the batch ships without it. The defect that #248 records stays in the product until that issue closes. |
 | 2026-08-10 | 1 | Epic 10 built in part. The gate for this batch cross-compiles each test binary to `linux/arm64` and runs it on a Linux host, because `internal/daemon/daemon.go:244` names `Pdeathsig` and six packages therefore fail to build on macOS. `go test -race ./...` does not cross-compile, so the batch pull request on `ubuntu-latest` is the only run of the race detector. |
 | 2026-08-10 | 1 | Epic 10 corrected. **FR-skills-6 pinned a form that does not work.** The function `hstn` ran `hydrascale exec <id> -- "$@"`. That command calls `ip netns exec`, which needs root, so the function failed for an account that holds no root permission. The deferred criterion of issue #248 caught it on the test host: "`eval "$(hydrascale env <id>)"` followed by `hstn curl http://<peer>:8080` reaches the peer through the namespace of `<id>`." FR-skills-6 now names `sudo hydrascale exec <id> -- "$@"`, and FR-skills-36 requires the printed comment to state that the command needs root. A test that reads printed bytes cannot observe a permission failure, therefore issue #263 runs the function against a live peer. |
+| 2026-08-10 | 1 | Epic 10 corrected. **`hydrascale switch` is the fourth place that omitted the root privilege, and the last one.** The command printed `hydrascale exec <id> -- <command>` and `hydrascale tailscale <id> -- <arguments>`. `runTailscaleInNamespace` at `cmd/hydrascale/main.go:616` calls `runInNamespace`, which runs `ip netns exec`, so both forms need root. Issue #261 corrected the cheat sheet of `hydrascale init`, issue #263 corrected the function `hstn` of `hydrascale env`, and issue #265 corrected the `README.md`. Issue #267 corrects the last one. **FR-skills-2** now names the two `sudo` forms, and the new **FR-skills-37** requires the printed line `Both forms run ip netns exec, which needs root.` The four corrections came one at a time, because each reader found one printed form and no reader read every printed form together. |
 
 ## Issue map
 
@@ -773,6 +774,7 @@ fix.
 | agent-skills | FR-skills-21 to 29 | #251 |
 | agent-skills | FR-skills-30 to 35 | #252 |
 | agent-skills | FR-skills-6, 36 | #263 |
+| agent-skills | FR-skills-2, 37 | #267 |
 
 Every one of the 239 requirements in these ten features is cited by at least one issue.
 

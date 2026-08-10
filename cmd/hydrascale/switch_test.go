@@ -82,6 +82,30 @@ func TestSwitchCmd(t *testing.T) {
 		}
 	})
 
+	t.Run("prints sudo in the exec routing form", func(t *testing.T) {
+		out, _ := runSwitch(t, configuredTailnet)
+		want := "sudo hydrascale exec " + configuredTailnet + " -- <command>"
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	})
+
+	t.Run("prints sudo in the tailscale routing form", func(t *testing.T) {
+		out, _ := runSwitch(t, configuredTailnet)
+		want := "sudo hydrascale tailscale " + configuredTailnet + " -- <arguments>"
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	})
+
+	t.Run("states that the two routing forms need root", func(t *testing.T) {
+		out, _ := runSwitch(t, configuredTailnet)
+		const want = "Both forms run ip netns exec, which needs root."
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	})
+
 	t.Run("holds no form of the word switch in the output", func(t *testing.T) {
 		out, _ := runSwitch(t, configuredTailnet)
 		if strings.Contains(strings.ToLower(out), "switch") {
