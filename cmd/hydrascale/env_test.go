@@ -73,10 +73,12 @@ func TestEnvCmd(t *testing.T) {
 		}
 	})
 
-	t.Run("holds no eval example in the help that a bare command follows", func(t *testing.T) {
+	t.Run("follows every eval example in the help with a routed command", func(t *testing.T) {
+		// The test reads a line that starts with the shell builtin, so a sentence
+		// that holds the word evaluate fails no assertion.
 		lines := strings.Split(envCmd().Long, "\n")
 		for i, line := range lines {
-			if !strings.Contains(line, "eval") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "eval ") {
 				continue
 			}
 			next := ""
