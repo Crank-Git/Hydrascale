@@ -746,6 +746,7 @@ fix.
 | Epic 7: Console access editor | #147 | #148 #149 #150 #151 #152 | `features/07-console-access-editor.md` |
 | Epic 8: Upstream policy control | #153 | #154 #155 #156 #157 #158 #159 | `features/08-upstream-policy.md` |
 | Epic 9: Documentation and release | #160 | #161 #162 #163 #164 #165 | `features/09-docs-and-release.md` |
+| Epic 10: Agent skills | #246 | #247 #248 #249 #250 #251 #252 | `features/10-agent-skills.md` |
 
 ### Requirement coverage
 
@@ -761,6 +762,12 @@ fix.
 | console-access-editor | FR-editor-1 to 33 | #148 #149 #150 #151 #152 |
 | upstream-policy | FR-policy-1 to 28 | #154 #155 #156 #157 #158 #159 |
 | docs-and-release | FR-docs-1 to 27 | #161 #162 #163 #164 #165 |
+| agent-skills | FR-skills-1 to 4 | #247 |
+| agent-skills | FR-skills-5 to 7 | #248 |
+| agent-skills | FR-skills-8 to 15, 20 | #249 |
+| agent-skills | FR-skills-8, 9, 16 to 20 | #250 |
+| agent-skills | FR-skills-21 to 29 | #251 |
+| agent-skills | FR-skills-30 to 35 | #252 |
 
 Every one of the 238 requirements in these ten features is cited by at least one issue.
 
