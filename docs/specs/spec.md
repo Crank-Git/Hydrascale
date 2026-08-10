@@ -29,6 +29,8 @@ features:
     file: features/08-upstream-policy.md
   - id: docs-and-release
     file: features/09-docs-and-release.md
+  - id: agent-skills
+    file: features/10-agent-skills.md
 ---
 
 # Hydrascale v1.0
