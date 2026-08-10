@@ -40,6 +40,15 @@ var version = "dev"
 var systemdUnit string
 
 func main() {
+	if err := rootCommand().Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// rootCommand returns the root command with every sub-command attached.
+// A test reads it to check that the binary holds a sub-command.
+func rootCommand() *cobra.Command {
 	var rootCmd = &cobra.Command{
 		Use:     "hydrascale",
 		Version: version,
@@ -75,12 +84,10 @@ reconciles toward it. GitOps for tailnets.`,
 	rootCmd.AddCommand(envCmd())
 	rootCmd.AddCommand(installCmd())
 	rootCmd.AddCommand(uninstallCmd())
+	rootCmd.AddCommand(skillsCmd())
 	rootCmd.AddCommand(versionCmd())
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func versionCmd() *cobra.Command {
