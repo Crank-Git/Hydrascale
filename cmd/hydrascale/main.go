@@ -387,7 +387,7 @@ func listCmd() *cobra.Command {
 func switchCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "switch <id>",
-		Short: "Switch default namespace",
+		Short: "Print the namespace name for a tailnet (changes no state)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tailnetID := args[0]
@@ -407,8 +407,17 @@ func switchCmd() *cobra.Command {
 				return fmt.Errorf("tailnet %s not found", tailnetID)
 			}
 
+			// A child process cannot move its parent shell into a namespace.
+			// The command therefore prints the routing forms rather than a state change.
+			// See FR-skills-1 and FR-skills-2.
 			nsName := namespaces.GetNamespaceName(tailnetID)
-			fmt.Printf("Switched to tailnet %s (namespace: %s)\n", tailnetID, nsName)
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"The tailnet %s uses the namespace %s.\n"+
+					"This command changes no state. The shell of the operator stays on the host network.\n"+
+					"Two routing forms send work to this tailnet:\n"+
+					"  hydrascale exec %s -- <command>\n"+
+					"  hydrascale tailscale %s -- <arguments>\n",
+				tailnetID, nsName, tailnetID, tailnetID)
 			return nil
 		},
 	}
