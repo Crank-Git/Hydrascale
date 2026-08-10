@@ -857,8 +857,8 @@ parent chain holds none.
 hydrascale add <id>                   Add a tailnet to the config and reconcile
 hydrascale apply                      Reconcile once
 hydrascale diff                       Show what a reconcile would change
-hydrascale env <tailnet-id>           Print the shell environment of a tailnet namespace
-hydrascale exec <tailnet-id> -- <cmd> Run a command inside the namespace of a tailnet
+hydrascale env <tailnet-id>           Print the exports and the shell function hstn for a tailnet
+hydrascale exec <tailnet-id> -- <cmd> Run a command inside the namespace of a tailnet (needs root)
 hydrascale init                       Run the first-run wizard
 hydrascale install                    Install the daemon as a systemd service
 hydrascale list                       List the configured tailnets
@@ -869,7 +869,7 @@ hydrascale skills install             Write the agent skills to the skill direct
 hydrascale skills list                List the name and the description of each skill
 hydrascale ssh  <tailnet-id> <target> Open an SSH session to a peer through a namespace
 hydrascale status                     Show the declared state and the live state
-hydrascale switch <id>                Switch the default namespace of the tailscale command
+hydrascale switch <id>                Print the namespace name for a tailnet (changes no state)
 hydrascale tailscale <tailnet-id> -- <args>
                                       Run a tailscale command inside the namespace of a tailnet
 hydrascale tui                        Open the terminal interface, which needs a running daemon
