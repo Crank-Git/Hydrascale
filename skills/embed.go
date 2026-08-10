@@ -29,9 +29,14 @@ type Skill struct {
 }
 
 // All returns every embedded skill, in the order of the name.
-// All returns an error when a file opens with no front matter, when the front matter holds
-// no name or no description, or when the name and the directory name differ. All reads
-// every skill and returns the errors together.
+//
+// All returns an error in each of these cases:
+//   - A file opens with no front matter.
+//   - The front matter holds no name.
+//   - The front matter holds no description.
+//   - The name and the directory name differ.
+//
+// All reads every skill and returns the errors together.
 func All() ([]Skill, error) {
 	entries, err := fs.ReadDir(files, ".")
 	if err != nil {
@@ -76,9 +81,12 @@ const frontMatterDelimiter = "---"
 
 // frontMatter returns the name and the description that the front matter of one skill file
 // holds. content is the whole file.
-// frontMatter returns an error when the file opens with no delimiter, when the front
-// matter holds no end delimiter, when the front matter holds no name, or when the front
-// matter holds no description.
+//
+// frontMatter returns an error in each of these cases:
+//   - The file opens with no delimiter.
+//   - The front matter holds no end delimiter.
+//   - The front matter holds no name.
+//   - The front matter holds no description.
 func frontMatter(content []byte) (name, description string, err error) {
 	lines := strings.Split(string(content), "\n")
 	if len(lines) == 0 || strings.TrimRight(lines[0], "\r") != frontMatterDelimiter {

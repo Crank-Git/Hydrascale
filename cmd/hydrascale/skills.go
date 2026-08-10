@@ -17,7 +17,7 @@ import (
 // because a test process cannot change its own identifier.
 var skillsGeteuid = os.Geteuid
 
-// skillDirectoryMode is the mode of the skill directory and of each skill directory.
+// skillDirectoryMode is the mode of $HOME/.claude/skills and of each directory under it.
 const skillDirectoryMode fs.FileMode = 0o755
 
 // skillFileMode is the mode of a SKILL.md that the command writes.
@@ -48,7 +48,7 @@ func skillsInstallCmd() *cobra.Command {
 		Long: `Write each embedded skill to $HOME/.claude/skills/<name>/SKILL.md.
 
 The command writes under the home directory of the invoking account and under no other
-path. Run it as the account that runs the coding agent, and run it without sudo.
+path. Run it as the account that runs the coding agent. Run it without sudo.
 
 The command keeps a file that exists. Pass --force to write that file.`,
 		Args: cobra.NoArgs,
@@ -98,19 +98,23 @@ func skillsListCmd() *cobra.Command {
 	}
 }
 
-// installSkills writes each embedded skill to the skill directory of the operator, and it
-// prints one line for each path. out receives those lines. dir names the target directory,
-// and an empty dir selects $HOME/.claude/skills. force writes a file that exists. dryRun
+// installSkills writes each embedded skill to the skill directory of the operator.
+// installSkills prints one line for each path to out. dir names the target directory, and
+// an empty dir selects $HOME/.claude/skills. force writes a file that exists. dryRun
 // prints each path and writes no file.
-// installSkills returns an error when the effective user identifier is 0, when dir is
-// empty and the environment holds no HOME, or when a write fails. installSkills attempts
-// every skill and returns the errors together.
+//
+// installSkills returns an error in each of these cases:
+//   - The effective user identifier is 0.
+//   - dir is empty and the environment holds no HOME.
+//   - A write fails.
+//
+// installSkills attempts every skill and returns the errors together.
 func installSkills(out io.Writer, dir string, force, dryRun bool) error {
 	// The coding agent runs as the operator and reads the skill directory of the operator,
 	// so a write as root would place the skill where the agent never looks.
 	if skillsGeteuid() == 0 {
 		return fmt.Errorf(
-			"the effective user identifier is 0, and the skill belongs to the account of the operator rather than to root. Run \"hydrascale skills install\" as %s, and run it without sudo",
+			"the effective user identifier is 0, and the skill belongs to the account of the operator rather than to root. Run \"hydrascale skills install\" as %s. Run it without sudo",
 			operatorAccount())
 	}
 
@@ -167,9 +171,10 @@ func installSkills(out io.Writer, dir string, force, dryRun bool) error {
 	return errors.Join(errs...)
 }
 
-// makeSkillDirectory creates the directory at mode 0755 when the directory is absent.
-// makeSkillDirectory keeps the mode of a directory that exists, because that directory
-// belongs to the operator. makeSkillDirectory returns an error when the create fails.
+// makeSkillDirectory creates the directory at skillDirectoryMode when the directory is
+// absent. makeSkillDirectory keeps the mode of a directory that exists, because that
+// directory belongs to the operator. makeSkillDirectory returns an error when the create
+// fails.
 func makeSkillDirectory(path string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
@@ -180,7 +185,7 @@ func makeSkillDirectory(path string) error {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	// MkdirAll subtracts the umask of the process from the mode, so the command sets the
-	// mode again. The skill directory holds mode 0755.
+	// mode again. The skill directory holds skillDirectoryMode.
 	if err := os.Chmod(path, skillDirectoryMode); err != nil {
 		return fmt.Errorf("set the mode of %s: %w", path, err)
 	}
