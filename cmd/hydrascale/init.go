@@ -431,12 +431,19 @@ func backupFile(path string) error {
 	return config.BackupFile(path, path+".bak")
 }
 
+// cheatSheet returns the guidance that hydrascale init prints last. A test reads this
+// text and fails when it names a command that the command tree does not hold.
+func cheatSheet() string {
+	return "\nHow to use your tailnets:\n" +
+		"  Run a command:            sudo hydrascale exec <id> -- <cmd>\n" +
+		"  Quick tools:              hydrascale ssh|ping|tailscale <id> ...\n" +
+		"  Define the function hstn: sudo -s, then eval \"$(hydrascale env <id>)\"\n" +
+		"  Run a command with hstn:  hstn <cmd>\n" +
+		"  Print the namespace name: hydrascale switch <id>\n" +
+		"  Run a service in-ns:      hydrascale wrap <service> <id>\n"
+}
+
 // printCheatSheet shows how to run commands inside tailnet namespaces.
 func printCheatSheet() {
-	fmt.Println("\nHow to use your tailnets:")
-	fmt.Println("  Run a command:            sudo hydrascale exec <id> -- <cmd>")
-	fmt.Println("  Quick tools:              hydrascale ssh|ping|tailscale <id> ...")
-	fmt.Println("  Default THIS shell:       eval \"$(hydrascale env <id>)\"")
-	fmt.Println("  Set a persistent default: hydrascale switch <id>")
-	fmt.Println("  Run a service in-ns:      hydrascale wrap <service> <id>")
+	fmt.Print(cheatSheet())
 }
