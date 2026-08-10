@@ -905,9 +905,9 @@ hydrascale skills install
 ```
 
 The command writes each skill to `$HOME/.claude/skills/<name>/SKILL.md`. Run it as the
-account that runs the coding agent, and run it without `sudo`. The command keeps a file
-that exists; pass `--force` to write that file. Pass `--dry-run` to print each path and
-write no file. `hydrascale skills list` prints the name and the description of each skill.
+account that runs the coding agent. Run it without `sudo`. The command keeps a file that
+exists. Pass `--force` to write that file. Pass `--dry-run` to print each path and write no
+file. `hydrascale skills list` prints the name and the description of each skill.
 
 The binary holds two skills:
 
@@ -916,8 +916,8 @@ The binary holds two skills:
   prints every command that changes the host, with the precondition and the risk, and it
   runs none of them.
 - **`tailnet-exec`** sends a command into the namespace of one tailnet rather than to the
-  host network. It states the five routing forms — `exec`, `tailscale`, `ping`, `ssh`, and
-  `wrap` — and it reads the tailnet identifier from `hydrascale list`.
+  host network. It states the five routing forms: `exec`, `tailscale`, `ping`, `ssh`, and
+  `wrap`. It reads the tailnet identifier from `hydrascale list`.
 
 `skills/tailnet-exec/SKILL.md` and `skills/hydrascale-setup/SKILL.md` hold the source of
 the two skills. A test reads each file, extracts each `hydrascale <command>` string, and
