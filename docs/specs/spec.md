@@ -772,8 +772,9 @@ fix.
 | agent-skills | FR-skills-8, 9, 16 to 20 | #250 |
 | agent-skills | FR-skills-21 to 29 | #251 |
 | agent-skills | FR-skills-30 to 35 | #252 |
+| agent-skills | FR-skills-6, 36 | #263 |
 
-Every one of the 238 requirements in these ten features is cited by at least one issue.
+Every one of the 239 requirements in these ten features is cited by at least one issue.
 
 **FR-access-2 is covered and reversed.** The requirement states that the daemon appends the
 jump rule into `FORWARD`. The operator decided on 2026-08-05 that the daemon keeps the
