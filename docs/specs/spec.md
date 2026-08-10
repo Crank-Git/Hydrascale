@@ -730,6 +730,7 @@ security and DNS work must not wait behind the console.
 | 2026-08-10 | 1 | Epic 10 built in part. The dependency of issue #249 on issue #248 is removed. FR-skills-10 to FR-skills-15 name no `hydrascale env` behaviour, so the skill `tailnet-exec` needs only the correction of `hydrascale switch` that issue #247 makes. |
 | 2026-08-10 | 1 | Epic 10 built in part. **The batch ships five of six issues.** Issue #248 holds at `status:blocked`, because one of its acceptance criteria needs a live tailnet and the test host at `192.168.1.221` does not answer. The five members stand alone, therefore the batch ships without it. The defect that #248 records stays in the product until that issue closes. |
 | 2026-08-10 | 1 | Epic 10 built in part. The gate for this batch cross-compiles each test binary to `linux/arm64` and runs it on a Linux host, because `internal/daemon/daemon.go:244` names `Pdeathsig` and six packages therefore fail to build on macOS. `go test -race ./...` does not cross-compile, so the batch pull request on `ubuntu-latest` is the only run of the race detector. |
+| 2026-08-10 | 1 | Epic 10 corrected. **FR-skills-6 pinned a form that does not work.** The function `hstn` ran `hydrascale exec <id> -- "$@"`. That command calls `ip netns exec`, which needs root, so the function failed for an account that holds no root permission. The deferred criterion of issue #248 caught it on the test host: "`eval "$(hydrascale env <id>)"` followed by `hstn curl http://<peer>:8080` reaches the peer through the namespace of `<id>`." FR-skills-6 now names `sudo hydrascale exec <id> -- "$@"`, and FR-skills-36 requires the printed comment to state that the command needs root. A test that reads printed bytes cannot observe a permission failure, therefore issue #263 runs the function against a live peer. |
 
 ## Issue map
 
@@ -771,8 +772,9 @@ fix.
 | agent-skills | FR-skills-8, 9, 16 to 20 | #250 |
 | agent-skills | FR-skills-21 to 29 | #251 |
 | agent-skills | FR-skills-30 to 35 | #252 |
+| agent-skills | FR-skills-6, 36 | #263 |
 
-Every one of the 238 requirements in these ten features is cited by at least one issue.
+Every one of the 239 requirements in these ten features is cited by at least one issue.
 
 **FR-access-2 is covered and reversed.** The requirement states that the daemon appends the
 jump rule into `FORWARD`. The operator decided on 2026-08-05 that the daemon keeps the

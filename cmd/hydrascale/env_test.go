@@ -34,7 +34,7 @@ func TestEnvCmd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("env %s = %v, want no error", envTailnet, err)
 		}
-		want := `hstn() { hydrascale exec ` + envTailnet + ` -- "$@"; }`
+		want := `hstn() { sudo hydrascale exec ` + envTailnet + ` -- "$@"; }`
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
@@ -46,9 +46,32 @@ func TestEnvCmd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("env %s = %v, want no error", other, err)
 		}
-		want := `hstn() { hydrascale exec ` + other + ` -- "$@"; }`
+		want := `hstn() { sudo hydrascale exec ` + other + ` -- "$@"; }`
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	})
+
+	t.Run("names the need for root in a comment above the function", func(t *testing.T) {
+		out, _ := runEnv(t, envTailnet)
+		const comment = "# hydrascale exec runs ip netns exec, which needs root."
+		commentAt := strings.Index(out, comment)
+		if commentAt < 0 {
+			t.Fatalf("output = %q, want it to contain %q", out, comment)
+		}
+		functionAt := strings.Index(out, "hstn() {")
+		if functionAt < 0 {
+			t.Fatalf("output = %q, want it to contain the function hstn", out)
+		}
+		if commentAt > functionAt {
+			t.Errorf("the comment follows the function, want the comment above it")
+		}
+	})
+
+	t.Run("states the need for root in the help of the command", func(t *testing.T) {
+		const want = "hydrascale exec runs ip netns exec, which needs root."
+		if got := envCmd().Long; !strings.Contains(got, want) {
+			t.Errorf("Long = %q, want it to contain %q", got, want)
 		}
 	})
 
