@@ -29,6 +29,8 @@ features:
     file: features/08-upstream-policy.md
   - id: docs-and-release
     file: features/09-docs-and-release.md
+  - id: agent-skills
+    file: features/10-agent-skills.md
 ---
 
 # Hydrascale v1.0
@@ -91,6 +93,9 @@ the operator what is allowed.
 | control server kind | noun | The type of control server that one tailnet joins: `tailscale` or `headscale`. | provider, backend, flavour, type |
 | credential state | noun | The condition where a tailnet holds a complete credential, or holds none. | credential status, auth state |
 | write availability | noun | The condition where the daemon can write the policy of one tailnet to its control server. | writable, editable, permission |
+| coding agent | noun | The program that reads a skill and runs a command for the operator, such as Claude Code. | AI, assistant, LLM, bot, harness |
+| skill | noun | One Markdown file that a coding agent loads, which states how the agent performs one task. | prompt, instruction file, plugin, rule |
+| routing form | noun | One command that sends work into the namespace of a named tailnet, such as `hydrascale exec`. | wrapper, prefix, invocation |
 
 ## Goals
 
@@ -149,6 +154,9 @@ version 1.0.
 | Console access editor | `features/07-console-access-editor.md` | Epic 7 | `mockups/03-acl-editor.html` |
 | Upstream policy control | `features/08-upstream-policy.md` | Epic 8 | `mockups/04-upstream-policy.html` |
 | Documentation and release | `features/09-docs-and-release.md` | Epic 9 | none |
+| Agent skills | `features/10-agent-skills.md` | Epic 10 | none |
+
+Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0.
 
 ## Architecture & stack
 
@@ -156,7 +164,7 @@ version 1.0.
 
 | Component | Path | Purpose |
 |---|---|---|
-| Command line interface | `cmd/hydrascale` | `init`, `apply`, `serve`, `install`, `uninstall`, `tui`. |
+| Command line interface | `cmd/hydrascale` | `init`, `apply`, `serve`, `install`, `uninstall`, `tui`, `skills`. |
 | Reconciler | `internal/reconciler` | The control loop that drives the host toward the configuration. |
 | Namespace manager | `internal/namespaces` | Namespace creation, the veth pair, and the iptables rules. |
 | Rule engine | `internal/access` (new) | The local rule model, and the iptables chain that enforces it. |
@@ -514,6 +522,17 @@ contributor. The terminal interface uses the brand palette. The upgrade note tel
 version 0.9 operator what changed. The tag `v1.0.0` builds and the binary runs on the
 test host.
 
+### Epic 10: Agent skills
+
+Goal: a coding agent sends a command to the tailnet that the operator names, and it stops
+before a command that disconnects the host.
+Covers: `features/10-agent-skills.md`.
+Depends on: Epic 9, because this epic follows the release of version 1.0.
+Exit criteria: `hydrascale switch` states that it changes no state. The help of
+`hydrascale env` states no procedure that fails. The repository holds two skills under
+`skills/`. `hydrascale skills install` writes them to the skill directory of the
+operator. A test fails when a skill names a command that the command tree does not hold.
+
 ## Milestones
 
 | Milestone | Epics | What is shippable |
@@ -523,6 +542,7 @@ test host.
 | M3 — Enforced isolation | 5 | The daemon enforces reachability. The command line interface and the configuration are the only way to change it. |
 | M4 — Console | 6, 7 | The operator sees and edits local rules in a browser. This is the headline of version 1.0. |
 | M5 — Upstream and release | 8, 9 | Upstream policy control works and version 1.0 ships. |
+| M6 — Agent skills | 10 | A coding agent routes a command to the named tailnet. This follows version 1.0. |
 
 M2 is the point at which the release is worth cutting even if nothing else lands. The
 security and DNS work must not wait behind the console.
