@@ -15,8 +15,8 @@ command for the operator. Run none of them.
 
 ## The commands you run
 
-The `allowed-tools` block above holds five commands. Each command reads the state, and
-none of them changes the host.
+The `allowed-tools` block above names five Hydrascale commands. Each command reads the
+state, and none of them changes the host.
 
 | Command | Result |
 |---|---|
@@ -31,7 +31,7 @@ The daemon holds the control socket `/var/lib/hydrascale/api.sock` at mode `0600
 
 Read the state in this order:
 
-1. Run `hydrascale version`. It names the release that the host runs.
+1. Run `hydrascale version`. It states the version that the host runs.
 2. Run `hydrascale list`. It reads the configuration file, so it names a tailnet that
    holds no namespace.
 3. Run `hydrascale status`. It names each tailnet that is down.
@@ -49,7 +49,7 @@ precondition, and the risk.
 These commands and edits change the host:
 
 - `hydrascale apply`, `hydrascale add <id>`, and `hydrascale remove <id>`.
-- `hydrascale install`, and `hydrascale serve`.
+- `hydrascale install` and `hydrascale serve`.
 - `sudo systemctl start hydrascale`, `sudo systemctl stop hydrascale`, and
   `sudo systemctl reload hydrascale`.
 - An edit of `/etc/hydrascale/config.yaml` or of `/etc/hydrascale/secrets.yaml`.
@@ -78,9 +78,10 @@ denies that packet. Print this order:
 2. Confirm the event `access.migrated` in the journal.
 3. Set `access.mode: observe` in `/etc/hydrascale/config.yaml`.
 4. Apply the mode with `sudo systemctl reload hydrascale`.
-5. Use the host for a day, then read the would-deny log lines.
-6. Add one rule for each path that the log names.
-7. Set `access.mode: enforce` only after the log names no further path.
+5. Use the host for a day.
+6. Read the would-deny log lines.
+7. Add one rule for each path that the log names.
+8. Set `access.mode: enforce` only after the log names no further path.
 
 The daemon detects the migration by the presence of the `access` key.
 `internal/config/migrate.go:72` returns early when the configuration file already holds an
@@ -99,8 +100,8 @@ The console listener binds a loopback address only, and `StartConsole` refuses a
 any other address. `internal/config/console.go:10` holds the default address
 `127.0.0.1:9443`.
 
-An SSH forward reaches the console from another machine. Print this command, and print the
-address `http://127.0.0.1:9443` for the browser of the operator:
+An SSH forward reaches the console from another machine. Print this command for the
+operator. Print the address `http://127.0.0.1:9443` for the browser as well:
 
 ```sh
 ssh -L 9443:127.0.0.1:9443 <host>
