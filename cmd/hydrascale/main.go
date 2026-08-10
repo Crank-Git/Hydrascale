@@ -416,14 +416,16 @@ func switchCmd() *cobra.Command {
 
 			// A child process cannot move its parent shell into a namespace.
 			// The command therefore prints the routing forms rather than a state change.
-			// See FR-skills-1 and FR-skills-2.
+			// Both forms reach runInNamespace, which runs ip netns exec, so both need
+			// root. See FR-skills-1, FR-skills-2, and FR-skills-37.
 			nsName := namespaces.GetNamespaceName(tailnetID)
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"The tailnet %s uses the namespace %s.\n"+
 					"This command changes no state. The shell of the operator stays on the host network.\n"+
 					"Two routing forms send work to this tailnet:\n"+
-					"  hydrascale exec %s -- <command>\n"+
-					"  hydrascale tailscale %s -- <arguments>\n",
+					"  sudo hydrascale exec %s -- <command>\n"+
+					"  sudo hydrascale tailscale %s -- <arguments>\n"+
+					"Both forms run ip netns exec, which needs root.\n",
 				tailnetID, nsName, tailnetID, tailnetID)
 			return nil
 		},

@@ -79,7 +79,8 @@ line reaches the host network. The only line that routes the traffic is a commen
 
 - **FR-skills-1** — `hydrascale switch <id>` states that it changes no state.
 - **FR-skills-2** — `hydrascale switch <id>` prints the two forms that route a command:
-  `hydrascale exec <id> -- <command>` and `hydrascale tailscale <id> -- <arguments>`.
+  `sudo hydrascale exec <id> -- <command>` and
+  `sudo hydrascale tailscale <id> -- <arguments>`.
 - **FR-skills-3** — The summary of `hydrascale switch` reads
   `Print the namespace name for a tailnet (changes no state)`.
 - **FR-skills-4** — `hydrascale switch <id>` exits 0 for a configured tailnet, so an
@@ -92,6 +93,8 @@ line reaches the host network. The only line that routes the traffic is a commen
   variable does not move the shell into the namespace.
 - **FR-skills-36** — `hydrascale env <id>` prints a comment above the function `hstn` that
   states that `hydrascale exec` needs root.
+- **FR-skills-37** — `hydrascale switch <id>` prints the line
+  `Both forms run ip netns exec, which needs root.`
 
 ### The skill files
 
