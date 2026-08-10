@@ -437,8 +437,8 @@ func cheatSheet() string {
 	return "\nHow to use your tailnets:\n" +
 		"  Run a command:            sudo hydrascale exec <id> -- <cmd>\n" +
 		"  Quick tools:              hydrascale ssh|ping|tailscale <id> ...\n" +
-		"  Define the function hstn: sudo -s, then eval \"$(hydrascale env <id>)\"\n" +
-		"  Run a command with hstn:  hstn <cmd>\n" +
+		"  Define the function hstn: eval \"$(hydrascale env <id>)\"\n" +
+		"  Run a command with hstn:  hstn <cmd>   # hstn calls sudo\n" +
 		"  Print the namespace name: hydrascale switch <id>\n" +
 		"  Run a service in-ns:      hydrascale wrap <service> <id>\n"
 }
