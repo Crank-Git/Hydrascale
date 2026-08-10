@@ -2,8 +2,8 @@
 id: agent-skills
 feature: Agent skills for the operator, and the two command defects they expose
 epic: "Epic 10: Agent skills"
-status: issued
-issues: [247, 248, 249, 250, 251, 252]
+status: built
+issues: [247, 248, 249, 250, 251, 252, 261, 263, 265, 267]
 mockups: []
 ---
 
