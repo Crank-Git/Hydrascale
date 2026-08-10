@@ -407,9 +407,9 @@ func switchCmd() *cobra.Command {
 				return fmt.Errorf("tailnet %s not found", tailnetID)
 			}
 
-			// A child process cannot move its parent shell into a namespace, therefore
-			// the command prints the routing forms rather than a state change. See
-			// FR-skills-1 and FR-skills-2.
+			// A child process cannot move its parent shell into a namespace.
+			// The command therefore prints the routing forms rather than a state change.
+			// See FR-skills-1 and FR-skills-2.
 			nsName := namespaces.GetNamespaceName(tailnetID)
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"The tailnet %s uses the namespace %s.\n"+

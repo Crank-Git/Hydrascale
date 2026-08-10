@@ -41,7 +41,7 @@ func runSwitch(t *testing.T, tailnetID string) (string, error) {
 }
 
 func TestSwitchCmd(t *testing.T) {
-	t.Run("summarises the command as a print that changes no state", func(t *testing.T) {
+	t.Run("states in the summary that the command changes no state", func(t *testing.T) {
 		const want = "Print the namespace name for a tailnet (changes no state)"
 		if got := switchCmd().Short; got != want {
 			t.Errorf("Short = %q, want %q", got, want)
