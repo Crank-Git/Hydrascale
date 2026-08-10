@@ -34,8 +34,9 @@ the daemon.
 | `hydrascale ssh <id> <target>` | `tailscale ssh` reaches the peer `<target>` from that namespace. |
 | `hydrascale wrap <service-name> <tailnet-id>` | The command prints a systemd drop-in that runs a service inside the namespace. |
 
-Each form takes the identifier of the tailnet as its first argument. Read that identifier
-from `hydrascale list`.
+The first four forms take the identifier of the tailnet as the first argument.
+`hydrascale wrap` takes it as the second argument. Read that identifier from
+`hydrascale list`.
 
 ## The separator `--`
 
@@ -57,8 +58,8 @@ hydrascale ssh personal peer
 hydrascale wrap nginx personal
 ```
 
-`hydrascale exec` runs `ip netns exec`, which needs root. Print the form with `sudo` for
-the operator when the account holds no root permission.
+`hydrascale exec` runs `ip netns exec`, which needs root. When the account holds no root
+permission, print the form with `sudo` for the operator.
 
 ## `hydrascale switch` changes no state
 
@@ -84,6 +85,6 @@ the daemon runs on another host:
 ssh <host> hydrascale exec <id> -- <command>
 ```
 
-Run `ssh <host> hydrascale list` and `ssh <host> hydrascale status` first, for the same
-reason as on the local host. The SSH account needs root permission on `<host>`, because
+Run `ssh <host> hydrascale list` and `ssh <host> hydrascale status` first. The reason is
+the same as on the local host. The SSH account needs root permission on `<host>`, because
 `hydrascale exec` runs `ip netns exec` there.
