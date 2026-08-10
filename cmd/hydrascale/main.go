@@ -772,13 +772,17 @@ func envCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "env <tailnet-id>",
 		Short: "Print shell environment for running commands in a tailnet namespace",
-		Long: `Print shell commands that configure the environment for a tailnet namespace.
-Use with eval to set up your shell:
+		Long: `Print the shell lines for a tailnet namespace.
+An environment variable does not move the shell into the namespace. A command reaches the
+tailnet through hydrascale exec.
 
-  eval $(hydrascale env personal)
-  curl http://my-tailscale-host:8080
+The output holds three exports and a shell function named hstn. The function hstn runs one
+command in the namespace of the tailnet:
 
-Or use with any command:
+  eval "$(hydrascale env personal)"
+  hstn curl http://my-tailscale-host:8080
+
+The direct form needs no function:
   hydrascale exec personal -- curl http://my-tailscale-host:8080`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -786,12 +790,17 @@ Or use with any command:
 			nsName := namespaces.GetNamespaceName(tailnetID)
 			socketPath := daemon.SocketPath(tailnetID)
 
-			fmt.Printf("export HYDRASCALE_TAILNET=%s\n", tailnetID)
-			fmt.Printf("export HYDRASCALE_NAMESPACE=%s\n", nsName)
-			fmt.Printf("export TAILSCALE_SOCKET=%s\n", socketPath)
-			fmt.Printf("# Run commands in this namespace with:\n")
-			fmt.Printf("#   sudo ip netns exec %s <command>\n", nsName)
-			fmt.Printf("# Or use: hydrascale exec %s -- <command>\n", tailnetID)
+			// A script reads the three exports, so the command keeps them. No export
+			// moves the shell into the namespace, so the command also prints the
+			// function hstn. See FR-skills-5 through FR-skills-7.
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "export HYDRASCALE_TAILNET=%s\n", tailnetID)
+			fmt.Fprintf(out, "export HYDRASCALE_NAMESPACE=%s\n", nsName)
+			fmt.Fprintf(out, "export TAILSCALE_SOCKET=%s\n", socketPath)
+			fmt.Fprintf(out, "# An environment variable does not move the shell into the namespace.\n")
+			fmt.Fprintf(out, "# The function hstn runs one command in the namespace:\n")
+			fmt.Fprintf(out, "#   hstn curl http://my-tailscale-host:8080\n")
+			fmt.Fprintf(out, "hstn() { hydrascale exec %s -- \"$@\"; }\n", tailnetID)
 			return nil
 		},
 	}
