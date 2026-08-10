@@ -82,7 +82,7 @@ func TestSwitchCmd(t *testing.T) {
 		}
 	})
 
-	t.Run("calls sudo in the exec routing form", func(t *testing.T) {
+	t.Run("prints sudo in the exec routing form", func(t *testing.T) {
 		out, _ := runSwitch(t, configuredTailnet)
 		want := "sudo hydrascale exec " + configuredTailnet + " -- <command>"
 		if !strings.Contains(out, want) {
@@ -90,7 +90,7 @@ func TestSwitchCmd(t *testing.T) {
 		}
 	})
 
-	t.Run("calls sudo in the tailscale routing form", func(t *testing.T) {
+	t.Run("prints sudo in the tailscale routing form", func(t *testing.T) {
 		out, _ := runSwitch(t, configuredTailnet)
 		want := "sudo hydrascale tailscale " + configuredTailnet + " -- <arguments>"
 		if !strings.Contains(out, want) {
