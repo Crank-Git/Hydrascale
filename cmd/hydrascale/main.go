@@ -776,6 +776,9 @@ func envCmd() *cobra.Command {
 An environment variable does not move the shell into the namespace. A command reaches the
 tailnet through hydrascale exec.
 
+hydrascale exec runs ip netns exec, which needs root. The function hstn calls sudo, so an
+account that holds no root permission runs it.
+
 The output holds three exports and a shell function named hstn. The function hstn runs one
 command in the namespace of the tailnet:
 
@@ -783,7 +786,7 @@ command in the namespace of the tailnet:
   hstn curl http://my-tailscale-host:8080
 
 The direct form needs no function:
-  hydrascale exec personal -- curl http://my-tailscale-host:8080`,
+  sudo hydrascale exec personal -- curl http://my-tailscale-host:8080`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tailnetID := args[0]
@@ -793,14 +796,20 @@ The direct form needs no function:
 			// A script reads the three exports, so the command keeps them. No export
 			// moves the shell into the namespace, so the command also prints the
 			// function hstn. See FR-skills-5 through FR-skills-7.
+			//
+			// The function calls sudo, because ip netns exec needs root. sudo runs a
+			// binary and never sees a shell function, so the operator cannot repair
+			// the privilege with sudo hstn. Issue #263 measured the failure.
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "export HYDRASCALE_TAILNET=%s\n", tailnetID)
 			fmt.Fprintf(out, "export HYDRASCALE_NAMESPACE=%s\n", nsName)
 			fmt.Fprintf(out, "export TAILSCALE_SOCKET=%s\n", socketPath)
 			fmt.Fprintf(out, "# An environment variable does not move the shell into the namespace.\n")
+			fmt.Fprintf(out, "# hydrascale exec runs ip netns exec, which needs root.\n")
+			fmt.Fprintf(out, "# The function hstn calls sudo, so an account that holds no root permission runs it.\n")
 			fmt.Fprintf(out, "# The function hstn runs one command in the namespace:\n")
 			fmt.Fprintf(out, "#   hstn curl http://my-tailscale-host:8080\n")
-			fmt.Fprintf(out, "hstn() { hydrascale exec %s -- \"$@\"; }\n", tailnetID)
+			fmt.Fprintf(out, "hstn() { sudo hydrascale exec %s -- \"$@\"; }\n", tailnetID)
 			return nil
 		},
 	}

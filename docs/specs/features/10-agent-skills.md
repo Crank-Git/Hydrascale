@@ -87,9 +87,11 @@ line reaches the host network. The only line that routes the traffic is a commen
 - **FR-skills-5** — The `Long` help of `hydrascale env` holds no `eval` example that is
   followed by a bare command.
 - **FR-skills-6** — `hydrascale env <id>` prints a shell function named `hstn` that runs
-  `hydrascale exec <id> -- "$@"`.
+  `sudo hydrascale exec <id> -- "$@"`.
 - **FR-skills-7** — The `Long` help of `hydrascale env` states that an environment
   variable does not move the shell into the namespace.
+- **FR-skills-36** — `hydrascale env <id>` prints a comment above the function `hstn` that
+  states that `hydrascale exec` needs root.
 
 ### The skill files
 
