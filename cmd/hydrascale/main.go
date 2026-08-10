@@ -798,8 +798,8 @@ The direct form needs no function:
 			// function hstn. See FR-skills-5 through FR-skills-7.
 			//
 			// The function calls sudo, because ip netns exec needs root. sudo runs a
-			// binary and never sees a shell function, so the operator cannot repair
-			// the privilege with sudo hstn. Issue #263 measured the failure.
+			// binary and never sees a shell function. sudo hstn therefore adds no
+			// root permission. Issue #263 measured the failure.
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "export HYDRASCALE_TAILNET=%s\n", tailnetID)
 			fmt.Fprintf(out, "export HYDRASCALE_NAMESPACE=%s\n", nsName)

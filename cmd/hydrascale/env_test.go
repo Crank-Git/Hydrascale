@@ -52,7 +52,7 @@ func TestEnvCmd(t *testing.T) {
 		}
 	})
 
-	t.Run("names the privilege in a comment above the function", func(t *testing.T) {
+	t.Run("names the need for root in a comment above the function", func(t *testing.T) {
 		out, _ := runEnv(t, envTailnet)
 		const comment = "# hydrascale exec runs ip netns exec, which needs root."
 		commentAt := strings.Index(out, comment)
@@ -68,7 +68,7 @@ func TestEnvCmd(t *testing.T) {
 		}
 	})
 
-	t.Run("states the privilege in the help of the command", func(t *testing.T) {
+	t.Run("states the need for root in the help of the command", func(t *testing.T) {
 		const want = "hydrascale exec runs ip netns exec, which needs root."
 		if got := envCmd().Long; !strings.Contains(got, want) {
 			t.Errorf("Long = %q, want it to contain %q", got, want)
