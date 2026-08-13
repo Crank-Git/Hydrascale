@@ -57,6 +57,20 @@ func (a Action) String() string {
 	return fmt.Sprintf("%s %s (%s)", a.Type, a.TailnetID, a.NsName)
 }
 
+// IsPeriodicSync reports whether the reconciler emits this action on every cycle of a
+// healthy tailnet, rather than for a difference between the desired state and the host.
+//
+// Such an action holds its own comparison and writes only what the host lacks, therefore
+// it changes nothing on a host that already matches. `hydrascale diff` states what would
+// change, so it counts these apart: a host that needs no change reported four actions and
+// the operator read no difference between a pending change and none. See issue #274.
+//
+// A new action that the reconciler emits on every cycle belongs in this list, so that
+// `hydrascale diff` keeps its meaning.
+func (t ActionType) IsPeriodicSync() bool {
+	return t == ActionSyncRoutes || t == ActionSyncHostAccess
+}
+
 // ErrTailnetNotFound is returned by GetTailscaleStatus when the tailnet ID is not in config.
 var ErrTailnetNotFound = errors.New("tailnet not found")
 
