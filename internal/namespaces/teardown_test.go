@@ -109,8 +109,8 @@ func TestTeardownHostAccessReturnsEveryFailedStepTogether(t *testing.T) {
 	if got := strings.Count(err.Error(), "\n") + 1; got != 3 {
 		t.Errorf("TeardownHostAccess returned %d errors, want 3: %v", got, err)
 	}
-	if len(rec.Calls()) != 3 {
-		t.Errorf("TeardownHostAccess ran %d commands, want 3", len(rec.Calls()))
+	if len(rec.Calls()) != 4 {
+		t.Errorf("TeardownHostAccess ran %d commands, want 4", len(rec.Calls()))
 	}
 }
 
@@ -146,6 +146,10 @@ func hostAccessFixture(t *testing.T, nsName, infraSubnet string, index int) (*ex
 	}
 
 	rec := execx.NewRecorder(t)
+	// The forwarding value is not a rule, therefore it stays out of `want`: a caller that
+	// scripts `want` with `absent` states that a rule is already gone, and that result
+	// carries no meaning for a sysctl write.
+	rec.Script(execx.Result{}, "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=0")
 	return rec, &RealManager{Runner: rec}, want
 }
 
@@ -203,6 +207,8 @@ func scriptHostAccessSetup(t *testing.T, rec *execx.Recorder, nsName, infraSubne
 	if err != nil {
 		t.Fatalf("VethIPs: %v", err)
 	}
+
+	rec.Script(execx.Result{}, "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=1")
 
 	for _, op := range []string{"-C", "-A"} {
 		res := execx.Result{}
@@ -435,5 +441,71 @@ func TestReapStaleRulesKeepsARuleOfTheOperator(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("ReapStaleRules removed %d rules, want 0", count)
+	}
+}
+
+// hasCall reports whether calls holds the command name with exactly args.
+func hasCall(calls []execx.Call, name string, args ...string) bool {
+	for _, c := range calls {
+		if c.Name == name && slices.Equal(c.Args, args) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSetupHostAccessEnablesForwardingInsideTheNamespace(t *testing.T) {
+	// Issue #272. The namespace holds the masquerade rule and the two DNS rules, and a
+	// packet from the host leaves on tailscale0. That step is a forward step, and a new
+	// namespace holds net.ipv4.ip_forward=0, therefore the kernel dropped every packet of
+	// the host before POSTROUTING. Host access and the unified resolver both failed.
+	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
+	index := VethIndex(nsName)
+
+	rec := execx.NewRecorder(t)
+	scriptHostAccessSetup(t, rec, nsName, infraSubnet, index)
+
+	m := &RealManager{Runner: rec}
+	if err := m.SetupHostAccess(nsName, index, infraSubnet); err != nil {
+		t.Fatalf("SetupHostAccess: %v", err)
+	}
+
+	if !hasCall(rec.Calls(), "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=1") {
+		t.Errorf("SetupHostAccess wrote no forwarding value in %s; calls: %v", nsName, rec.Calls())
+	}
+}
+
+func TestSetupHostAccessReturnsTheErrorWhenTheForwardingWriteFails(t *testing.T) {
+	// The rules reach no packet without the forwarding value, therefore this step returns
+	// its error rather than a log line.
+	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
+	index := VethIndex(nsName)
+
+	rec := execx.NewRecorder(t)
+	scriptHostAccessSetup(t, rec, nsName, infraSubnet, index)
+	rec.Script(broken, "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=1")
+
+	m := &RealManager{Runner: rec}
+	if err := m.SetupHostAccess(nsName, index, infraSubnet); err == nil {
+		t.Fatal("SetupHostAccess returned no error for a failed forwarding write")
+	}
+}
+
+func TestTeardownHostAccessDisablesForwardingInsideTheNamespace(t *testing.T) {
+	// The operator set host_access to false, therefore the namespace forwards no packet of
+	// the host again.
+	const nsName, infraSubnet = "ns-team-prod", "10.200.0.0/16"
+	const index = 1
+
+	rec, m, want := hostAccessFixture(t, nsName, infraSubnet, index)
+	for _, c := range want {
+		rec.Script(execx.Result{}, c.Name, c.Args...)
+	}
+
+	if err := m.TeardownHostAccess(nsName, index, infraSubnet); err != nil {
+		t.Fatalf("TeardownHostAccess: %v", err)
+	}
+	if !hasCall(rec.Calls(), "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=0") {
+		t.Errorf("TeardownHostAccess wrote no forwarding value in %s; calls: %v", nsName, rec.Calls())
 	}
 }
