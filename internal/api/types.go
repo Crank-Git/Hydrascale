@@ -78,7 +78,13 @@ type PolicyTailnet struct {
 	Kind              string `json:"kind"`
 	CredentialPresent bool   `json:"credential_present"`
 	WriteAvailable    bool   `json:"write_available"`
-	Reason            string `json:"reason,omitempty"`
+	// CredentialState carries one of CredentialAbsent, CredentialRejected, and
+	// CredentialUsable. CredentialPresent and WriteAvailable state the presence of a
+	// credential, which FR-policy-5 and FR-policy-11 require, and a credential that exists
+	// and works for no request holds both of those the same way a working one does.
+	// See issue #276.
+	CredentialState string `json:"credential_state"`
+	Reason          string `json:"reason,omitempty"`
 }
 
 // PolicyListResponse is the JSON response for GET /api/policy.

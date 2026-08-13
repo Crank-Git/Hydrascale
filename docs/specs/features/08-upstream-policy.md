@@ -52,6 +52,13 @@ rather than hiding it.
 - **FR-policy-4** — The control API never returns a credential value.
 - **FR-policy-5** — The control API returns, per tailnet, whether a credential is
   present and which control server kind it targets.
+- **FR-policy-5a** — The control API returns, per tailnet, one of three credential states:
+  the tailnet holds no credential, the control server takes no request with the credential,
+  or the credential is usable. The state names no part of a credential value.
+- **FR-policy-5b** — The daemon states that the control server takes no request with a
+  Tailscale credential when the client secret carries no prefix `tskey-client`, and it names
+  that prefix. A device authentication key carries the prefix `tskey-auth` and reaches no
+  API.
 - **FR-policy-6** — The console can write a credential through `PUT /api/policy/{id}/credentials`.
 - **FR-policy-7** — The daemon writes the secrets file with mode `0600` and owner root.
 - **FR-policy-8** — The daemon never logs a credential value.
@@ -62,7 +69,8 @@ rather than hiding it.
   as text.
 - **FR-policy-10** — The response states the control server kind, `tailscale` or
   `headscale`.
-- **FR-policy-11** — The response states whether a write is available.
+- **FR-policy-11** — The response states whether a write is available. A credential that
+  the control server refuses makes no write available.
 - **FR-policy-12** — For a Tailscale tailnet, the response carries the `ETag` value that
   the control server returned.
 - **FR-policy-13** — When no credential is configured, the route returns HTTP 409 and a

@@ -24,6 +24,19 @@ const (
 // EventPolicyPushed is the event kind of a policy write. See FR-policy-20.
 const EventPolicyPushed = "policy.pushed"
 
+// The three credential states that one row of GET /api/policy carries. See issue #276.
+const (
+	// CredentialAbsent states that the tailnet holds no credential.
+	CredentialAbsent = "absent"
+	// CredentialRejected states that the tailnet holds a credential that the control
+	// server accepts for no request. The shape of the value states it before any request,
+	// and the answer of the control server states it after one.
+	CredentialRejected = "rejected"
+	// CredentialUsable states that the tailnet holds a credential of the right shape that
+	// the control server refused for no request yet.
+	CredentialUsable = "usable"
+)
+
 // tailnetOfAccessToken is the tailnet name that the daemon sends to the Tailscale API.
 // The dash names the default tailnet of the access token, which the description of the
 // path parameter tailnet states in the Tailscale OpenAPI schema, retrieved 2026-08-05.
@@ -50,7 +63,7 @@ func (s *Server) handlePolicyList(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("failed to read the secrets file: %v", err), http.StatusInternalServerError)
 			return
 		}
-		rows = append(rows, policyRow(tn.ID, controlServerKind(cfg, tn), cred))
+		rows = append(rows, policyRow(tn.ID, controlServerKind(cfg, tn), cred, s.credentialRejection(tn.ID)))
 	}
 	writeJSON(w, PolicyListResponse{Tailnets: rows})
 }
@@ -68,6 +81,7 @@ func (s *Server) handlePolicyRead(w http.ResponseWriter, r *http.Request) {
 
 	if target.kind == KindHeadscale {
 		document, err := s.headscaleClient(target).Read(r.Context())
+		s.recordCredentialResult(target.id, err)
 		if err != nil {
 			writePolicyError(w, "the policy read", err)
 			return
@@ -77,6 +91,7 @@ func (s *Server) handlePolicyRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	document, err := s.tailscaleClient(target).ReadPolicy(r.Context())
+	s.recordCredentialResult(target.id, err)
 	if err != nil {
 		writePolicyError(w, "the policy read", err)
 		return
@@ -108,6 +123,7 @@ func (s *Server) handlePolicyValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.validate(r.Context(), target, req.Document)
+	s.recordCredentialResult(target.id, err)
 	if err != nil {
 		writePolicyError(w, "the policy validate", err)
 		return
@@ -208,7 +224,11 @@ func (s *Server) handlePolicyCredentials(w http.ResponseWriter, r *http.Request)
 		http.Error(w, fmt.Sprintf("failed to write the secrets file: %v", err), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, policyRow(target.id, target.kind, cred))
+	// The stored rejection describes the credential that this write replaced, therefore it
+	// describes the new one never. The next call to the control server records its own
+	// result. See issue #276.
+	s.recordCredentialResult(target.id, nil)
+	writeJSON(w, policyRow(target.id, target.kind, cred, ""))
 }
 
 // validate returns the result of the validate route of the control server.
@@ -322,15 +342,54 @@ func controlServerKind(cfg *config.Config, tn config.Tailnet) string {
 // The write availability of a Headscale tailnet states that the daemon holds the
 // credential. The daemon learns the policy mode of that control server from the answer to
 // a write, because the control server exposes no route that states the mode.
-func policyRow(id, kind string, cred secrets.Tailnet) PolicyTailnet {
-	reason := missingCredential(kind, id, cred)
+// rejection carries the message of the last call that the control server refused for this
+// tailnet, and it is empty when no call was refused.
+func policyRow(id, kind string, cred secrets.Tailnet, rejection string) PolicyTailnet {
+	if reason := missingCredential(kind, id, cred); reason != "" {
+		return PolicyTailnet{
+			ID:              id,
+			Kind:            kind,
+			CredentialState: CredentialAbsent,
+			Reason:          reason,
+		}
+	}
+	if reason := credentialRefused(kind, cred, rejection); reason != "" {
+		// The credential is present, therefore CredentialPresent stays true and
+		// FR-policy-5 holds. The write is not available, because the control server takes
+		// no request that carries this credential.
+		return PolicyTailnet{
+			ID:                id,
+			Kind:              kind,
+			CredentialPresent: true,
+			CredentialState:   CredentialRejected,
+			Reason:            reason,
+		}
+	}
 	return PolicyTailnet{
 		ID:                id,
 		Kind:              kind,
-		CredentialPresent: reason == "",
-		WriteAvailable:    reason == "",
-		Reason:            reason,
+		CredentialPresent: true,
+		WriteAvailable:    true,
+		CredentialState:   CredentialUsable,
 	}
+}
+
+// credentialRefused returns the reason that the control server takes no request with this
+// credential, and it returns an empty string when no reason is known.
+//
+// The shape of the value states the reason before any request runs. The answer of the
+// control server states it after one, and that answer reaches this function as rejection.
+// See issue #276.
+func credentialRefused(kind string, cred secrets.Tailnet, rejection string) string {
+	if kind == KindTailscale {
+		if problem := policy.TailscaleSecretProblem(cred.TailscaleOAuthClientSecret); problem != "" {
+			return problem
+		}
+	}
+	if rejection != "" {
+		return "the control server refused the credential: " + rejection
+	}
+	return ""
 }
 
 // missingCredential returns a message that names the credential that the tailnet needs,
@@ -411,4 +470,33 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: message}); err != nil {
 		log.Printf("api: encode the refusal: %v", err)
 	}
+}
+
+// recordCredentialResult keeps the result of one call to a control server for the tailnet
+// id. It stores the message of a call that the control server refused because the
+// credential itself is not valid, and it clears the entry after a call that succeeds.
+//
+// The status 401 alone marks the credential. A 403 states that the credential is valid and
+// that its scopes do not cover the request, which is a different repair. See issue #276.
+func (s *Server) recordCredentialResult(id string, err error) {
+	s.credMu.Lock()
+	defer s.credMu.Unlock()
+	if s.credRejections == nil {
+		s.credRejections = make(map[string]string)
+	}
+	if err == nil {
+		delete(s.credRejections, id)
+		return
+	}
+	var apiErr *policy.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized {
+		s.credRejections[id] = apiErr.Message
+	}
+}
+
+// credentialRejection returns the message that recordCredentialResult stored for id.
+func (s *Server) credentialRejection(id string) string {
+	s.credMu.Lock()
+	defer s.credMu.Unlock()
+	return s.credRejections[id]
 }

@@ -64,3 +64,31 @@ func LoadCredential(path, tailnetID string) (secrets.Tailnet, error) {
 	}
 	return cred, nil
 }
+
+// TailscaleClientSecretPrefix is the prefix of a Tailscale OAuth client secret. The admin
+// console of the control server writes a secret that starts with this value.
+const TailscaleClientSecretPrefix = "tskey-client"
+
+// tailscaleAuthKeyPrefix is the prefix of a device authentication key. That key enrols a
+// device with `tailscale up --authkey`, and it reaches no API.
+const tailscaleAuthKeyPrefix = "tskey-auth"
+
+// TailscaleSecretProblem returns a message that states why the control server accepts this
+// Tailscale OAuth client secret for no request, and it returns an empty string for a secret
+// whose shape is right. It returns an empty string for an empty secret, because a tailnet
+// that holds no credential is a separate state.
+//
+// The check reads the prefix alone, and the message names no part of the value.
+//
+// The control server answers a device authentication key with HTTP 401 and the message
+// "API token invalid", which names neither the mistake nor the value. An operator wrote
+// such a key on 2026-08-13 and read `read and write` on the policy view. See issue #276.
+func TailscaleSecretProblem(secret string) string {
+	if secret == "" || strings.HasPrefix(secret, TailscaleClientSecretPrefix) {
+		return ""
+	}
+	if strings.HasPrefix(secret, tailscaleAuthKeyPrefix) {
+		return "the value is a device authentication key, which enrols a device and reaches no API: generate an OAuth client in the admin console of the control server, whose secret starts with " + TailscaleClientSecretPrefix
+	}
+	return "the value is no Tailscale OAuth client secret: such a secret starts with " + TailscaleClientSecretPrefix
+}
