@@ -9,6 +9,7 @@
 // authentication. An unescaped document, an unescaped identifier, and an unescaped message
 // of the daemon are each script injection into this page. See SA-5 of docs/specs/spec.md.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -897,4 +898,15 @@ test("the console sends one request when the control server rate-limits the push
   assert.equal(writes, 1);
   assert.equal(entryOf(state, "jbones").stage, "push-failed");
   assert.match(resultModel(entryOf(state, "jbones")).message, /rate limit exceeded/);
+});
+
+test("the stylesheet hides every element that carries the attribute hidden", async () => {
+  // Issue #278. The editor writes `chip.hidden = !state.edited(id)`, therefore the state
+  // of the element is correct. A class selector holds a higher specificity than the rule
+  // [hidden]{display:none} of the user agent, so `.chip{display:inline-flex}` won the
+  // cascade and the word `edited` painted on a document that holds no edit. A guard for
+  // one class repeats the defect for the next class, therefore the rule covers every
+  // element.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\[hidden\]\{display:none *!important\}/);
 });
