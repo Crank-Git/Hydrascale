@@ -1062,11 +1062,24 @@ func (r *Reconciler) ensureForwardPath(desired map[string]config.Tailnet, actual
 }
 
 // checkNamespaceForwarding records access.namespace_forwarding for each namespace whose
-// net.ipv4.ip_forward is not 0. The finding SA-48 states that the containment of a packet
-// inside the second namespace is a kernel default. A namespace that forwards turns the
-// finding SA-8 into a path between two tailnets, therefore the operator sees an event.
+// net.ipv4.ip_forward differs from the value that the configuration requires.
+//
+// A tailnet whose host_access is true requires the value 1. The namespace forwards a packet
+// of the host to a peer, and it forwards the query that the unified resolver sends to
+// 100.100.100.100. Both features failed while the value was 0. See issue #272.
+//
+// A tailnet that the operator keeps isolated requires the value 0.
+//
+// The finding SA-48 states that the containment of a packet inside the second namespace is
+// a kernel default. The deny happens in HYDRASCALE-FWD on the host before the packet reaches
+// the second namespace, therefore the containment does not depend on this value. The event
+// reports a value that the configuration did not ask for.
 func (r *Reconciler) checkNamespaceForwarding(desired map[string]config.Tailnet) {
 	if r.reaper == nil {
+		return
+	}
+	cfg, err := config.LoadConfig(r.configPath)
+	if err != nil {
 		return
 	}
 	for id := range desired {
@@ -1075,8 +1088,13 @@ func (r *Reconciler) checkNamespaceForwarding(desired map[string]config.Tailnet)
 		if err != nil {
 			continue
 		}
-		if value != "0" {
-			r.emit("access.namespace_forwarding", id, fmt.Sprintf("net.ipv4.ip_forward is %s in %s", value, nsName))
+		want := "0"
+		if cfg.TailnetHostAccess(id) {
+			want = "1"
+		}
+		if value != want {
+			r.emit("access.namespace_forwarding", id,
+				fmt.Sprintf("net.ipv4.ip_forward is %s in %s, and the configuration requires %s", value, nsName, want))
 		}
 	}
 }

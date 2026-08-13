@@ -391,15 +391,28 @@ func SetupHostAccess(nsName string, index int, infraSubnet string) error {
 }
 
 // SetupHostAccess adds namespace-side iptables rules for host access:
+// - net.ipv4.ip_forward=1 so the namespace forwards the packets of the host
 // - Masquerade on tailscale0 so host traffic is forwarded to peers
 // - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
 // All rules are idempotent (check before insert).
+//
+// The caller reaches this function only for a tailnet whose host_access is true, therefore
+// a tailnet that the operator keeps isolated holds net.ipv4.ip_forward=0.
 func (m *RealManager) SetupHostAccess(nsName string, index int, infraSubnet string) error {
 	_, nsVeth := VethNames(nsName)
 	_, nsIPRange, _, _, err := VethIPs(infraSubnet, index)
 	if err != nil {
 		return err
+	}
+
+	// A packet of the host arrives on the veth device and leaves on tailscale0, which is a
+	// forward step. A new namespace holds net.ipv4.ip_forward=0, so the kernel dropped that
+	// packet before POSTROUTING and the masquerade rule below reached nothing. Host access
+	// and the unified resolver both failed for that reason. See issue #272.
+	// This step returns its error, because every rule below it reaches no packet without it.
+	if out, err := m.run("ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+		return fmt.Errorf("host-access: enable forwarding in %s: %v (%s)", nsName, err, out)
 	}
 
 	// Masquerade on tailscale0
@@ -523,7 +536,16 @@ func (m *RealManager) TeardownHostAccess(nsName string, index int, infraSubnet s
 		return fmt.Errorf("host-access: veth IPs for %s: %w", nsName, err)
 	}
 
+	// The operator set host_access to false, therefore the namespace forwards no packet of
+	// the host again. A sysctl write is not a rule delete, so it does not run through
+	// deleteRule, whose "rule does not exist" result carries no meaning here. See issue #272.
+	var forwarding error
+	if out, err := m.run("ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=0"); err != nil {
+		forwarding = fmt.Errorf("host-access: disable forwarding in %s: %v (%s)", nsName, err, out)
+	}
+
 	return errors.Join(
+		forwarding,
 		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE"),
 		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
 		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
