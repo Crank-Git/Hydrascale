@@ -181,6 +181,7 @@ func TestParseRouteGetOutput(t *testing.T) {
 		input      string
 		wantDev    string
 		wantHasVia bool
+		wantTable  string
 	}{
 		{
 			name:       "directly-connected LAN (no via)",
@@ -212,15 +213,27 @@ func TestParseRouteGetOutput(t *testing.T) {
 			wantDev:    "eth0",
 			wantHasVia: false,
 		},
+		{
+			// Issue #273. The host runs its own tailscaled, which answers for the whole
+			// Tailscale range out of the policy routing table 52.
+			name:       "answered from a policy routing table",
+			input:      "fd7a:115c:a1e0::2735:6b25 from :: dev tailscale0 table 52 src fd7a:115c:a1e0::b936:fe73 metric 1024 pref medium",
+			wantDev:    "tailscale0",
+			wantHasVia: false,
+			wantTable:  "52",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dev, hasVia := parseRouteGetOutput(tt.input)
+			dev, hasVia, table := parseRouteGetOutput(tt.input)
 			if dev != tt.wantDev {
 				t.Errorf("dev: got %q, want %q", dev, tt.wantDev)
 			}
 			if hasVia != tt.wantHasVia {
 				t.Errorf("hasVia: got %v, want %v", hasVia, tt.wantHasVia)
+			}
+			if table != tt.wantTable {
+				t.Errorf("table: got %q, want %q", table, tt.wantTable)
 			}
 		})
 	}
