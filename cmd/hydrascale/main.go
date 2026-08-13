@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -128,6 +129,46 @@ func newReconciler() *reconciler.Reconciler {
 
 // --- Declarative commands ---
 
+// splitActions separates the actions that change the host from the actions that the
+// reconciler emits on every cycle. See reconciler.ActionType.IsPeriodicSync.
+func splitActions(actions []reconciler.Action) (changing, periodic []reconciler.Action) {
+	for _, a := range actions {
+		if a.Type.IsPeriodicSync() {
+			periodic = append(periodic, a)
+			continue
+		}
+		changing = append(changing, a)
+	}
+	return changing, periodic
+}
+
+// writeActionReport writes what would change. `heading` names the report and `none` names
+// the result for a host that needs no change.
+//
+// The report counts the periodic actions apart. Each one holds its own comparison, so it
+// changes nothing on a host that already matches, and a report that counts it states a
+// change that would not happen. See issue #274.
+func writeActionReport(w io.Writer, actions []reconciler.Action, heading, none string) {
+	changing, periodic := splitActions(actions)
+
+	if len(changing) == 0 {
+		fmt.Fprintln(w, none)
+	} else {
+		fmt.Fprintf(w, heading+"\n", len(changing))
+		for _, a := range changing {
+			fmt.Fprintf(w, "  %s\n", a)
+		}
+	}
+
+	if len(periodic) > 0 {
+		fmt.Fprintf(w, "\nThe daemon runs %d periodic sync action(s) on each cycle. Each one\n"+
+			"compares the host against the desired set and writes only a difference:\n", len(periodic))
+		for _, a := range periodic {
+			fmt.Fprintf(w, "  %s\n", a)
+		}
+	}
+}
+
 func diffCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "diff",
@@ -142,17 +183,9 @@ func diffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			actions := r.Diff(desired, actual)
-
-			if len(actions) == 0 {
-				fmt.Println("No changes needed. Desired state matches actual state.")
-				return nil
-			}
-
-			fmt.Printf("%d action(s) needed:\n", len(actions))
-			for _, a := range actions {
-				fmt.Printf("  %s\n", a)
-			}
+			writeActionReport(cmd.OutOrStdout(), r.Diff(desired, actual),
+				"%d action(s) needed:",
+				"No changes needed. Desired state matches actual state.")
 			return nil
 		},
 	}
@@ -176,17 +209,9 @@ func applyCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				actions := r.Diff(desired, actual)
-
-				if len(actions) == 0 {
-					fmt.Println("No changes needed (dry run).")
-					return nil
-				}
-
-				fmt.Printf("%d action(s) would be taken (dry run):\n", len(actions))
-				for _, a := range actions {
-					fmt.Printf("  %s\n", a)
-				}
+				writeActionReport(cmd.OutOrStdout(), r.Diff(desired, actual),
+					"%d action(s) would be taken (dry run):",
+					"No changes needed (dry run).")
 				return nil
 			}
 

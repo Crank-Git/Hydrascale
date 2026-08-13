@@ -624,3 +624,27 @@ func TestReconcileRecordsANamespaceThatDoesNotForwardForHostAccess(t *testing.T)
 		t.Errorf("the event states %q, and it names no required value", got[0])
 	}
 }
+
+func TestThePeriodicSyncActionsAreTheTwoThatEveryCycleEmits(t *testing.T) {
+	// Issue #274. `hydrascale diff` counts these apart, therefore the set is asserted here
+	// rather than read from the command.
+	periodic := map[ActionType]bool{
+		ActionSyncRoutes:     true,
+		ActionSyncHostAccess: true,
+	}
+	others := []ActionType{
+		ActionCreateNS, ActionDeleteNS, ActionStartDaemon, ActionStopDaemon,
+		ActionRefreshDNS, ActionTeardownHostAccess, ActionAuthDaemon,
+	}
+
+	for a := range periodic {
+		if !a.IsPeriodicSync() {
+			t.Errorf("%s reports that it is no periodic sync action", a)
+		}
+	}
+	for _, a := range others {
+		if a.IsPeriodicSync() {
+			t.Errorf("%s reports that it is a periodic sync action", a)
+		}
+	}
+}
