@@ -9,6 +9,7 @@
 // authentication. An unescaped document, an unescaped identifier, and an unescaped message
 // of the daemon are each script injection into this page. See SA-5 of docs/specs/spec.md.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -897,4 +898,87 @@ test("the console sends one request when the control server rate-limits the push
   assert.equal(writes, 1);
   assert.equal(entryOf(state, "jbones").stage, "push-failed");
   assert.match(resultModel(entryOf(state, "jbones")).message, /rate limit exceeded/);
+});
+
+test("the stylesheet hides every element that carries the attribute hidden", async () => {
+  // Issue #278. The editor writes `chip.hidden = !state.edited(id)`, therefore the state
+  // of the element is correct. A class selector holds a higher specificity than the rule
+  // [hidden]{display:none} of the user agent, so `.chip{display:inline-flex}` won the
+  // cascade and the word `edited` painted on a document that holds no edit. A guard for
+  // one class repeats the defect for the next class, therefore the rule covers every
+  // element.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\[hidden\]\{display:none *!important\}/);
+});
+
+test("the editor gives the gutter and the text one scrolling box", async () => {
+  // Issue #277. A flex container aligns its items with `stretch`, therefore both children
+  // took the height of the container: the text area then held its own scroll under
+  // overflow-y:hidden and the line numbers stood still while the text moved. The container
+  // scrolls both only while each child keeps its whole height.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+
+  assert.match(style, /\.pol-code\{[^}]*align-items:flex-start/);
+  assert.match(style, /\.pol-code\{[^}]*overflow:auto/);
+  // The text area must not scroll on its own, because its `rows` attribute holds the whole
+  // line count and the container carries the scroll.
+  assert.match(style, /\.pol-doc\{[^}]*overflow-y:hidden/);
+});
+
+test("the editor sizes the text area to the line count of the document", async () => {
+  // The `rows` attribute is what gives the text area its whole height inside the scrolling
+  // box. A document of three lines therefore draws three rows.
+  const state = createPolicyState({ request: async () => documentBody() });
+  state.setList(listBody());
+  state.setDocument("jbones", documentBody());
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.lines, 3);
+  assert.match(editorMarkup(model), /<textarea class="pol-doc mono"[^>]*rows="3"/);
+});
+
+test("a tailnet whose credential the control server refuses reads as rejected", () => {
+  // Issue #276. The row states the presence of a credential, therefore a credential that
+  // exists and works for no request read `read and write` and the operator learned of the
+  // mistake through a failed policy read alone.
+  const body = listBody({
+    tailnets: [{
+      id: "jbones",
+      kind: "tailscale",
+      credential_present: true,
+      write_available: false,
+      credential_state: "rejected",
+      reason: "the value is a device authentication key, which enrols a device and reaches no API: generate an OAuth client in the admin console of the control server, whose secret starts with tskey-client",
+    }],
+  });
+
+  const row = policyRows(body, null)[0];
+  assert.equal(row.word, "credential rejected");
+  assert.equal(row.tone, "crit");
+  assert.match(row.reason, /device authentication key/);
+});
+
+test("the rejected state names the expected prefix to the operator", () => {
+  const body = listBody({
+    tailnets: [{
+      id: "jbones",
+      kind: "tailscale",
+      credential_present: true,
+      write_available: false,
+      credential_state: "rejected",
+      reason: "the value is no Tailscale OAuth client secret: such a secret starts with tskey-client",
+    }],
+  });
+
+  assert.match(policyListMarkup(policyRows(body, null)), /tskey-client/);
+});
+
+test("a usable credential still reads as read and write", () => {
+  const body = listBody({
+    tailnets: [{ id: "jbones", kind: "tailscale", credential_present: true, write_available: true, credential_state: "usable" }],
+  });
+
+  const row = policyRows(body, null)[0];
+  assert.equal(row.word, "read and write");
+  assert.equal(row.tone, "ok");
 });

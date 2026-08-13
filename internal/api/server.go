@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,6 +44,13 @@ type Server struct {
 	// mux holds the JSON routes. The control socket serves it, and the console listener
 	// serves it under /api/, so one route set answers on both. See FR-console-4.
 	mux *http.ServeMux
+
+	// credRejections holds, per tailnet, the message of the last call that the control
+	// server refused because it took no request with that credential. GET /api/policy
+	// reports it, so the console states a credential that exists and works for nothing.
+	// A call that succeeds clears the entry. See issue #276.
+	credMu         sync.Mutex
+	credRejections map[string]string
 
 	// tailscaleBaseURL names the root of the Tailscale API. The daemon leaves it empty,
 	// which selects policy.DefaultTailscaleBaseURL. A test sets it to a local server, so

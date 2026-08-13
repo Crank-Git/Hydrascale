@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"hydrascale/internal/config"
+	"hydrascale/internal/policy"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/secrets"
 )
@@ -760,5 +761,95 @@ func assertNoCredentialValue(t *testing.T, payload []byte) {
 		if bytes.Contains(payload, []byte(value)) {
 			t.Errorf("the response body %s holds the credential value %q", payload, value)
 		}
+	}
+}
+
+func TestThePolicyRowStatesARejectedCredentialForADeviceAuthenticationKey(t *testing.T) {
+	// Issue #276. An operator wrote such a key on 2026-08-13. The row read `read and write`
+	// and the control server answered the token request with HTTP 401.
+	cred := secrets.Tailnet{
+		TailscaleOAuthClientID:     "khjuWjCNTRL",
+		TailscaleOAuthClientSecret: "tskey-auth-khjuWjCNTRL-abcdefghijklmnop",
+	}
+
+	row := policyRow("jbones", KindTailscale, cred, "")
+
+	if row.CredentialState != CredentialRejected {
+		t.Errorf("CredentialState = %q, want %q", row.CredentialState, CredentialRejected)
+	}
+	if !row.CredentialPresent {
+		t.Error("CredentialPresent is false, and the tailnet holds a credential")
+	}
+	if row.WriteAvailable {
+		t.Error("WriteAvailable is true, and the control server takes no request with this credential")
+	}
+	if !strings.Contains(row.Reason, "device authentication key") {
+		t.Errorf("Reason = %q, and it names no device authentication key", row.Reason)
+	}
+}
+
+func TestThePolicyRowStatesAUsableCredentialForAnOAuthClientSecret(t *testing.T) {
+	cred := secrets.Tailnet{
+		TailscaleOAuthClientID:     "khjuWjCNTRL",
+		TailscaleOAuthClientSecret: "tskey-client-khjuWjCNTRL-abcdefghijklmnop",
+	}
+
+	row := policyRow("jbones", KindTailscale, cred, "")
+
+	if row.CredentialState != CredentialUsable {
+		t.Errorf("CredentialState = %q, want %q", row.CredentialState, CredentialUsable)
+	}
+	if !row.WriteAvailable {
+		t.Error("WriteAvailable is false for a credential of the right shape")
+	}
+}
+
+func TestThePolicyRowStatesAnAbsentCredential(t *testing.T) {
+	row := policyRow("jbones", KindTailscale, secrets.Tailnet{}, "")
+
+	if row.CredentialState != CredentialAbsent {
+		t.Errorf("CredentialState = %q, want %q", row.CredentialState, CredentialAbsent)
+	}
+	if row.CredentialPresent {
+		t.Error("CredentialPresent is true for a tailnet that holds no credential")
+	}
+}
+
+func TestThePolicyRowStatesARejectionThatTheControlServerReported(t *testing.T) {
+	// The shape of the value is right, therefore only the answer of the control server
+	// states that the credential works for no request.
+	cred := secrets.Tailnet{
+		TailscaleOAuthClientID:     "khjuWjCNTRL",
+		TailscaleOAuthClientSecret: "tskey-client-khjuWjCNTRL-abcdefghijklmnop",
+	}
+
+	row := policyRow("jbones", KindTailscale, cred, "API token invalid")
+
+	if row.CredentialState != CredentialRejected {
+		t.Errorf("CredentialState = %q, want %q", row.CredentialState, CredentialRejected)
+	}
+	if !strings.Contains(row.Reason, "API token invalid") {
+		t.Errorf("Reason = %q, and it holds no message of the control server", row.Reason)
+	}
+}
+
+func TestTheServerRecordsAndClearsACredentialRejection(t *testing.T) {
+	s := &Server{}
+
+	s.recordCredentialResult("jbones", &policy.APIError{Operation: "the token request", StatusCode: 401, Message: "API token invalid"})
+	if got := s.credentialRejection("jbones"); got != "API token invalid" {
+		t.Errorf("credentialRejection = %q, want the message of the control server", got)
+	}
+
+	// A 403 states that the credential is valid and that its scopes do not cover the
+	// request, which is a different repair.
+	s.recordCredentialResult("havoc", &policy.APIError{Operation: "the policy write", StatusCode: 403, Message: "insufficient scope"})
+	if got := s.credentialRejection("havoc"); got != "" {
+		t.Errorf("credentialRejection = %q for HTTP 403, want an empty string", got)
+	}
+
+	s.recordCredentialResult("jbones", nil)
+	if got := s.credentialRejection("jbones"); got != "" {
+		t.Errorf("credentialRejection = %q after a call that succeeded, want an empty string", got)
 	}
 }

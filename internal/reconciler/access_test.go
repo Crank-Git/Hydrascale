@@ -571,3 +571,80 @@ func TestTheReconcilerReadsNoForwardPathForANamespaceThatIsAbsent(t *testing.T) 
 		t.Errorf("the Reconciler read the forward path of %v, want no read", ns.pathNames)
 	}
 }
+
+// forwardingEvents returns the access.namespace_forwarding events that the Reconciler
+// recorded for one tailnet.
+func forwardingEvents(r *Reconciler, id string) []string {
+	var out []string
+	for _, e := range r.Events() {
+		if e.Type == "access.namespace_forwarding" && e.TailnetID == id {
+			out = append(out, e.Message)
+		}
+	}
+	return out
+}
+
+func TestReconcileRecordsNoEventForANamespaceThatForwardsForHostAccess(t *testing.T) {
+	// Issue #272. Host access and the unified resolver both need net.ipv4.ip_forward=1
+	// inside the namespace, therefore the value 1 is the value that the configuration
+	// requires and it is no finding. The deny happens in HYDRASCALE-FWD on the host.
+	cfgPath := writeAccessConfig(t, "host_access: true\n", "alpha")
+	ns := newMockNS()
+	ns.forwarding = "1"
+	r := newTestReconciler(cfgPath, ns, newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{})
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if got := forwardingEvents(r, "alpha"); len(got) != 0 {
+		t.Errorf("the Reconciler recorded %d events for a namespace that the configuration requires to forward: %v", len(got), got)
+	}
+}
+
+func TestReconcileRecordsANamespaceThatDoesNotForwardForHostAccess(t *testing.T) {
+	// The state of the defect: host_access is true and the namespace forwards no packet,
+	// therefore the host reaches no peer and the resolver answers no tailnet name.
+	cfgPath := writeAccessConfig(t, "host_access: true\n", "alpha")
+	ns := newMockNS()
+	ns.forwarding = "0"
+	r := newTestReconciler(cfgPath, ns, newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{})
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := forwardingEvents(r, "alpha")
+	if len(got) == 0 {
+		t.Fatal("the Reconciler recorded no event for a namespace that forwards no packet while host_access is true")
+	}
+	if !strings.Contains(got[0], "requires 1") {
+		t.Errorf("the event states %q, and it names no required value", got[0])
+	}
+}
+
+func TestThePeriodicSyncActionsAreTheTwoThatEveryCycleEmits(t *testing.T) {
+	// Issue #274. `hydrascale diff` counts these apart, therefore the set is asserted here
+	// rather than read from the command.
+	periodic := map[ActionType]bool{
+		ActionSyncRoutes:     true,
+		ActionSyncHostAccess: true,
+	}
+	others := []ActionType{
+		ActionCreateNS, ActionDeleteNS, ActionStartDaemon, ActionStopDaemon,
+		ActionRefreshDNS, ActionTeardownHostAccess, ActionAuthDaemon,
+	}
+
+	for a := range periodic {
+		if !a.IsPeriodicSync() {
+			t.Errorf("%s reports that it is no periodic sync action", a)
+		}
+	}
+	for _, a := range others {
+		if a.IsPeriodicSync() {
+			t.Errorf("%s reports that it is a periodic sync action", a)
+		}
+	}
+}

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net"
+	"slices"
 	"strings"
 	"time"
 )
@@ -290,14 +292,16 @@ func (m *Manager) listNsTableRoutesV6(nsName string) ([]string, error) {
 	return routes, nil
 }
 
-// parseRouteGetOutput extracts the `dev` interface name and whether a `via`
-// gateway is present from the first line of `ip [-6] route get` output.
+// parseRouteGetOutput extracts the `dev` interface name, whether a `via` gateway is
+// present, and the routing table that answered, from the first line of `ip [-6] route get`
+// output. The table is empty when the kernel names none, which means the main table.
 // Examples:
 //
-//	"192.168.1.0 dev eth0 src 192.168.1.50"          -> dev=eth0, hasVia=false
-//	"10.42.0.0 via 192.168.1.1 dev eth0 src ..."     -> dev=eth0, hasVia=true
-//	"100.64.0.5 via 10.200.0.1 dev vh<hash> src ..." -> dev=vh<hash>, hasVia=true
-func parseRouteGetOutput(output string) (dev string, hasVia bool) {
+//	"192.168.1.0 dev eth0 src 192.168.1.50"          -> dev=eth0, hasVia=false, table=""
+//	"10.42.0.0 via 192.168.1.1 dev eth0 src ..."     -> dev=eth0, hasVia=true, table=""
+//	"100.64.0.5 via 10.200.0.1 dev vh<hash> src ..." -> dev=vh<hash>, hasVia=true, table=""
+//	"fd7a::1 dev tailscale0 table 52 src ..."        -> dev=tailscale0, hasVia=false, table=52
+func parseRouteGetOutput(output string) (dev string, hasVia bool, table string) {
 	line := strings.SplitN(strings.TrimSpace(output), "\n", 2)[0]
 	fields := strings.Fields(line)
 	for i, f := range fields {
@@ -308,17 +312,30 @@ func parseRouteGetOutput(output string) (dev string, hasVia bool) {
 			}
 		case "via":
 			hasVia = true
+		case "table":
+			if i+1 < len(fields) {
+				table = fields[i+1]
+			}
 		}
 	}
-	return dev, hasVia
+	return dev, hasVia, table
 }
 
-// wouldClobberDirectLAN reports whether installing a host route to dest
-// would shadow a directly-connected, non-vh* route (e.g. the LAN on eth0).
-// We probe with `ip [-6] route get <network-addr>`: if the kernel resolves
-// the destination via a non-vh* device with no `via` gateway, the destination
-// is on a directly-attached LAN and we must not replace its route. Issue #21.
-func (m *Manager) wouldClobberDirectLAN(dest string, v6 bool) bool {
+// skipReasonForRoute returns the reason that the daemon writes no host route to dest, and
+// it returns an empty string when the daemon writes the route.
+//
+// The probe is `ip [-6] route get <address>`. It reports two conditions:
+//
+//   - Another routing table answers before the main table. The daemon writes its route
+//     into the main table, therefore that route reaches no packet. A host that runs its
+//     own tailscaled holds `fd7a:115c:a1e0::/48 dev tailscale0` in the table 52, and
+//     `ip rule` places the lookup of the table 52 before the lookup of the main table.
+//     Every IPv6 address of every tailnet falls inside that range. See issue #273.
+//   - The host reaches the address over a directly connected network. A route of the
+//     daemon would take that traffic. See issue #21.
+//
+// A device that the daemon owns is neither condition: a replace of its own route is safe.
+func (m *Manager) skipReasonForRoute(dest string, v6 bool) string {
 	addr := dest
 	if i := strings.Index(addr, "/"); i >= 0 {
 		addr = addr[:i]
@@ -329,37 +346,60 @@ func (m *Manager) wouldClobberDirectLAN(dest string, v6 bool) bool {
 	}
 	out, err := m.run("ip", args...)
 	if err != nil {
-		// If the kernel can't resolve it (no route at all), installing
-		// our route is fine — there's nothing to clobber.
-		return false
+		// The kernel resolves the destination over no route, therefore the daemon
+		// replaces nothing and it writes its own route.
+		return ""
 	}
-	dev, hasVia := parseRouteGetOutput(string(out))
+	dev, hasVia, table := parseRouteGetOutput(string(out))
 	if strings.HasPrefix(dev, "vh") {
 		// One of ours (or a sibling tailnet's). Replace is idempotent / safe.
-		return false
+		return ""
 	}
-	// Non-vh* dev with no `via` means the destination is reached directly
-	// over an attached LAN — installing our route would steal that traffic.
-	return !hasVia
+	// A table that the kernel names is not the main table, and `ip rule` reaches it first.
+	// This test comes before the test for a directly connected network, because an answer
+	// out of a policy routing table names a device and carries no `via` gateway, and the
+	// address is on no attached network.
+	if table != "" && table != "main" {
+		return fmt.Sprintf("the routing table %s answers for that address before the main table, on the device %s", table, dev)
+	}
+	if !hasVia {
+		return fmt.Sprintf("the host reaches that address over a directly connected network on the device %s", dev)
+	}
+	return ""
 }
 
-// filterClobberingRoutes drops candidate destinations that would shadow a
-// directly-connected non-vh* route on the host. Skipped entries are logged.
-func (m *Manager) filterClobberingRoutes(candidates []string, v6 bool) []string {
+// filterWritableRoutes returns the destinations that the daemon writes, and it records one
+// line for each reason that it left a destination to the host.
+//
+// The line carries the count and one example rather than one line per destination. A host
+// that runs its own tailscaled answers for every IPv6 address of every tailnet out of the
+// table 52, and the reconcile cycle runs every ten seconds, therefore one line for each
+// destination filled the log of the host. See issue #273.
+func (m *Manager) filterWritableRoutes(candidates []string, v6 bool) []string {
 	if len(candidates) == 0 {
 		return candidates
 	}
 	out := make([]string, 0, len(candidates))
+	skipped := make(map[string][]string)
 	for _, dest := range candidates {
 		if !validRouteDest(dest) {
 			log.Printf("hostaccess: the destination %q is not an address and not a CIDR block", dest)
 			continue
 		}
-		if m.wouldClobberDirectLAN(dest, v6) {
-			log.Printf("hostaccess: skipping route %s — would clobber a directly-connected host LAN route", dest)
+		if reason := m.skipReasonForRoute(dest, v6); reason != "" {
+			skipped[reason] = append(skipped[reason], dest)
 			continue
 		}
 		out = append(out, dest)
+	}
+	for _, reason := range slices.Sorted(maps.Keys(skipped)) {
+		dests := skipped[reason]
+		if len(dests) == 1 {
+			log.Printf("hostaccess: the daemon writes no route to %s, because %s", dests[0], reason)
+			continue
+		}
+		log.Printf("hostaccess: the daemon writes no route to %d addresses, %s among them, because %s",
+			len(dests), dests[0], reason)
 	}
 	return out
 }
@@ -393,8 +433,8 @@ func (m *Manager) SyncHostRoutes(peers TailnetPeers) error {
 	// route. Peer IPs are CGNAT (or fd7a:115c:a1e0::/48) so they never
 	// overlap a real LAN; the filter is meaningful for accepted subnet
 	// routes from table 52. See issue #21.
-	wantV4 = m.filterClobberingRoutes(wantV4, false)
-	wantV6 = m.filterClobberingRoutes(wantV6, true)
+	wantV4 = m.filterWritableRoutes(wantV4, false)
+	wantV6 = m.filterWritableRoutes(wantV6, true)
 
 	// Gather current host routes
 	v4Out, err := m.run("ip", "route", "show")
