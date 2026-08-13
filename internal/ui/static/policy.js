@@ -150,6 +150,13 @@ export function policyRows(body, selectedId) {
     if (!tailnet.credential_present) {
       tone = "crit";
       word = "no credential";
+    } else if (tailnet.credential_state === "rejected") {
+      // The tailnet holds a credential that the control server takes for no request. The
+      // state read `read and write` before, because the row states the presence of a
+      // credential and a present credential that works for nothing looks the same.
+      // See issue #276.
+      tone = "crit";
+      word = "credential rejected";
     } else if (!tailnet.write_available) {
       tone = "warn";
       word = "read only";

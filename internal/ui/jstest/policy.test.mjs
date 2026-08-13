@@ -936,3 +936,49 @@ test("the editor sizes the text area to the line count of the document", async (
   assert.equal(model.lines, 3);
   assert.match(editorMarkup(model), /<textarea class="pol-doc mono"[^>]*rows="3"/);
 });
+
+test("a tailnet whose credential the control server refuses reads as rejected", () => {
+  // Issue #276. The row states the presence of a credential, therefore a credential that
+  // exists and works for no request read `read and write` and the operator learned of the
+  // mistake through a failed policy read alone.
+  const body = listBody({
+    tailnets: [{
+      id: "jbones",
+      kind: "tailscale",
+      credential_present: true,
+      write_available: false,
+      credential_state: "rejected",
+      reason: "the value is a device authentication key, which enrols a device and reaches no API: generate an OAuth client in the admin console of the control server, whose secret starts with tskey-client",
+    }],
+  });
+
+  const row = policyRows(body, null)[0];
+  assert.equal(row.word, "credential rejected");
+  assert.equal(row.tone, "crit");
+  assert.match(row.reason, /device authentication key/);
+});
+
+test("the rejected state names the expected prefix to the operator", () => {
+  const body = listBody({
+    tailnets: [{
+      id: "jbones",
+      kind: "tailscale",
+      credential_present: true,
+      write_available: false,
+      credential_state: "rejected",
+      reason: "the value is no Tailscale OAuth client secret: such a secret starts with tskey-client",
+    }],
+  });
+
+  assert.match(policyListMarkup(policyRows(body, null)), /tskey-client/);
+});
+
+test("a usable credential still reads as read and write", () => {
+  const body = listBody({
+    tailnets: [{ id: "jbones", kind: "tailscale", credential_present: true, write_available: true, credential_state: "usable" }],
+  });
+
+  const row = policyRows(body, null)[0];
+  assert.equal(row.word, "read and write");
+  assert.equal(row.tone, "ok");
+});

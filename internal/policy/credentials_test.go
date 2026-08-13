@@ -232,3 +232,55 @@ func failedLoad(t *testing.T, path string) error {
 	}
 	return err
 }
+
+func TestTailscaleSecretProblemNamesADeviceAuthenticationKey(t *testing.T) {
+	// Issue #276. An operator wrote such a key on 2026-08-13. The control server answered
+	// the token request with HTTP 401 and the message "API token invalid", which names
+	// neither the mistake nor the value.
+	got := TailscaleSecretProblem("tskey-auth-kXXXXXXCNTRL-abcdefghijklmnop")
+
+	if got == "" {
+		t.Fatal("TailscaleSecretProblem accepted a device authentication key")
+	}
+	if !strings.Contains(got, "device authentication key") {
+		t.Errorf("the message %q names no device authentication key", got)
+	}
+	if !strings.Contains(got, TailscaleClientSecretPrefix) {
+		t.Errorf("the message %q names no expected prefix", got)
+	}
+}
+
+func TestTailscaleSecretProblemAcceptsAnOAuthClientSecret(t *testing.T) {
+	if got := TailscaleSecretProblem("tskey-client-kXXXXXXCNTRL-abcdefghijklmnop"); got != "" {
+		t.Errorf("TailscaleSecretProblem returned %q for an OAuth client secret", got)
+	}
+}
+
+func TestTailscaleSecretProblemStatesNothingForAnEmptySecret(t *testing.T) {
+	// A tailnet that holds no credential is a separate state, which missingCredential names.
+	if got := TailscaleSecretProblem(""); got != "" {
+		t.Errorf("TailscaleSecretProblem returned %q for an empty secret", got)
+	}
+}
+
+func TestTailscaleSecretProblemNamesNoPartOfTheValue(t *testing.T) {
+	// FR-policy-4. The message reaches the control API, therefore it carries no part of
+	// the credential.
+	const secret = "tskey-auth-kSECRETVALUE-shouldneverappear"
+	got := TailscaleSecretProblem(secret)
+
+	if strings.Contains(got, "kSECRETVALUE") || strings.Contains(got, "shouldneverappear") {
+		t.Errorf("the message %q holds part of the credential", got)
+	}
+}
+
+func TestTailscaleSecretProblemRejectsAValueOfAnotherShape(t *testing.T) {
+	got := TailscaleSecretProblem("not-a-tailscale-value")
+
+	if got == "" {
+		t.Fatal("TailscaleSecretProblem accepted a value of another shape")
+	}
+	if !strings.Contains(got, TailscaleClientSecretPrefix) {
+		t.Errorf("the message %q names no expected prefix", got)
+	}
+}
