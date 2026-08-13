@@ -910,3 +910,29 @@ test("the stylesheet hides every element that carries the attribute hidden", asy
   const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
   assert.match(style, /\[hidden\]\{display:none *!important\}/);
 });
+
+test("the editor gives the gutter and the text one scrolling box", async () => {
+  // Issue #277. A flex container aligns its items with `stretch`, therefore both children
+  // took the height of the container: the text area then held its own scroll under
+  // overflow-y:hidden and the line numbers stood still while the text moved. The container
+  // scrolls both only while each child keeps its whole height.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+
+  assert.match(style, /\.pol-code\{[^}]*align-items:flex-start/);
+  assert.match(style, /\.pol-code\{[^}]*overflow:auto/);
+  // The text area must not scroll on its own, because its `rows` attribute holds the whole
+  // line count and the container carries the scroll.
+  assert.match(style, /\.pol-doc\{[^}]*overflow-y:hidden/);
+});
+
+test("the editor sizes the text area to the line count of the document", async () => {
+  // The `rows` attribute is what gives the text area its whole height inside the scrolling
+  // box. A document of three lines therefore draws three rows.
+  const state = createPolicyState({ request: async () => documentBody() });
+  state.setList(listBody());
+  state.setDocument("jbones", documentBody());
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.lines, 3);
+  assert.match(editorMarkup(model), /<textarea class="pol-doc mono"[^>]*rows="3"/);
+});
