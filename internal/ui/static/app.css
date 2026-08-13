@@ -664,8 +664,14 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-bar .pol-name{display:inline}
 
 /* A 400 kilobyte document scrolls inside the editor and never pushes the view apart. The
-   gutter scrolls with the text, therefore the two share one scrolling box. */
-.pol-code{display:flex; max-height:440px; overflow:auto; font-size:var(--fs-data); line-height:1.6}
+   gutter scrolls with the text, therefore the two share one scrolling box.
+
+   align-items keeps that box working. A flex container aligns its items with `stretch`, so
+   both children took the height of the container, the text area held its own scroll bar
+   under overflow-y:hidden, and the line numbers stood still while the text moved. The
+   `rows` attribute of the text area already holds the line count, therefore `flex-start`
+   gives both children their whole height and the container alone scrolls. See issue #277. */
+.pol-code{display:flex; align-items:flex-start; max-height:440px; overflow:auto; font-size:var(--fs-data); line-height:1.6}
 .pol-gut{
   flex:none;
   padding:var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
