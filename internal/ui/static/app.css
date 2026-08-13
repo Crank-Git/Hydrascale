@@ -7,6 +7,12 @@
 
 *{box-sizing:border-box}
 
+/* A class that sets display holds a higher specificity than the rule [hidden]{display:none}
+   of the user agent, therefore the element paints while it carries the attribute. The word
+   `edited` painted on a document that holds no edit for that reason. See issue #278. This
+   rule covers every class, because a guard for one class repeats the defect for the next. */
+[hidden]{display:none !important}
+
 body{
   margin:0;
   background:var(--surface-page);
