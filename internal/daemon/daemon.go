@@ -198,7 +198,8 @@ func (m *RealManager) Start(tailnetID string, namespaceName string, allowUnprote
 	// Launch tailscaled through the hydrascale __nsdaemon helper, which mounts a
 	// per-namespace overlay on /etc first. tailscaled replaces /etc/resolv.conf
 	// via rename; a single-file bind-mount can't contain that, so writes would
-	// otherwise land in the host's shared /etc and clobber host DNS. The overlay
+	// otherwise land in the host's shared /etc and replace the DNS configuration
+	// of the host. The overlay
 	// keeps every /etc write namespace-local. See issue #28.
 	self, err := os.Executable()
 	if err != nil {
