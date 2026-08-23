@@ -540,6 +540,27 @@ test("push is disabled until the control server accepts the document", async () 
   assert.equal(controlOf(actionsModel(model), "push").disabled, false);
 });
 
+test("a validate result of the literal empty object states no message", async () => {
+  // The control server answers a valid document with a literal "{}", which holds no
+  // information for the operator to read.
+  const state = loaded(async () => ({ passed: true, result: "{}" }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validated");
+  assert.equal(resultModel(model).message, "");
+});
+
+test("a validate result that holds real content reaches the screen verbatim", async () => {
+  const state = loaded(async () => ({ passed: true, result: "the document holds 3 warnings" }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(resultModel(model).message, "the document holds 3 warnings");
+});
+
 test("an edit after a successful validate disables push again", async () => {
   const state = loaded(async () => ({ passed: true }));
   await state.validate("jbones");
