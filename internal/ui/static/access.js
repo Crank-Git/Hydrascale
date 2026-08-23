@@ -851,7 +851,7 @@ function chip(text, dotTone) {
 
 /** control builds one button of the header from its model. */
 function control(model, onClick) {
-  const button = el("button", model.accent ? "btn primary" : "btn", model.label);
+  const button = el("button", model.accent && !model.disabled ? "btn primary" : "btn", model.label);
   button.type = "button";
   button.disabled = model.disabled;
   button.addEventListener("click", onClick);

@@ -465,7 +465,25 @@ test("the accent marks the push action alone", () => {
   const accented = actionsModel(entryOf(state, "jbones")).filter((one) => one.accent);
   assert.equal(accented.length, 1);
   assert.equal(accented[0].id, "push");
-  assert.match(actionsMarkup(actionsModel(entryOf(state, "jbones"))), /class="btn primary" data-act="push"/);
+});
+
+test("a disabled push draws no accent, because it is not the affirmative action yet", () => {
+  // The stage read disables push. CLAUDE.md's accent rule marks the affirmative action,
+  // and a disabled push is not the affirmative action.
+  const state = loaded(async () => documentBody());
+
+  assert.equal(controlOf(actionsModel(entryOf(state, "jbones")), "push").disabled, true);
+  assert.match(actionsMarkup(actionsModel(entryOf(state, "jbones"))), /class="btn" data-act="push"[^>]*disabled/);
+});
+
+test("an enabled push keeps the accent", async () => {
+  // The stage validated enables push. Push is the affirmative action again.
+  const state = loaded(async () => ({ passed: true }));
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+  assert.match(actionsMarkup(actionsModel(model)), /class="btn primary" data-act="push"/);
 });
 
 test("the push states that it changes what every device in the tailnet reaches", () => {
@@ -520,6 +538,27 @@ test("push is disabled until the control server accepts the document", async () 
   const model = entryOf(state, "jbones");
   assert.equal(model.stage, "validated");
   assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+});
+
+test("a validate result of the literal empty object states no message", async () => {
+  // The control server answers a valid document with a literal "{}", which holds no
+  // information for the operator to read.
+  const state = loaded(async () => ({ passed: true, result: "{}" }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validated");
+  assert.equal(resultModel(model).message, "");
+});
+
+test("a validate result that holds real content reaches the screen verbatim", async () => {
+  const state = loaded(async () => ({ passed: true, result: "the document holds 3 warnings" }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(resultModel(model).message, "the document holds 3 warnings");
 });
 
 test("an edit after a successful validate disables push again", async () => {
