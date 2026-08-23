@@ -159,6 +159,7 @@ func (s *Server) handlePolicyWrite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.validate(r.Context(), target, req.Document)
+	s.recordCredentialResult(target.id, err)
 	if err != nil {
 		writePolicyError(w, "the policy validate", err)
 		return
@@ -170,12 +171,15 @@ func (s *Server) handlePolicyWrite(w http.ResponseWriter, r *http.Request) {
 
 	response := PolicyResponse{ID: target.id, Kind: target.kind, Document: req.Document, WriteAvailable: true}
 	if target.kind == KindHeadscale {
-		if err := s.headscaleClient(target).Write(r.Context(), req.Document); err != nil {
+		err := s.headscaleClient(target).Write(r.Context(), req.Document)
+		s.recordCredentialResult(target.id, err)
+		if err != nil {
 			writePolicyError(w, "the policy write", err)
 			return
 		}
 	} else {
 		written, err := s.tailscaleClient(target).WritePolicy(r.Context(), req.Document, req.ETag)
+		s.recordCredentialResult(target.id, err)
 		if err != nil {
 			writePolicyError(w, "the policy write", err)
 			return

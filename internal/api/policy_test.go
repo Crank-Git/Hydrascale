@@ -30,6 +30,7 @@ type wirePolicyTailnet struct {
 	Kind              string `json:"kind"`
 	CredentialPresent bool   `json:"credential_present"`
 	WriteAvailable    bool   `json:"write_available"`
+	CredentialState   string `json:"credential_state"`
 	Reason            string `json:"reason"`
 }
 
@@ -74,6 +75,7 @@ type fakeTailscale struct {
 	etag           string
 	writtenETag    string
 	validateResult string
+	validateStatus int
 	writeStatus    int
 	ifMatch        string
 	paths          []string
@@ -98,6 +100,11 @@ func (f *fakeTailscale) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"access_token":%q,"token_type":"Bearer","expires_in":3600}`, testAccessToken)
 	case "/tailnet/-/acl/validate":
+		if f.validateStatus != 0 {
+			w.WriteHeader(f.validateStatus)
+			fmt.Fprint(w, `{"message":"API token invalid"}`)
+			return
+		}
 		if f.validateResult != "" {
 			fmt.Fprint(w, f.validateResult)
 		}
@@ -535,6 +542,56 @@ func TestPutOnePolicyReturnsHTTP409WhenTheHeadscaleControlServerRunsTheFilePolic
 	decodePolicy(t, payload, &got)
 	if !strings.Contains(got.Error, `policy.mode: "database"`) {
 		t.Errorf("the message %q does not state the reason", got.Error)
+	}
+}
+
+func TestPutOnePolicyRecordsARejectionOnAValidateFailure(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	tailscale.mu.Lock()
+	tailscale.validateStatus = http.StatusUnauthorized
+	tailscale.mu.Unlock()
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	code, _ := callAccess(t, fixture.client, http.MethodPut, "/api/policy/alpha", `{"document":"{\"acls\":[]}"}`)
+	if code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", code, http.StatusBadGateway)
+	}
+
+	code, payload := callAccess(t, fixture.client, http.MethodGet, "/api/policy", "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wirePolicyList
+	decodePolicy(t, payload, &got)
+	if got.Tailnets[0].CredentialState != CredentialRejected {
+		t.Errorf("credential_state = %q, want %q; body %s", got.Tailnets[0].CredentialState, CredentialRejected, payload)
+	}
+}
+
+func TestPutOnePolicyRecordsARejectionOnAWriteFailure(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	tailscale.mu.Lock()
+	tailscale.writeStatus = http.StatusUnauthorized
+	tailscale.mu.Unlock()
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	code, _ := callAccess(t, fixture.client, http.MethodPut, "/api/policy/alpha", `{"document":"{\"acls\":[]}"}`)
+	if code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", code, http.StatusBadGateway)
+	}
+
+	code, payload := callAccess(t, fixture.client, http.MethodGet, "/api/policy", "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wirePolicyList
+	decodePolicy(t, payload, &got)
+	if got.Tailnets[0].CredentialState != CredentialRejected {
+		t.Errorf("credential_state = %q, want %q; body %s", got.Tailnets[0].CredentialState, CredentialRejected, payload)
 	}
 }
 
