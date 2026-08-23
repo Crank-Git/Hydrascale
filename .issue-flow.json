@@ -1,7 +1,8 @@
 {
+  "pluginVersion": "0.15.1",
   "concurrency": 2,
   "batchSize": 4,
-  "runLength": "2-epics",
+  "runLength": { "mode": "backlog" },
   "prGranularity": "batch",
   "prAuthority": "autonomous",
   "branchModel": "dev-and-live",
