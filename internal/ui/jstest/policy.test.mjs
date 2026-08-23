@@ -465,7 +465,25 @@ test("the accent marks the push action alone", () => {
   const accented = actionsModel(entryOf(state, "jbones")).filter((one) => one.accent);
   assert.equal(accented.length, 1);
   assert.equal(accented[0].id, "push");
-  assert.match(actionsMarkup(actionsModel(entryOf(state, "jbones"))), /class="btn primary" data-act="push"/);
+});
+
+test("a disabled push draws no accent, because it is not the affirmative action yet", () => {
+  // The stage read disables push. CLAUDE.md's accent rule marks the affirmative action,
+  // and a disabled push is not the affirmative action.
+  const state = loaded(async () => documentBody());
+
+  assert.equal(controlOf(actionsModel(entryOf(state, "jbones")), "push").disabled, true);
+  assert.match(actionsMarkup(actionsModel(entryOf(state, "jbones"))), /class="btn" data-act="push"[^>]*disabled/);
+});
+
+test("an enabled push keeps the accent", async () => {
+  // The stage validated enables push. Push is the affirmative action again.
+  const state = loaded(async () => ({ passed: true }));
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+  assert.match(actionsMarkup(actionsModel(model)), /class="btn primary" data-act="push"/);
 });
 
 test("the push states that it changes what every device in the tailnet reaches", () => {

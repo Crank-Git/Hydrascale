@@ -385,7 +385,7 @@ function detailMarkup(detail) {
 
 /** buttonMarkup returns one control of the editor region. */
 function buttonMarkup(control) {
-  const className = control.accent ? "btn primary" : "btn";
+  const className = control.accent && !control.disabled ? "btn primary" : "btn";
   return (
     `<button type="button" class="${className}" data-act="${esc(control.id)}"${control.disabled ? " disabled" : ""}>` +
     `${esc(control.label)}</button>`
