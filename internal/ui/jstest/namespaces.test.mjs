@@ -123,6 +123,36 @@ test("the error row shows a critical dot", () => {
   assert.deepEqual(rows[0].state, { word: "error", tone: "crit" });
 });
 
+test("a row with no usable policy credential shows an additional state, and the health word does not change", () => {
+  // Issue #287. Local reachability and upstream policy are two independent systems, so
+  // the credential problem is a second line, not a replacement of the health word.
+  const status = statusOf([{ id: "havoc", reachability: { state: "reachable" } }]);
+  status.policy = [
+    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+  ];
+  const rows = buildRows(status, {}, {});
+  assert.deepEqual(rows[0].state, { word: "healthy", tone: "ok" });
+  assert.deepEqual(rows[0].reachability, { word: "reachable", tone: "ok" });
+  assert.deepEqual(rows[0].credential, {
+    tone: "crit",
+    word: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+  });
+});
+
+test("a row with a usable policy credential shows no additional state", () => {
+  const status = statusOf([{ id: "jbones" }]);
+  status.policy = [{ id: "jbones", kind: "tailscale", credential_state: "usable" }];
+  const rows = buildRows(status, {}, {});
+  assert.equal(rows[0].credential, null);
+});
+
+test("a row of a tailnet the poll holds no policy entry for shows no additional state", () => {
+  const status = statusOf([{ id: "jbones" }]);
+  status.policy = [];
+  const rows = buildRows(status, {}, {});
+  assert.equal(rows[0].credential, null);
+});
+
 test("the removing row is muted and its actions are disabled", () => {
   const status = statusOf([{ id: "alpha" }, { id: "beta" }]);
   const rows = buildRows(status, {}, { removing: ["alpha"] });
@@ -173,6 +203,30 @@ test("the panel states the peers, the magicdns name, the control server and the 
   // The panel shows the events of this tailnet only.
   assert.equal(panel.events.length, 1);
   assert.equal(panel.events[0].kind, "namespace.created");
+});
+
+test("the panel states the credential problem beside the health and it fills the control server row with the reason", () => {
+  // Issue #287. havoc declares no ControlURL and holds no credential, so the panel showed
+  // a bare em dash before. It now shows the reason that the daemon reported.
+  const status = statusOf([{ id: "havoc" }]);
+  status.policy = [
+    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+  ];
+  const panel = buildPanel(status, {}, [], "havoc");
+  assert.deepEqual(panel.credential, {
+    tone: "crit",
+    word: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+  });
+  const value = (label) => panel.fields.find((field) => field.label === label).value;
+  assert.equal(value("control server"), "the tailnet \"havoc\" has no Tailscale OAuth credential");
+});
+
+test("the panel keeps the em dash of the control server row when no policy entry names the tailnet", () => {
+  const status = statusOf([{ id: "jbones" }]);
+  const panel = buildPanel(status, {}, [], "jbones");
+  assert.equal(panel.credential, null);
+  const value = (label) => panel.fields.find((field) => field.label === label).value;
+  assert.equal(value("control server"), "—");
 });
 
 test("the panel lists two hundred peers in a scrolling region and it states the count", () => {

@@ -243,13 +243,41 @@ export function activityRows(events) {
 }
 
 /**
+ * policyCredentialNote returns the markup of one note line naming every tailnet that
+ * holds no usable policy credential, and an empty string when every declared tailnet
+ * holds one or the poll reports no policy entry yet.
+ *
+ * entries is the field policy of the merged poll body, from GET /api/policy. Local
+ * reachability and upstream policy are two independent systems (see
+ * docs/specs/features/08-upstream-policy.md), so this note names a policy fact and it
+ * writes no event into the log. See issue #287.
+ */
+function policyCredentialNote(entries) {
+  const ids = (entries || [])
+    .filter((entry) => entry.credential_state !== "usable")
+    .map((entry) => entry.id);
+  if (ids.length === 0) {
+    return "";
+  }
+  const sentence = ids.length === 1
+    ? `The tailnet ${ids[0]} needs a policy credential. Open the Policy tab for the reason.`
+    : `These tailnets need a policy credential: ${ids.join(", ")}. Open the Policy tab for the reason.`;
+  return alert("crit", [sentence]);
+}
+
+/**
  * activityMarkup returns the whole activity view as markup.
  * rows comes from activityRows. A time, a kind, and a tailnet identifier are machine
- * values, and a message is the sentence that the daemon wrote.
+ * values, and a message is the sentence that the daemon wrote. policyEntries is the field
+ * policy of the merged poll body, and it adds one note line above the event list when a
+ * declared tailnet holds no usable credential.
  */
-export function activityMarkup(rows) {
+export function activityMarkup(rows, policyEntries = []) {
+  const note = policyCredentialNote(policyEntries);
+
   if (rows.length === 0) {
     return (
+      note +
       '<section class="card empty"><span class="label">Empty</span>' +
       "<p>The daemon reports no event. An event arrives when the reconciler creates a namespace, connects a tailnet, or writes the access rules.</p></section>"
     );
@@ -269,6 +297,7 @@ export function activityMarkup(rows) {
     .join("");
 
   return (
+    note +
     '<section class="card"><span class="label">Events</span>' +
     `<div class="events">${list}</div>` +
     '<p class="note">The daemon holds the newest events in memory. It records one event for every mutating request on the console listener.</p>' +
