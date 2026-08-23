@@ -2,8 +2,8 @@
 id: visual-policy-advanced
 feature: Visual policy editor — SSH and advanced constructs
 epic: "Epic 13: Visual policy editor — SSH and advanced constructs"
-status: planned
-issues: []
+status: issued
+issues: [321, 322, 323, 324, 325]
 mockups: [mockups/07-advanced-policy-constructs.html]
 ---
 

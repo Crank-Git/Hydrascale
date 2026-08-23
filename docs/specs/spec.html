@@ -725,7 +725,11 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>Epic 9: Documentation and release</td><td>#160</td><td>#161 #162 #163 #164 #165</td><td><code>features/09-docs-and-release.md</code></td></tr>
 <tr><td>Epic 10: Agent skills</td><td>#246</td><td>#247 #248 #249 #250 #251 #252</td><td><code>features/10-agent-skills.md</code></td></tr>
 <tr><td>Epic 10 follow-up: the root privilege</td><td>none</td><td>#261 #263 #265 #267</td><td><code>features/10-agent-skills.md</code></td></tr>
+<tr><td>Epic 11: Policy document model</td><td>#308</td><td>#309 #310 #311 #312</td><td><code>features/11-policy-document-model.md</code></td></tr>
+<tr><td>Epic 12: Visual ACL editor</td><td>#313</td><td>#314 #315 #316 #317 #318 #319</td><td><code>features/12-visual-acl-editor.md</code></td></tr>
+<tr><td>Epic 13: Visual policy editor — SSH and advanced constructs</td><td>#320</td><td>#321 #322 #323 #324 #325</td><td><code>features/13-visual-policy-advanced.md</code></td></tr>
 </table></div>
+<p>Epics 11 to 13 were filed on 2026-08-23, after the <code>/spec-update</code> round that added version 1.1 was approved.</p>
 <h3 id="requirement-coverage">Requirement coverage</h3>
 <div class="table-wrap"><table>
 <tr><th>Feature</th><th>Requirements</th><th>Issues that cover them</th></tr>
@@ -747,8 +751,23 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>agent-skills</td><td>FR-skills-30 to 35</td><td>#252</td></tr>
 <tr><td>agent-skills</td><td>FR-skills-6, 36</td><td>#263</td></tr>
 <tr><td>agent-skills</td><td>FR-skills-2, 37</td><td>#267</td></tr>
+<tr><td>policy-document-model</td><td>FR-model-1 to 4</td><td>#309</td></tr>
+<tr><td>policy-document-model</td><td>FR-model-5, 6</td><td>#310</td></tr>
+<tr><td>policy-document-model</td><td>FR-model-7 to 9</td><td>#311</td></tr>
+<tr><td>policy-document-model</td><td>FR-model-10, 11</td><td>#312</td></tr>
+<tr><td>visual-acl-editor</td><td>FR-vacl-1 to 3</td><td>#314</td></tr>
+<tr><td>visual-acl-editor</td><td>FR-vacl-4 to 6</td><td>#315</td></tr>
+<tr><td>visual-acl-editor</td><td>FR-vacl-7 to 9</td><td>#316</td></tr>
+<tr><td>visual-acl-editor</td><td>FR-vacl-10 to 12</td><td>#317</td></tr>
+<tr><td>visual-acl-editor</td><td>FR-vacl-13 to 16</td><td>#318</td></tr>
+<tr><td>visual-acl-editor</td><td>FR-vacl-17 to 19</td><td>#319</td></tr>
+<tr><td>visual-policy-advanced</td><td>FR-vadv-1 to 5</td><td>#321</td></tr>
+<tr><td>visual-policy-advanced</td><td>FR-vadv-6, 7</td><td>#322</td></tr>
+<tr><td>visual-policy-advanced</td><td>FR-vadv-8, 9</td><td>#323</td></tr>
+<tr><td>visual-policy-advanced</td><td>FR-vadv-10, 11</td><td>#324</td></tr>
+<tr><td>visual-policy-advanced</td><td>FR-vadv-12 to 14</td><td>#325</td></tr>
 </table></div>
-<p>Every one of the 239 requirements in these ten features is cited by at least one issue.</p>
+<p>Every one of the 239 requirements in these ten features is cited by at least one issue. Every one of the 44 requirements across <code>policy-document-model</code>, <code>visual-acl-editor</code>, and <code>visual-policy-advanced</code> is cited by exactly one issue.</p>
 <p><strong>FR-access-2 is covered and reversed.</strong> The requirement states that the daemon appends the jump rule into <code>FORWARD</code>. The operator decided on 2026-08-05 that the daemon keeps the insert at position 1. Issue #139 edits the requirement text, corrects <code>CLAUDE.md</code>, and adds the detection that the decision needs.</p>
 <h3 id="requirements-already-satisfied-when-the-issues-were-created">Requirements already satisfied when the issues were created</h3>
 <div class="table-wrap"><table>

@@ -818,6 +818,12 @@ fix.
 | Epic 9: Documentation and release | #160 | #161 #162 #163 #164 #165 | `features/09-docs-and-release.md` |
 | Epic 10: Agent skills | #246 | #247 #248 #249 #250 #251 #252 | `features/10-agent-skills.md` |
 | Epic 10 follow-up: the root privilege | none | #261 #263 #265 #267 | `features/10-agent-skills.md` |
+| Epic 11: Policy document model | #308 | #309 #310 #311 #312 | `features/11-policy-document-model.md` |
+| Epic 12: Visual ACL editor | #313 | #314 #315 #316 #317 #318 #319 | `features/12-visual-acl-editor.md` |
+| Epic 13: Visual policy editor — SSH and advanced constructs | #320 | #321 #322 #323 #324 #325 | `features/13-visual-policy-advanced.md` |
+
+Epics 11 to 13 were filed on 2026-08-23, after the `/spec-update` round that added version
+1.1 was approved.
 
 ### Requirement coverage
 
@@ -841,8 +847,25 @@ fix.
 | agent-skills | FR-skills-30 to 35 | #252 |
 | agent-skills | FR-skills-6, 36 | #263 |
 | agent-skills | FR-skills-2, 37 | #267 |
+| policy-document-model | FR-model-1 to 4 | #309 |
+| policy-document-model | FR-model-5, 6 | #310 |
+| policy-document-model | FR-model-7 to 9 | #311 |
+| policy-document-model | FR-model-10, 11 | #312 |
+| visual-acl-editor | FR-vacl-1 to 3 | #314 |
+| visual-acl-editor | FR-vacl-4 to 6 | #315 |
+| visual-acl-editor | FR-vacl-7 to 9 | #316 |
+| visual-acl-editor | FR-vacl-10 to 12 | #317 |
+| visual-acl-editor | FR-vacl-13 to 16 | #318 |
+| visual-acl-editor | FR-vacl-17 to 19 | #319 |
+| visual-policy-advanced | FR-vadv-1 to 5 | #321 |
+| visual-policy-advanced | FR-vadv-6, 7 | #322 |
+| visual-policy-advanced | FR-vadv-8, 9 | #323 |
+| visual-policy-advanced | FR-vadv-10, 11 | #324 |
+| visual-policy-advanced | FR-vadv-12 to 14 | #325 |
 
 Every one of the 239 requirements in these ten features is cited by at least one issue.
+Every one of the 44 requirements across `policy-document-model`, `visual-acl-editor`,
+and `visual-policy-advanced` is cited by exactly one issue.
 
 **FR-access-2 is covered and reversed.** The requirement states that the daemon appends the
 jump rule into `FORWARD`. The operator decided on 2026-08-05 that the daemon keeps the
