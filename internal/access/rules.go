@@ -64,7 +64,7 @@ type port struct {
 func parsePort(entry string) (port, error) {
 	match := portPattern.FindStringSubmatch(entry)
 	if match == nil {
-		return port{}, fmt.Errorf("invalid port %q: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>", entry)
+		return port{}, fmt.Errorf("invalid port %q: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22", entry)
 	}
 	low, err := strconv.Atoi(match[2])
 	if err != nil || low < 1 || low > 65535 {

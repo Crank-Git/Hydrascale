@@ -251,6 +251,18 @@ func TestCompile(t *testing.T) {
 		}
 	})
 
+	t.Run("names tcp/22 as the concrete example of the port format", func(t *testing.T) {
+		set := RuleSet{Rules: []Rule{{From: "alpha", To: "beta", Ports: []string{"22"}}}}
+		_, err := Compile(set, testTopology(), EnforceTail)
+		if err == nil {
+			t.Fatal("Compile returned no error, want an error")
+		}
+		want := `rule 1: invalid port "22": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22`
+		if err.Error() != want {
+			t.Errorf("Compile returned %q, want %q", err.Error(), want)
+		}
+	})
+
 	t.Run("accepts a valid port entry", func(t *testing.T) {
 		for _, port := range []string{"tcp/1", "tcp/65535", "udp/53", "tcp/22-23", "udp/1-65535"} {
 			set := RuleSet{Rules: []Rule{{From: "alpha", To: "beta", Ports: []string{port}}}}

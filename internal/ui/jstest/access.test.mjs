@@ -831,7 +831,10 @@ test("entering the port 22 shows an error that names the expected format", () =>
   // FR-editor-22, and the edge case "A port entry is 22".
   const result = parsePorts("22");
   assert.equal(result.ports, null);
-  assert.equal(result.error, 'invalid port "22": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>');
+  assert.equal(
+    result.error,
+    'invalid port "22": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22',
+  );
 });
 
 test("the rule list rejects tcp/0, tcp/65536, and tcp/22-21", () => {
@@ -850,7 +853,7 @@ test("the console repeats the port rule that internal/access holds", async () =>
   // states what PUT /api/access states rather than a second grammar.
   const rules = await readFile(new URL("../../access/rules.go", import.meta.url), "utf8");
   assert.match(rules, /\^\(tcp\|udp\)\/\(\[0-9\]\{1,5\}\)\(\?:-\(\[0-9\]\{1,5\}\)\)\?\$/);
-  assert.match(rules, /the form is tcp\/<n>, udp\/<n>, tcp\/<n>-<m>, or udp\/<n>-<m>/);
+  assert.match(rules, /the form is tcp\/<n>, udp\/<n>, tcp\/<n>-<m>, or udp\/<n>-<m>, for example tcp\/22/);
   assert.match(rules, /a port number is between 1 and 65535/);
   assert.match(rules, /the second number is lower than the first/);
 });

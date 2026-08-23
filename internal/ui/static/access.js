@@ -628,7 +628,7 @@ const portPattern = /^(tcp|udp)\/([0-9]{1,5})(?:-([0-9]{1,5}))?$/;
 function portFailure(entry) {
   const match = portPattern.exec(entry);
   if (match === null) {
-    return `invalid port ${JSON.stringify(entry)}: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>`;
+    return `invalid port ${JSON.stringify(entry)}: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22`;
   }
   const range = `invalid port ${JSON.stringify(entry)}: a port number is between 1 and 65535`;
   const low = Number(match[2]);
