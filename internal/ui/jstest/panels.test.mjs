@@ -262,6 +262,46 @@ test("the activity view escapes every value that the daemon reports", () => {
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
+test("the activity view names a tailnet with no usable policy credential above the event list", () => {
+  // Issue #287. The activity log stays a record of real daemon events, so the credential
+  // problem is a note above the list, not a synthetic event row.
+  const markup = activityMarkup(activityRows(events()), [
+    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+  ]);
+  assert.match(markup, /needs a policy credential/);
+  assert.match(markup, /havoc/);
+  assert.match(markup, /Open the Policy tab/);
+  assert.ok(
+    markup.indexOf("needs a policy credential") < markup.indexOf('<div class="events">'),
+    "the note sits above the event list",
+  );
+  // The note names a policy fact, not a daemon event.
+  assert.ok(
+    !activityRows(events()).some((row) => row.message.includes("policy credential")),
+    "the credential note is not a synthetic event row",
+  );
+});
+
+test("the activity view shows no credential note when every tailnet holds a usable credential", () => {
+  const markup = activityMarkup(activityRows(events()), [
+    { id: "jbones", kind: "tailscale", credential_state: "usable" },
+  ]);
+  assert.doesNotMatch(markup, /needs a policy credential/);
+});
+
+test("the activity view shows no credential note when the poll holds no policy entry yet", () => {
+  const markup = activityMarkup(activityRows(events()));
+  assert.doesNotMatch(markup, /needs a policy credential/);
+});
+
+test("the activity view escapes the tailnet identifiers of the credential note", () => {
+  const hostile = '<img src=x onerror="alert(1)">';
+  const markup = activityMarkup(activityRows([]), [
+    { id: hostile, kind: "tailscale", credential_state: "absent", reason: hostile },
+  ]);
+  assert.doesNotMatch(markup, /<img/);
+});
+
 // ---------------------------------------------------------------------------
 // The settings view
 // ---------------------------------------------------------------------------

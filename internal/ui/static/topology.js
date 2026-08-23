@@ -107,6 +107,25 @@ export function reconcilerState(status) {
 }
 
 /**
+ * credentialOf returns the upstream policy credential problem of one tailnet as a dot
+ * tone and its reason, word for word, and null when the credential is usable or the poll
+ * holds no policy entry for the tailnet yet.
+ *
+ * status.policy is the field that fetchConsoleState merges from GET /api/policy. Local
+ * reachability and upstream policy are two independent systems (see
+ * docs/specs/features/08-upstream-policy.md), so this state never replaces reachabilityOf;
+ * it is a second, additional signal on the node. See issue #287.
+ */
+function credentialOf(status, id) {
+  const entries = (status && status.policy) || [];
+  const entry = entries.find((tailnet) => tailnet.id === id);
+  if (!entry || entry.credential_state === "usable") {
+    return null;
+  }
+  return { tone: "crit", reason: entry.reason || "" };
+}
+
+/**
  * lastReconcileAt returns the time of the newest `reconcile_complete` event, in
  * milliseconds, and it returns null when the event list holds none.
  *
@@ -216,6 +235,7 @@ export function buildTopology(status, access) {
       tone: reach.tone,
       word: reach.word,
       detail: reach.detail,
+      credential: credentialOf(status, node.id),
     });
   });
   right.forEach((node, index) => {
@@ -267,6 +287,11 @@ export function buildTopology(status, access) {
       ? `${path.from} reaches ${path.to} on ${path.ports.join(", ")}.`
       : `${path.from} reaches ${path.to}.`,
   );
+  for (const node of nodes) {
+    if (node.kind === "tailnet" && node.credential) {
+      sentences.push(`${node.id} needs a policy credential: ${node.credential.reason}`);
+    }
+  }
 
   const between = paths.some(
     (path) => byID.get(path.from).kind === "tailnet" && byID.get(path.to).kind === "tailnet",
@@ -356,8 +381,11 @@ export function topologySVGMarkup(model, selected, options = {}) {
 
   for (const node of model.nodes) {
     const pressed = node.id === selected ? "true" : "false";
+    const credentialNote = node.kind === "tailnet" && node.credential
+      ? ` This tailnet needs a policy credential: ${node.credential.reason}`
+      : "";
     const label = node.kind === "tailnet"
-      ? `${node.id}, ${node.word}, ${plural(node.peers, "peer")}, ${plural(node.paths, "allowed path")}.`
+      ? `${node.id}, ${node.word}, ${plural(node.peers, "peer")}, ${plural(node.paths, "allowed path")}.${credentialNote}`
       : `${node.id}, ${plural(node.paths, "allowed path")}.`;
     parts.push(
       `<g class="node" data-node="${esc(node.id)}" tabindex="0" role="button"` +
@@ -372,6 +400,12 @@ export function topologySVGMarkup(model, selected, options = {}) {
         `<circle class="dot ${node.tone}" cx="${node.x + 22}" cy="${node.y + 34}" r="4"></circle>`,
       );
       parts.push(`<text class="s" x="${node.x + 32}" y="${node.y + 38}">${esc(node.line)}</text>`);
+      if (node.credential) {
+        parts.push(
+          `<circle class="dot ${node.credential.tone}" cx="${node.x + node.w - 14}" cy="${node.y + 14}" r="4">` +
+            `<title>${esc(node.credential.reason)}</title></circle>`,
+        );
+      }
     } else {
       parts.push(`<text class="s" x="${node.x + 18}" y="${node.y + 38}">${esc(node.line)}</text>`);
     }
