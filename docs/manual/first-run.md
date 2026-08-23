@@ -58,7 +58,7 @@ reads "The access policy that each control server holds. A policy change affects
 device in the tailnet, not only this host." The view shows a list of tailnets with the
 credential state of each one.
 
-[Read the upstream policy in Policy](policy-editor.md) covers this view step by step.
+[Read and change the upstream policy in Policy](policy-editor.md) covers this view step by step.
 
 ![The Policy tailnet list](screenshots/first-run/05-policy-list.png)
 

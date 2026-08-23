@@ -12,7 +12,7 @@ enforces, and to read and change the upstream policy that each control server ho
 |---|---|
 | [Get oriented in the console](first-run.md) | The Overview, Namespaces, Access, Policy, Activity, and Settings views, on first arrival. |
 | [Change a local rule in Access](access-editor.md) | Stage a local rule, enter ports, and discard the staged edit. |
-| [Read the upstream policy in Policy](policy-editor.md) | The Policy tailnet list, the credential state of each tailnet, and the read-only state of a tailnet with no credential. |
+| [Read and change the upstream policy in Policy](policy-editor.md) | The Policy tailnet list, the policy document editor, and the read-only state of a tailnet with no credential. |
 
 ## Getting started
 
