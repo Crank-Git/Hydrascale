@@ -15,7 +15,7 @@ Design lives in `docs/specs/`. Read `docs/specs/spec.md` and the relevant
 
 ## Stack
 
-- Go 1.26.5, standard library first. Seven direct dependencies. The build reaches the Go
+- Go 1.26.6, standard library first. Seven direct dependencies. The build reaches the Go
   module proxy, and `go.sum` pins the hash of each dependency.
 - Bubble Tea and Lip Gloss for the terminal interface.
 - The console is a static single-page application with no build step. `go:embed` places
