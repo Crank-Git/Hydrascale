@@ -342,8 +342,10 @@ export function resultModel(model) {
   });
 
   switch (model.stage) {
-    case "validated":
-      return result("ok", "validated", "The control server accepted the document.", { message: model.result });
+    case "validated": {
+      const detail = model.result && model.result !== "{}" ? { message: model.result } : {};
+      return result("ok", "validated", "The control server accepted the document.", detail);
+    }
     case "validate-failed":
       return result("crit", "validate failed", "The control server rejected the document.", {
         errors: validateErrors(model.result),
