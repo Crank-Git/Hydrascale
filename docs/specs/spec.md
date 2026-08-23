@@ -2,10 +2,10 @@
 name: Hydrascale v1.0
 slug: hydrascale-v1
 repo: Crank-Git/Hydrascale
-status: draft
+status: approved
 spec_version: 2
 created: 2026-08-04
-approved: 2026-08-04
+approved: 2026-08-23
 html_generated: 2026-08-23
 branch_model: dev-and-live
 features:
@@ -796,6 +796,7 @@ security and DNS work must not wait behind the console.
 | 2026-08-13 | 1 | Issue #276. **A credential that the control server refuses now holds its own state.** On 2026-08-13 an operator wrote a Tailscale device authentication key, whose prefix is `tskey-auth`, into the field `tailscale_oauth_client_secret`, whose value carries the prefix `tskey-client`. `GET /api/policy` answered `credential_present: true` and `write_available: true`, and the policy view drew `read and write`. The control server answered the token request with HTTP 401 and the message `API token invalid`, which names neither the mistake nor the value, therefore the mistake reached the operator through a failed policy read alone. **FR-policy-5a** and **FR-policy-5b** add a third state. The daemon reads the prefix of the client secret before any request, and it records the answer of a control server that refuses the credential with HTTP 401. A 403 states that the credential is valid and that its scopes do not cover the request, therefore it marks no credential. |
 | 2026-08-23 | 1 | Issue #294 resolved. **The toolchain moves to Go 1.26.6.** `govulncheck` named five called standard library advisories on `dev` — GO-2026-6218, GO-2026-6090, GO-2026-6089, GO-2026-5972, and GO-2026-5026 — that a project-review run found while merging an unrelated pull request. Each names `go1.26.6` as its fix. `go.mod`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` now hold `1.26.6`, which closes the gap and clears every advisory. |
 | 2026-08-23 | 1 | **A `/spec-update` round adds version 1.1: the visual policy editor.** `features/08-upstream-policy.md`'s Out of scope explicitly deferred a visual editor for the policy document; the operator asked for one, scoped to a full model of Tailscale's ACL grammar (groups, hosts, tagOwners, ipsets, acls, grants, ssh, autoApprovers, nodeAttrs, postures, tests) with byte-for-byte preservation of every part an edit does not touch, for both Tailscale and Headscale. That scope does not fit one epic under the sizing rule of 3 to 6 sub-issues, so it splits into three: Epic 11 (`features/11-policy-document-model.md`), the document model that makes the round-trip fidelity possible; Epic 12 (`features/12-visual-acl-editor.md`), the matrix-and-rule-list editor for tags, groups, and reachability rules, reusing `features/07-console-access-editor.md`'s visual grammar; Epic 13 (`features/13-visual-policy-advanced.md`), the five remaining constructs. `features/08-upstream-policy.md` itself is unchanged — it still describes the shipped text editor, which the new features extend rather than replace. Confirmed against `https://tailscale.com/kb/1337/acl-syntax` (retrieved 2026-08-23) for the field shapes, and against `docs/ref/policy.md` at Headscale tag `v0.29.3` (retrieved 2026-08-23) for the `postures`/`ipsets` gap that R10 records. R9 records the round-trip fidelity decision as a risk, not a settled fact. |
+| 2026-08-23 | 2 | **Approved.** The operator reviewed the first draft's two new mockups and found a layout defect: the reachability matrix, sized to fill a 300px grid column, overflowed its card and bled onto the adjacent Rules card. Both mockups moved to a single stacked column with fixed-size matrix cells in a scrollable wrapper, and the example data's self-contradiction about which tailnet is Headscale (`jbones`, used as Tailscale everywhere else in the package) was corrected to name `corp-prod` instead. The operator approved the revised round. |
 
 ## Issue map
 
