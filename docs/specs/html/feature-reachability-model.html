@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale v1.0 — Feature: Local reachability model</title>
+<style>
+:root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
+        --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#14141b; --fg:#e8e8ee; --muted:#9a9aa8; --line:#2c2c38; --accent:#8ea6ff;
+          --card:#1c1c26; --warn-bg:#2a2318; --warn-line:#a87c2a; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:16px/1.6 system-ui,-apple-system,sans-serif; }
+.layout { display:flex; min-height:100vh; }
+aside.site { width:17rem; flex:none; border-right:1px solid var(--line);
+             padding:1.2rem 1rem 3rem; position:sticky; top:0; height:100vh;
+             overflow-y:auto; background:var(--card); }
+aside.site h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+                color:var(--muted); margin:1.2rem 0 .3rem; border:none; padding:0; }
+aside.site ul { list-style:none; margin:0; padding:0; }
+aside.site li { margin:.15rem 0; }
+aside.site a { text-decoration:none; color:var(--fg); font-size:.92rem;
+               display:block; padding:.15rem .5rem; border-radius:6px; }
+aside.site a:hover { background:var(--bg); }
+aside.site a.current { background:var(--accent); color:#fff; }
+aside.site a.sub { padding-left:1.3rem; font-size:.84rem; color:var(--muted); }
+aside.site .brand { font-weight:700; font-size:1.05rem; }
+main { max-width:60rem; margin:0 auto; padding:2rem 1.5rem 6rem; min-width:0; flex:1; }
+h1,h2,h3,h4 { line-height:1.25; }
+h1 { font-size:2rem; margin:.2rem 0; }
+h2 { border-bottom:1px solid var(--line); padding-bottom:.3rem; margin-top:2.5rem; }
+a { color:var(--accent); }
+code { background:var(--card); padding:.1em .35em; border-radius:4px; font-size:.9em; }
+pre.code { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; overflow-x:auto; }
+pre.code code { background:none; padding:0; }
+.table-wrap { overflow-x:auto; }
+table { border-collapse:collapse; margin:1rem 0; min-width:50%; }
+th,td { border:1px solid var(--line); padding:.4rem .7rem; text-align:left; }
+th { background:var(--card); }
+blockquote { border-left:3px solid var(--accent); margin:1rem 0; padding:.2rem 1rem;
+             color:var(--muted); }
+.meta { color:var(--muted); margin-bottom:2rem; }
+.badge { display:inline-block; padding:.1rem .6rem; border-radius:999px;
+         border:1px solid var(--accent); color:var(--accent); font-size:.85rem; }
+.diagram { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; margin:1rem 0; overflow-x:auto; }
+.diagram pre.mermaid { margin:0; }
+.diagram.raw::before { content:"diagram source (assets/mermaid.min.js not vendored)";
+                       display:block; color:var(--muted); font-size:.8rem;
+                       margin-bottom:.5rem; }
+.callout-h, .callout-h ~ p, .callout-h ~ ul { background:var(--warn-bg); }
+.callout-h { border-left:4px solid var(--warn-line); padding:.3rem .8rem; }
+.mockup { margin:1.5rem 0; }
+.mockup iframe { width:100%; height:32rem; border:1px solid var(--line);
+                 border-radius:8px; background:#fff; }
+nav.pager { display:flex; justify-content:space-between; margin-top:3rem;
+            border-top:1px solid var(--line); padding-top:1rem; }
+@media (max-width: 900px) {
+  .layout { display:block; }
+  aside.site { width:auto; height:auto; position:static; border-right:none;
+               border-bottom:1px solid var(--line); }
+}
+h1[id]:hover .rv-add, h2[id]:hover .rv-add, h3[id]:hover .rv-add,
+h4[id]:hover .rv-add { opacity:1; }
+.rv-add { opacity:0; margin-left:.5rem; font-size:.75rem; cursor:pointer;
+          border:1px solid var(--accent); color:var(--accent); background:none;
+          border-radius:6px; padding:0 .45rem; vertical-align:middle;
+          transition:opacity .15s; }
+.rv-comment { border:1px solid var(--warn-line); border-left-width:4px;
+              background:var(--warn-bg); border-radius:8px; padding:.6rem .9rem;
+              margin:.8rem 0; font-size:.92rem; }
+.rv-comment.rv-resolved { opacity:.6; border-left-color:var(--line); }
+.rv-comment .rv-head { display:flex; gap:.6rem; align-items:center;
+                       color:var(--muted); font-size:.8rem; margin-bottom:.3rem; }
+.rv-comment .rv-head button { font-size:.75rem; cursor:pointer; background:none;
+                              border:1px solid var(--line); border-radius:6px;
+                              color:var(--muted); padding:0 .4rem; }
+.rv-comment .rv-body { white-space:pre-wrap; }
+.rv-editor textarea { width:100%; min-height:5rem; background:var(--bg);
+                      color:var(--fg); border:1px solid var(--line);
+                      border-radius:6px; padding:.5rem; font:inherit; }
+.rv-editor .rv-actions { margin-top:.4rem; display:flex; gap:.5rem; }
+.rv-editor button { cursor:pointer; border-radius:6px; padding:.2rem .8rem;
+                    border:1px solid var(--accent); background:var(--accent);
+                    color:#fff; }
+.rv-editor button.rv-cancel { background:none; color:var(--accent); }
+#rv-toggle { position:fixed; right:1rem; bottom:1rem; z-index:60;
+             background:var(--accent); color:#fff; border:none; cursor:pointer;
+             border-radius:999px; padding:.5rem 1rem; font-size:.85rem;
+             box-shadow:0 2px 10px rgba(0,0,0,.2); }
+#rv-drawer { position:fixed; top:0; right:0; bottom:0; width:21rem; z-index:55;
+             background:var(--card); border-left:1px solid var(--line);
+             display:flex; flex-direction:column; transform:translateX(100%);
+             transition:transform .2s ease; box-shadow:-4px 0 16px rgba(0,0,0,.12); }
+body.rv-open #rv-drawer { transform:none; }
+body.rv-open .layout { padding-right:21rem; }
+#rv-drawer header { padding:.8rem 1rem .5rem; border-bottom:1px solid var(--line); }
+#rv-drawer header .rv-count { color:var(--muted); font-size:.8rem; }
+#rv-drawer .rv-compose { padding:.8rem 1rem; border-bottom:1px solid var(--line); }
+#rv-drawer .rv-compose label { display:block; font-size:.75rem;
+                               color:var(--muted); margin-bottom:.25rem; }
+#rv-drawer .rv-compose select { width:100%; margin-bottom:.4rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.3rem; font:inherit; font-size:.85rem; }
+#rv-drawer .rv-compose textarea { width:100%; min-height:5.5rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.5rem; font:inherit; font-size:.9rem; }
+#rv-drawer .rv-compose .rv-live { font-size:.72rem; color:var(--muted); }
+#rv-drawer .rv-list { flex:1; overflow-y:auto; padding:.6rem 1rem; }
+#rv-drawer .rv-item { border:1px solid var(--line); border-left:3px solid
+             var(--warn-line); border-radius:8px; padding:.45rem .6rem;
+             margin-bottom:.6rem; font-size:.82rem; cursor:pointer; }
+#rv-drawer .rv-item.rv-resolved { opacity:.55; border-left-color:var(--line); }
+#rv-drawer .rv-item .rv-where { color:var(--accent); font-size:.72rem; }
+#rv-drawer .rv-item .rv-meta { color:var(--muted); font-size:.72rem;
+                               display:flex; gap:.5rem; align-items:center; }
+#rv-drawer .rv-item .rv-meta button { font-size:.7rem; cursor:pointer;
+             background:none; border:1px solid var(--line); border-radius:5px;
+             color:var(--muted); padding:0 .35rem; }
+#rv-drawer .rv-item .rv-text { white-space:pre-wrap; margin:.15rem 0; }
+#rv-drawer footer { padding:.6rem 1rem; border-top:1px solid var(--line);
+                    display:flex; gap:.5rem; flex-wrap:wrap; }
+#rv-drawer footer button, #rv-drawer .rv-compose button {
+  cursor:pointer; border:1px solid var(--accent); background:none;
+  color:var(--accent); border-radius:6px; padding:.2rem .7rem; font-size:.8rem; }
+#rv-drawer .rv-compose button.rv-primary { background:var(--accent); color:#fff; }
+#rv-drawer .rv-otherpages { color:var(--muted); font-size:.75rem;
+                            margin:.4rem 0 0; }
+@media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
+</style>
+</head>
+<body data-page="feature-reachability-model" data-rvkey="hydrascale-v1">
+<div class="layout">
+<aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
+<h2>Spec</h2><ul>
+<li><a href="../spec.html">Overview &amp; index</a></li>
+</ul>
+<h2>Features</h2><ul>
+<li><a href="feature-foundation.html">Foundation</a></li>
+<li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
+<li><a href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-fixes.html">Security fixes</a></li>
+<li><a href="feature-dns-integrity.html">DNS integrity</a></li>
+<li><a class="current" href="feature-reachability-model.html">Local reachability model</a></li>
+<li><a href="feature-console-foundation.html">Console foundation</a></li>
+<li><a href="feature-console-access-editor.html">Console access editor</a></li>
+<li><a href="feature-upstream-policy.html">Upstream policy control</a></li>
+<li><a href="feature-docs-and-release.html">Documentation, terminal interface restyle, and the release</a></li>
+<li><a href="feature-agent-skills.html">Agent skills for the operator, and the two command defects they expose</a></li>
+<li><a href="feature-policy-document-model.html">Policy document model</a></li>
+<li><a href="feature-visual-acl-editor.html">Visual ACL editor</a></li>
+<li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
+</ul></aside>
+<main>
+<h1>Feature: Local reachability model</h1>
+<p class="meta">Epic 5: Local reachability model &nbsp; <span class="badge">issued</span></p>
+<h3 id="reachability-model-purpose">Purpose</h3>
+<p>The daemon promises that traffic from one tailnet never enters another. Separate network stacks deliver that promise for routing. The host <code>FORWARD</code> chain does not deliver it for forwarding.</p>
+<p><code>internal/namespaces/ns.go:263</code> inserts one rule per namespace:</p>
+<pre class="code"><code>iptables -I FORWARD 1 -i vh&lt;hash&gt; -j ACCEPT</code></pre>
+<p>The rule matches on the input interface only. It has no destination match and no output interface match. Every namespace has a default route to the host (<code>internal/namespaces/ns.go:250</code>). Every namespace has a <code>MASQUERADE</code> rule (<code>internal/namespaces/ns.go:277</code>). Host forwarding is enabled per veth device (<code>internal/namespaces/ns.go:256</code>).</p>
+<p>A process inside namespace A therefore has a forwarding path to namespace B, to every peer route that host access installs for B, and to the host local network. The rule is inserted at position 1, so it also sits above any rule that the operator's own firewall placed in <code>FORWARD</code>.</p>
+<p>This feature set replaces that rule with a rule set that the operator controls. The default is deny.</p>
+<h3 id="reachability-model-user-stories">User stories</h3>
+<ul>
+<li>As the operator, I want a namespace to be unable to reach another namespace unless I
+</li>
+</ul>
+<p>allow it, so that the isolation the documentation promises is real.</p>
+<ul>
+<li>As the operator, I want to see what the daemon would deny before it denies it, so that
+</li>
+</ul>
+<p>an upgrade does not cut off a tailnet I depend on.</p>
+<ul>
+<li>As the operator, I want the upgrade to keep my current reachability, so that nothing
+</li>
+</ul>
+<p>breaks the day I install version 1.0.</p>
+<ul>
+<li>As the operator, I want the daemon's rules to live in their own chain, so that the
+</li>
+</ul>
+<p>daemon writes no rule into a chain that I own.</p>
+<ul>
+<li>As the operator, I want to read an event when another rule displaces the jump rule of
+</li>
+</ul>
+<p>the daemon, so that I see a change to the order of <code>FORWARD</code> that I did not make.</p>
+<h3 id="reachability-model-functional-requirements">Functional requirements</h3>
+<h4 id="reachability-model-the-chain">The chain</h4>
+<ul>
+<li><strong>FR-access-1</strong> — The daemon creates the iptables chain <code>HYDRASCALE-FWD</code> in the
+</li>
+</ul>
+<p><code>filter</code> table.</p>
+<ul>
+<li><strong>FR-access-2</strong> — The daemon inserts exactly one rule into <code>FORWARD</code>, which jumps to
+</li>
+</ul>
+<p><code>HYDRASCALE-FWD</code>, and it inserts that rule at position 1.</p>
+<ul>
+<li><strong>FR-access-2a</strong> — The daemon reads the position of its jump rule in <code>FORWARD</code> on each
+</li>
+</ul>
+<p>tick, and it writes the jump rule again when <code>FORWARD</code> holds none.</p>
+<ul>
+<li><strong>FR-access-2b</strong> — The daemon records the event <code>access.jump_displaced</code> when the
+</li>
+</ul>
+<p>position of its jump rule changes to a position other than 1. The event names the position and the target of each rule above the jump rule.</p>
+<ul>
+<li><strong>FR-access-2c</strong> — <code>GET /api/status</code> carries the position of the jump rule in the field
+</li>
+</ul>
+<p><code>access.jump_position</code>.</p>
+<ul>
+<li><strong>FR-access-3</strong> — The daemon owns every rule in <code>HYDRASCALE-FWD</code> and no rule outside
+</li>
+</ul>
+<p>it, other than the single jump.</p>
+<ul>
+<li><strong>FR-access-4</strong> — The last rule in <code>HYDRASCALE-FWD</code> accepts when <code>access.mode</code> is
+</li>
+</ul>
+<p><code>observe</code>, and it drops when <code>access.mode</code> is <code>enforce</code>.</p>
+<ul>
+<li><strong>FR-access-4a</strong> — The last rule in <code>HYDRASCALE-OUT</code>, for each namespace device,
+</li>
+</ul>
+<p>accepts when <code>access.mode</code> is <code>observe</code>, and it drops when <code>access.mode</code> is <code>enforce</code>.</p>
+<ul>
+<li><strong>FR-access-5</strong> — The daemon creates the chain <code>HYDRASCALE-OUT</code> for traffic that a
+</li>
+</ul>
+<p>namespace sends to the host itself, and it jumps to it from <code>INPUT</code>.</p>
+<h4 id="reachability-model-the-rule-set">The rule set</h4>
+<ul>
+<li><strong>FR-access-6</strong> — A local rule has a <code>from</code>, a <code>to</code>, and a list of ports.
+</li>
+<li><strong>FR-access-7</strong> — <code>from</code> is a tailnet identifier or the literal <code>host</code>.
+</li>
+<li><strong>FR-access-8</strong> — <code>to</code> is a tailnet identifier, the literal <code>host</code>, or the literal
+</li>
+</ul>
+<p><code>internet</code>.</p>
+<ul>
+<li><strong>FR-access-9</strong> — An empty port list allows every port and every protocol.
+</li>
+<li><strong>FR-access-10</strong> — A port entry matches <code>tcp/&lt;n&gt;</code>, <code>udp/&lt;n&gt;</code>, <code>tcp/&lt;n&gt;-&lt;m&gt;</code>, or
+</li>
+</ul>
+<p><code>udp/&lt;n&gt;-&lt;m&gt;</code>, where each number is between 1 and 65535.</p>
+<ul>
+<li><strong>FR-access-11</strong> — The daemon rejects a rule where <code>from</code> equals <code>to</code>.
+</li>
+<li><strong>FR-access-12</strong> — The daemon rejects a rule that names a tailnet that the
+</li>
+</ul>
+<p>configuration does not declare.</p>
+<ul>
+<li><strong>FR-access-13</strong> — The daemon allows return traffic for an established connection
+</li>
+</ul>
+<p>without a rule.</p>
+<ul>
+<li><strong>FR-access-14</strong> — The daemon allows a namespace to reach the DNS forwarder bind
+</li>
+</ul>
+<p>address without a rule, because DNS is how the product works.</p>
+<h4 id="reachability-model-compilation">Compilation</h4>
+<ul>
+<li><strong>FR-access-15</strong> — The daemon compiles the rule set into an ordered list of iptables
+</li>
+</ul>
+<p>arguments. The compiler is a pure function of the rule set and the namespace addresses.</p>
+<ul>
+<li><strong>FR-access-16</strong> — The compiler produces the same output for the same input.
+</li>
+<li><strong>FR-access-17</strong> — The daemon compares the compiled rule set with the live chain and
+</li>
+</ul>
+<p>it writes only when they differ.</p>
+<ul>
+<li><strong>FR-access-18</strong> — The daemon writes the chain with <code>iptables-restore --noflush</code> on a
+</li>
+</ul>
+<p>table that contains only its own chains, so that one write is atomic.</p>
+<h4 id="reachability-model-modes-and-migration">Modes and migration</h4>
+<ul>
+<li><strong>FR-access-19</strong> — <code>access.mode</code> accepts <code>enforce</code> and <code>observe</code>, and it defaults to
+</li>
+</ul>
+<p><code>enforce</code>.</p>
+<ul>
+<li><strong>FR-access-20</strong> — In <code>observe</code> mode, the daemon logs each packet that it would drop,
+</li>
+</ul>
+<p>through an iptables <code>LOG</code> rule with the prefix <code>hydrascale-would-deny: </code>, and it then accepts that packet.</p>
+<ul>
+<li><strong>FR-access-20a</strong> — In <code>observe</code> mode, the policy of <code>FORWARD</code> and the policy of
+</li>
+</ul>
+<p><code>INPUT</code> receive no packet that a namespace device carries, because the tail of each daemon chain accepts before the packet leaves the chain.</p>
+<ul>
+<li><strong>FR-access-21</strong> — When the configuration contains no <code>access</code> block, the daemon
+</li>
+</ul>
+<p>writes the rule set that preserves the reachability of version 0.9 on first start.</p>
+<ul>
+<li><strong>FR-access-22</strong> — The preserving rule set contains one rule per tailnet, from that
+</li>
+</ul>
+<p>tailnet to <code>internet</code>, with an empty port list.</p>
+<ul>
+<li><strong>FR-access-23</strong> — The daemon records the event <code>access.migrated</code> with the rules it
+</li>
+</ul>
+<p>wrote.</p>
+<ul>
+<li><strong>FR-access-24</strong> — The daemon writes the generated <code>access</code> block into the
+</li>
+</ul>
+<p>configuration file, and it keeps a copy of the previous file at <code>&lt;config&gt;.pre-v1.backup</code>.</p>
+<h4 id="reachability-model-the-control-api">The control API</h4>
+<ul>
+<li><strong>FR-access-25</strong> — <code>GET /api/access</code> returns the rule set, the mode, and the compiled
+</li>
+</ul>
+<p>reachability.</p>
+<ul>
+<li><strong>FR-access-26</strong> — <code>PUT /api/access</code> replaces the whole rule set.
+</li>
+<li><strong>FR-access-27</strong> — <code>PUT /api/access</code> validates every rule before it writes any rule.
+</li>
+<li><strong>FR-access-28</strong> — <code>PUT /api/access</code> returns the compiled reachability that the new
+</li>
+</ul>
+<p>rule set produces, without applying it, when the query parameter <code>dry_run=true</code> is set.</p>
+<h3 id="reachability-model-user-flows">User flows</h3>
+<h4 id="reachability-model-the-operator-upgrades-from-version-0-9">The operator upgrades from version 0.9</h4>
+<ol>
+<li>The operator installs the version 1.0 binary and restarts the service.
+</li>
+<li>The daemon reads the configuration and finds no <code>access</code> block.
+</li>
+<li>The daemon writes <code>&lt;config&gt;.pre-v1.backup</code>.
+</li>
+<li>The daemon builds the preserving rule set, one rule per tailnet to <code>internet</code>.
+</li>
+<li>The daemon writes the <code>access</code> block into the configuration file.
+</li>
+<li>The daemon records <code>access.migrated</code> and logs each rule that it wrote.
+</li>
+<li>The daemon applies the rule set.
+</li>
+<li>Each tailnet keeps its internet path. No tailnet can reach another tailnet.
+</li>
+</ol>
+<h4 id="reachability-model-the-operator-checks-before-enforcement">The operator checks before enforcement</h4>
+<ol>
+<li>The operator sets <code>access.mode: observe</code> and restarts the service.
+</li>
+<li>The daemon writes the chain with a <code>LOG</code> rule and an <code>ACCEPT</code> rule, and no drop.
+</li>
+<li>The operator uses the host normally for a day.
+</li>
+<li>The operator reads <code>journalctl -k | grep hydrascale-would-deny</code>. The <code>LOG</code> target
+</li>
+</ol>
+<p>writes to the kernel log, therefore the unit journal holds no such line.</p>
+<ol>
+<li>The operator adds a rule for each path that the log shows and that the operator wants.
+</li>
+<li>The operator sets <code>access.mode: enforce</code> and restarts the service.
+</li>
+</ol>
+<h4 id="reachability-model-the-reconciler-applies-a-changed-rule-set">The reconciler applies a changed rule set</h4>
+<ol>
+<li>The console sends <code>PUT /api/access</code>.
+</li>
+<li>The daemon validates every rule.
+</li>
+<li>The daemon writes the rule set into the configuration file.
+</li>
+<li>The reconciler ticks.
+</li>
+<li>The reconciler compiles the rule set and compares it with the live chain.
+</li>
+<li>The reconciler writes the chain when it differs.
+</li>
+<li>The reconciler records <code>access.applied</code> with the count of rules.
+</li>
+</ol>
+<h3 id="reachability-model-screens-states">Screens &amp; states</h3>
+<p>This feature set has no screen. <code>features/07-console-access-editor.md</code> defines the screens that drive it.</p>
+<h3 id="reachability-model-behaviour-rules">Behaviour rules</h3>
+<ul>
+<li>Deny is the default. A rule allows. There is no deny rule, because a rule set with
+</li>
+</ul>
+<p>both is a rule set with an order that the operator must reason about.</p>
+<ul>
+<li>The daemon never writes a rule outside its own chains. An operator firewall rule stays
+</li>
+</ul>
+<p>where the operator put it.</p>
+<ul>
+<li>The daemon inserts the jump rule at position 1. The operator decided this on
+</li>
+</ul>
+<p>2026-08-05: "I guess 1, but we need to make sure we catch if this is an issue." The position is not stable, because <code>ts-forward</code>, <code>DOCKER-USER</code> and <code>DOCKER-FORWARD</code> each take position 1 after the daemon starts. The daemon therefore reads the position on each tick and records <code>access.jump_displaced</code> when the position changes.</p>
+<ul>
+<li>The daemon filters a forwarded packet that involves a namespace device, and it returns
+</li>
+</ul>
+<p>every other forwarded packet to <code>FORWARD</code>. The jump rule sits at position 1, so every forwarded packet of the host enters <code>HYDRASCALE-FWD</code>. The rule <code>-A HYDRASCALE-FWD ! -i vh+ ! -o vh+ -j RETURN</code> keeps the container traffic and the subnet route traffic of the operator, so the deny default applies to namespace traffic alone. The operator confirmed this on 2026-08-05: "Keep the RETURN guard".</p>
+<ul>
+<li>A rule set that fails validation is not partially applied. Validate everything, then
+</li>
+</ul>
+<p>write.</p>
+<ul>
+<li>The migration runs once. The daemon detects it by the presence of the <code>access</code> key,
+</li>
+</ul>
+<p>not by a version marker, so a manually written empty <code>access</code> block suppresses it.</p>
+<ul>
+<li>The <code>internet</code> destination means a public address only. The daemon excludes every
+</li>
+</ul>
+<p>namespace device and these five ranges:</p>
+<ul>
+<li><code>10.0.0.0/8</code>
+<ul>
+<li><code>172.16.0.0/12</code>
+</li>
+<li><code>192.168.0.0/16</code>
+</li>
+<li><code>169.254.0.0/16</code>
+</li>
+<li><code>127.0.0.0/8</code>
+</li>
+</ul>
+</li>
+<li>The host local network is inside one of the five ranges, therefore an <code>internet</code> rule
+</li>
+</ul>
+<p>gives no path to it. To reach a host on the operator local network needs its own rule. The operator decided this on 2026-08-05: "Exclude all RFC1918 + the host's subnets".</p>
+<h3 id="reachability-model-data-touched">Data touched</h3>
+<div class="table-wrap"><table>
+<tr><th>Entity</th><th>Change</th></tr>
+<tr><td>Configuration</td><td>New <code>access</code> block with <code>mode</code> and <code>rules</code>.</td></tr>
+<tr><td>Event</td><td>New kinds <code>access.applied</code>, <code>access.migrated</code>, <code>access.write_failed</code>, and <code>access.jump_displaced</code>.</td></tr>
+<tr><td>Status</td><td>New field <code>access</code> with the mode, the rule count, and the jump rule position.</td></tr>
+</table></div>
+<h3 id="reachability-model-interfaces">Interfaces</h3>
+<h4 id="reachability-model-get-api-access"><code>GET /api/access</code></h4>
+<pre class="code"><code>{
+  "mode": "enforce",
+  "rules": [
+    { "from": "jbones", "to": "homelab", "ports": ["tcp/22", "tcp/443"] },
+    { "from": "jbones", "to": "internet", "ports": [] }
+  ],
+  "nodes": [
+    { "id": "jbones", "kind": "tailnet", "peers": 6, "veth": "10.99.0.2" },
+    { "id": "homelab", "kind": "tailnet", "peers": 3, "veth": "10.99.0.6" },
+    { "id": "host", "kind": "host" },
+    { "id": "internet", "kind": "internet" }
+  ]
+}</code></pre>
+<h4 id="reachability-model-put-api-access"><code>PUT /api/access</code></h4>
+<p>The request body has the same <code>mode</code> and <code>rules</code> fields. The response is the new <code>GET /api/access</code> body. A validation failure returns HTTP 400 and <code>{"error": "&lt;message&gt;"}</code>.</p>
+<h4 id="reachability-model-iptables">iptables</h4>
+<p>The compiler emits, for a rule from tailnet <code>a</code> to tailnet <code>b</code> with port <code>tcp/22</code>:</p>
+<pre class="code"><code>-A HYDRASCALE-FWD -i vh&lt;hash-a&gt; -o vh&lt;hash-b&gt; -p tcp --dport 22 -j ACCEPT</code></pre>
+<p>The chain opens with the established-connection rule and closes with the policy rule:</p>
+<pre class="code"><code>-A HYDRASCALE-FWD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+…
+-A HYDRASCALE-FWD -j DROP</code></pre>
+<p><code>iptables-restore</code> accepts a rule file on standard input. The <code>--noflush</code> flag keeps chains that the file does not name. The behaviour is documented in <code>iptables-restore(8)</code>.</p>
+<h3 id="reachability-model-edge-cases-failures">Edge cases &amp; failures</h3>
+<div class="table-wrap"><table>
+<tr><th>Case</th><th>Behaviour</th></tr>
+<tr><td>The chain write fails halfway.</td><td>It cannot. <code>iptables-restore</code> applies the file as one transaction. A failure leaves the previous chain in place and records <code>access.write_failed</code>.</td></tr>
+<tr><td>The host runs <code>nftables</code> through the <code>iptables-nft</code> compatibility layer.</td><td>The commands work, because the compatibility layer implements them. Epic 5 verifies this on the test host and records the kernel and the backend.</td></tr>
+<tr><td>An operator firewall reloads and removes the jump rule.</td><td>The reconciler detects the missing jump on the next tick and re-adds it. It records <code>access.jump_displaced</code> so that the operator sees the conflict.</td></tr>
+<tr><td>Another service takes position 1 of <code>FORWARD</code>.</td><td>The reconciler reads the position on each tick and records <code>access.jump_displaced</code>. It names the position and the target of each rule above the jump rule. It moves no rule of the operator.</td></tr>
+<tr><td>A tailnet is removed while a rule names it.</td><td>The daemon drops the rules that name the removed tailnet and records an event. It does not refuse to start.</td></tr>
+<tr><td>Two tailnets use overlapping peer address ranges.</td><td>The rules match on the veth device rather than on the address, so overlap does not matter. This is why the compiler uses interfaces.</td></tr>
+<tr><td>The operator sets <code>access.mode: observe</code> on a busy host.</td><td>The <code>LOG</code> rule can fill the journal. The compiler adds <code>-m limit --limit 60/minute</code> to the <code>LOG</code> rule.</td></tr>
+<tr><td>The operator sets <code>access.mode: observe</code> on a host that runs Docker.</td><td>The tail accepts, therefore the packet reaches no later chain of <code>FORWARD</code>, and <code>ts-forward</code>, <code>DOCKER-USER</code> and <code>DOCKER-FORWARD</code> do not see it. Version 0.9 wrote <code>ACCEPT</code> rules into <code>FORWARD</code> and had the same behaviour. The mode <code>enforce</code> is the default and it does not change.</td></tr>
+<tr><td>IPv6 traffic.</td><td>Version 1.0 writes IPv4 rules only. The daemon logs at start that IPv6 forwarding is not filtered, so the gap is stated rather than hidden.</td></tr>
+</table></div>
+<h3 id="reachability-model-acceptance-criteria">Acceptance criteria</h3>
+<ul>
+<li>[ ] The compiler is a pure function and a test asserts its exact output for a fixed
+</li>
+</ul>
+<p>rule set.</p>
+<ul>
+<li>[ ] A test asserts that the compiler rejects <code>tcp/0</code>, <code>tcp/65536</code>, and <code>tcp/22-21</code>.
+</li>
+<li>[ ] A test asserts that the compiler rejects a rule where <code>from</code> equals <code>to</code>.
+</li>
+<li>[ ] A test asserts that the daemon inserts one jump rule into <code>FORWARD</code> at position 1.
+</li>
+<li>[ ] A test asserts that the daemon records <code>access.jump_displaced</code> for a jump rule at
+</li>
+</ul>
+<p>position 4, and that it records no event for a jump rule at position 1.</p>
+<ul>
+<li>[ ] A test asserts that a rule set with no <code>access</code> block produces the preserving rule
+</li>
+</ul>
+<p>set with one rule per tailnet to <code>internet</code>.</p>
+<ul>
+<li>[ ] A test asserts that the daemon writes <code>&lt;config&gt;.pre-v1.backup</code> before it changes
+</li>
+</ul>
+<p>the configuration file.</p>
+<ul>
+<li>[ ] <code>PUT /api/access</code> with an invalid rule returns HTTP 400 and changes nothing.
+</li>
+<li>[ ] <code>PUT /api/access?dry_run=true</code> returns the compiled result and changes nothing.
+</li>
+<li>[ ] On the test host with two tailnets and no rule between them,
+</li>
+</ul>
+<p><code>ip netns exec ns-a ping -c1 &lt;veth address of b&gt;</code> fails.</p>
+<ul>
+<li>[ ] On the test host, after a rule from <code>a</code> to <code>b</code> is added, the same command succeeds.
+</li>
+<li>[ ] On the test host, <code>ip netns exec ns-a curl -sS https://example.com</code> succeeds with
+</li>
+</ul>
+<p>the <code>internet</code> rule and fails without it.</p>
+<ul>
+<li>[ ] On the test host, <code>observe</code> mode writes <code>hydrascale-would-deny</code> lines to the kernel
+</li>
+</ul>
+<p>log and drops nothing. <code>journalctl -k | grep hydrascale-would-deny</code> reads them.</p>
+<ul>
+<li>[ ] On the test host in <code>observe</code> mode, a path that no rule allows carries traffic and
+</li>
+</ul>
+<p>the policy counter of <code>FORWARD</code> does not rise.</p>
+<ul>
+<li>[ ] On the test host, the daemon re-adds the jump rule after <code>iptables -F FORWARD</code>.
+</li>
+<li>[ ] On the test host, <code>iptables -I FORWARD 1 -j ACCEPT</code> displaces the jump rule, and
+</li>
+</ul>
+<p>the daemon records <code>access.jump_displaced</code> within one tick.</p>
+<h3 id="reachability-model-out-of-scope">Out of scope</h3>
+<ul>
+<li>IPv6 rules. The gap is recorded and logged.
+</li>
+<li>Per-peer rules. A rule names a tailnet, not a device inside it. Per-peer control is
+</li>
+</ul>
+<p>what the upstream policy does, and <code>features/08-upstream-policy.md</code> covers it.</p>
+<ul>
+<li>A rule that denies. The model is allow-only.
+</li>
+<li>Rate limiting or shaping.
+</li>
+</ul>
+<h3 id="reachability-model-open-questions" class="callout-h">Open questions</h3>
+<p>None.</p><nav class="pager">
+<a href="feature-dns-integrity.html">&larr; Feature: DNS integrity</a>
+<a href="feature-console-foundation.html">Feature: Console foundation &rarr;</a>
+</nav>
+</main>
+</div>
+<script>document.querySelectorAll('.diagram').forEach(function(d){d.classList.add('raw')});</script>
+<script type="application/json" id="rv-embedded">[]</script>
+<script>
+(function(){
+  'use strict';
+  var PAGE = document.body.getAttribute('data-page');
+  // storage key carries the spec's slug: file:// pages can share one
+  // localStorage pool, and two specs must never share a comment store
+  var RVKEY = 'spec-review:' + (document.body.getAttribute('data-rvkey') || 'spec');
+  var EMBED = [];
+  var embedEl = document.getElementById('rv-embedded');
+  if (embedEl) { try { EMBED = JSON.parse(embedEl.textContent); } catch(e){} }
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(RVKEY)) || {comments:[], deleted:[]}; } catch(e){ return {comments:[], deleted:[]}; } }
+  function saveLocal(s){ try { localStorage.setItem(RVKEY, JSON.stringify(s)); } catch(e){} }
+  function cid(c){ return c.page + '|' + c.section + '|' + (c.date||'') + '|' + c.body.slice(0,24); }
+  function allComments(){
+    var s = loadLocal(), map = {};
+    EMBED.forEach(function(c){ map[cid(c)] = c; });
+    s.comments.forEach(function(c){ map[cid(c)] = c; });
+    s.deleted.forEach(function(id){ delete map[id]; });
+    return Object.keys(map).map(function(k){ return map[k]; });
+  }
+  function upsert(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    s.comments.push(c);
+    s.deleted = s.deleted.filter(function(x){ return x !== id; });
+    saveLocal(s); refresh();
+  }
+  function remove(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    if (EMBED.some(function(x){ return cid(x) === id; })) s.deleted.push(id);
+    saveLocal(s); refresh();
+  }
+  function today(){ return new Date().toISOString().slice(0,10); }
+  function exportMd(){
+    var lines = ['# Review comments', '',
+      '<!-- Exported from the spec review layer. Save this file as',
+      '     docs/specs/review-comments.md and re-run render-spec.py to embed',
+      '     every comment under its section for the next review round. -->', ''];
+    allComments().sort(function(a,b){
+      return (a.page+a.section).localeCompare(b.page+b.section);
+    }).forEach(function(c){
+      lines.push('## [' + c.page + '] ' + (c.section||''));
+      lines.push('status: ' + (c.status||'open'));
+      lines.push('date: ' + (c.date||today()));
+      lines.push(c.body); lines.push('');
+    });
+    var blob = new Blob([lines.join('\n')], {type:'text/markdown'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-comments.md';
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function importMd(file){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var text = String(reader.result);
+      var blocks = text.split(/^## /m).slice(1);
+      blocks.forEach(function(b){
+        var head = b.match(/^\[([^\]]+)\]\s*(\S*)/);
+        if (!head) return;
+        var status = (b.match(/^status:\s*(\S+)/m)||[])[1] || 'open';
+        var date = (b.match(/^date:\s*(\S+)/m)||[])[1] || today();
+        var body = b.replace(/^\[[^\]]*\]\s*\S*\s*\n/, '')
+                    .replace(/^status:.*\n?/m,'').replace(/^date:.*\n?/m,'').trim();
+        if (body) upsert({page:head[1], section:head[2]||'', status:status, date:date, body:body});
+      });
+      refresh();
+    };
+    reader.readAsText(file);
+  }
+  function commentBox(c){
+    var div = document.createElement('div');
+    div.className = 'rv-comment' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var head = document.createElement('div'); head.className = 'rv-head';
+    head.textContent = '💬 ' + (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(){ remove(c); c = Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'}); upsert(c); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(){ if (confirm('Delete this comment?')) remove(c); };
+    head.appendChild(tog); head.appendChild(del);
+    var body = document.createElement('div'); body.className = 'rv-body';
+    body.textContent = c.body;
+    div.appendChild(head); div.appendChild(body);
+    return div;
+  }
+  function editor(section, after){
+    var wrap = document.createElement('div');
+    wrap.className = 'rv-comment rv-editor';
+    var ta = document.createElement('textarea');
+    ta.placeholder = 'Comment on this section…';
+    var actions = document.createElement('div'); actions.className = 'rv-actions';
+    var save = document.createElement('button'); save.textContent = 'Save';
+    save.onclick = function(){
+      if (ta.value.trim()) upsert({page:PAGE, section:section, status:'open', date:today(), body:ta.value.trim()});
+      wrap.remove();
+    };
+    var cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+    cancel.className = 'rv-cancel'; cancel.onclick = function(){ wrap.remove(); };
+    actions.appendChild(save); actions.appendChild(cancel);
+    wrap.appendChild(ta); wrap.appendChild(actions);
+    after.insertAdjacentElement('afterend', wrap);
+    ta.focus();
+  }
+  // --- headings, inline buttons ---
+  var mainH1 = document.querySelector('main h1');
+  if (mainH1 && !mainH1.id) { mainH1.id = 'page-title'; }
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll('main h1[id], main h2[id], main h3[id], main h4[id]'));
+  headings.forEach(function(h){
+    var b = document.createElement('button');
+    b.className = 'rv-add'; b.textContent = '💬 comment'; b.title = 'Comment on this section';
+    b.onclick = function(){ editor(h.id, h); };
+    h.appendChild(b);
+  });
+  function headingTitle(h){
+    var t = h.childNodes[0] ? h.childNodes[0].textContent : h.textContent;
+    return t.trim();
+  }
+  function titleFor(section){
+    var el = section && document.getElementById(section);
+    return el ? headingTitle(el) : (section || '(page)');
+  }
+
+  // --- drawer ---
+  var drawer = document.createElement('div');
+  drawer.id = 'rv-drawer';
+  drawer.innerHTML =
+    '<header><strong>Review</strong> <span class="rv-count"></span></header>' +
+    '<div class="rv-compose">' +
+    '<div class="rv-live">Commenting on the section in view:</div>' +
+    '<label for="rv-sec"></label><select id="rv-sec"></select>' +
+    '<textarea id="rv-text" placeholder="Type as you read… (Ctrl+Enter saves)"></textarea>' +
+    '<div style="margin-top:.4rem; display:flex; gap:.5rem;">' +
+    '<button class="rv-primary" id="rv-save">Save comment</button>' +
+    '<button id="rv-clear">Clear</button></div></div>' +
+    '<div class="rv-list"></div>' +
+    '<footer><button id="rv-export">Export .md</button>' +
+    '<button id="rv-import">Import</button>' +
+    '<span class="rv-otherpages"></span></footer>';
+  document.body.appendChild(drawer);
+  var toggle = document.createElement('button');
+  toggle.id = 'rv-toggle';
+  toggle.onclick = function(){
+    document.body.classList.toggle('rv-open');
+    try { localStorage.setItem(RVKEY + ':open', document.body.classList.contains('rv-open') ? '1' : ''); } catch(e){}
+  };
+  document.body.appendChild(toggle);
+  try { if (localStorage.getItem(RVKEY + ':open')) document.body.classList.add('rv-open'); } catch(e){}
+
+  var sel = drawer.querySelector('#rv-sec');
+  headings.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h.id; opt.textContent = headingTitle(h);
+    sel.appendChild(opt);
+  });
+  var followScroll = true;
+  sel.onchange = function(){ followScroll = false; };
+
+  // scroll spy: pick the last heading above the upper third of the viewport
+  function currentSection(){
+    var line = window.innerHeight * 0.33, best = headings[0];
+    for (var i = 0; i < headings.length; i++) {
+      if (headings[i].getBoundingClientRect().top <= line) best = headings[i];
+    }
+    return best ? best.id : '';
+  }
+  window.addEventListener('scroll', function(){
+    if (!followScroll) return;
+    var s = currentSection();
+    if (s && sel.value !== s) sel.value = s;
+  }, {passive:true});
+  // typing pins the target section so a stray scroll can't retarget the comment
+  drawer.querySelector('#rv-text').addEventListener('input', function(){
+    if (this.value.trim()) followScroll = false;
+    else followScroll = true;
+  });
+
+  function saveFromDrawer(){
+    var ta = drawer.querySelector('#rv-text');
+    if (!ta.value.trim()) return;
+    upsert({page:PAGE, section:sel.value, status:'open', date:today(), body:ta.value.trim()});
+    ta.value = ''; followScroll = true;
+  }
+  drawer.querySelector('#rv-save').onclick = saveFromDrawer;
+  drawer.querySelector('#rv-text').addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveFromDrawer();
+  });
+  drawer.querySelector('#rv-clear').onclick = function(){
+    drawer.querySelector('#rv-text').value = ''; followScroll = true;
+  };
+  drawer.querySelector('#rv-export').onclick = exportMd;
+  var fileIn = document.createElement('input');
+  fileIn.type = 'file'; fileIn.accept = '.md,text/markdown'; fileIn.style.display = 'none';
+  fileIn.onchange = function(){ if (fileIn.files[0]) importMd(fileIn.files[0]); };
+  drawer.appendChild(fileIn);
+  drawer.querySelector('#rv-import').onclick = function(){ fileIn.click(); };
+
+  function drawerItem(c){
+    var div = document.createElement('div');
+    div.className = 'rv-item' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var where = document.createElement('div'); where.className = 'rv-where';
+    where.textContent = titleFor(c.section);
+    var text = document.createElement('div'); text.className = 'rv-text';
+    text.textContent = c.body;
+    var meta = document.createElement('div'); meta.className = 'rv-meta';
+    meta.textContent = (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(e){ e.stopPropagation(); remove(c);
+      upsert(Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'})); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(e){ e.stopPropagation();
+      if (confirm('Delete this comment?')) remove(c); };
+    meta.appendChild(tog); meta.appendChild(del);
+    div.appendChild(where); div.appendChild(text); div.appendChild(meta);
+    div.onclick = function(){
+      var el = c.section && document.getElementById(c.section);
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+    return div;
+  }
+
+  function refresh(){
+    document.querySelectorAll('.rv-comment:not(.rv-editor)').forEach(function(el){ el.remove(); });
+    var all = allComments();
+    var mine = all.filter(function(c){ return c.page === PAGE; });
+    mine.forEach(function(c){
+      var target = c.section && document.getElementById(c.section);
+      var anchor = target || mainH1 || document.body.querySelector('main') || document.body;
+      anchor.insertAdjacentElement('afterend', commentBox(c));
+    });
+    var open = all.filter(function(c){ return c.status !== 'resolved'; }).length;
+    toggle.textContent = '💬 Review (' + open + ')';
+    drawer.querySelector('.rv-count').textContent =
+      open + ' open / ' + all.length + ' total';
+    var list = drawer.querySelector('.rv-list');
+    list.innerHTML = '';
+    mine.slice().reverse().forEach(function(c){ list.appendChild(drawerItem(c)); });
+    var others = {};
+    all.forEach(function(c){ if (c.page !== PAGE) others[c.page] = (others[c.page]||0) + 1; });
+    var otherKeys = Object.keys(others);
+    drawer.querySelector('.rv-otherpages').textContent = otherKeys.length
+      ? 'Other pages: ' + otherKeys.map(function(k){ return k + ' (' + others[k] + ')'; }).join(', ')
+      : '';
+  }
+  refresh();
+  var s0 = currentSection();
+  if (s0) sel.value = s0;
+})();
+</script>
+</body>
+</html>
