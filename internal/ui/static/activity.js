@@ -16,9 +16,10 @@ import { activityMarkup, activityRows } from "./panels.js";
 /**
  * draw draws the activity view from one poll snapshot.
  *
- * snapshot.status holds the merged body of the poll, and its field events holds the body
- * of GET /api/events. The shell draws the stale marker in the poll banner, so this view
- * draws the last known list and adds no second marker.
+ * snapshot.status holds the merged body of the poll: its field events holds the body of
+ * GET /api/events, and its field policy holds the body of GET /api/policy. The shell
+ * draws the stale marker in the poll banner, so this view draws the last known list and
+ * adds no second marker.
  */
 function draw(section, snapshot) {
   section.replaceChildren();
@@ -37,9 +38,10 @@ function draw(section, snapshot) {
     return;
   }
 
-  const events = (snapshot.status && snapshot.status.events) || [];
+  const status = snapshot.status;
+  const events = (status && status.events) || [];
   // The serializer escapes every value that the daemon reported, and a test asserts that.
-  section.innerHTML = activityMarkup(activityRows(events));
+  section.innerHTML = activityMarkup(activityRows(events), (status && status.policy) || []);
 }
 
 registerView("activity", draw);

@@ -382,3 +382,64 @@ test("the topology escapes every value that the daemon reports", () => {
   assert.ok(!markup.includes("a<b"), "the topology writes a raw angle bracket");
   assert.ok(markup.includes("a&lt;b"));
 });
+
+test("a tailnet with no usable policy credential carries a second state on its node, and reachable does not change", () => {
+  // Issue #287. Local reachability and upstream policy are two independent systems, so
+  // the topology draws the credential problem beside reachable rather than in place of it.
+  const status = statusWith({
+    havoc: { reach: { state: "reachable" } },
+    jbones: { reach: { state: "reachable" } },
+  });
+  status.policy = [
+    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+    { id: "jbones", kind: "tailscale", credential_state: "usable" },
+  ];
+  const access = accessWith(
+    [
+      { id: "havoc", peers: 1, veth: "10.99.0.2" },
+      { id: "jbones", peers: 1, veth: "10.99.0.6" },
+    ],
+    [],
+  );
+  const model = buildTopology(status, access);
+
+  const havoc = model.nodes.find((node) => node.id === "havoc");
+  const jbones = model.nodes.find((node) => node.id === "jbones");
+  assert.equal(havoc.word, "reachable", "the reachability word does not change");
+  assert.deepEqual(havoc.credential, {
+    tone: "crit",
+    reason: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+  });
+  assert.equal(jbones.credential, null);
+});
+
+test("the topology marks the node of a missing credential with a second dot, and names the reason in the text equivalent", () => {
+  const status = statusWith({ havoc: { reach: { state: "reachable" } } });
+  status.policy = [
+    { id: "havoc", kind: "tailscale", credential_state: "rejected", reason: "the control server rejected the credential of \"havoc\"" },
+  ];
+  const access = accessWith([{ id: "havoc", peers: 0, veth: "10.99.0.2" }], []);
+  const model = buildTopology(status, access);
+
+  assert.ok(
+    model.sentences.some((sentence) => sentence.includes("the control server rejected the credential of \"havoc\"")),
+    "the text equivalent names no credential reason",
+  );
+
+  const markup = topologySVGMarkup(model, null);
+  assert.match(markup, /<circle class="dot crit"[^>]*><title>the control server rejected the credential of &quot;havoc&quot;<\/title><\/circle>/);
+  assert.match(markup, /needs a policy credential/);
+});
+
+test("a poll with no policy field draws no credential dot", () => {
+  const model = three();
+  const markup = topologySVGMarkup(model, null);
+  assert.ok(!markup.includes("needs a policy credential"));
+  assert.deepEqual(model.sentences, [
+    "jbones reaches internet.",
+    "jbones reaches host on tcp/22.",
+    "homelab reaches internet.",
+    "homelab reaches host.",
+    "corp-prod reaches internet.",
+  ]);
+});

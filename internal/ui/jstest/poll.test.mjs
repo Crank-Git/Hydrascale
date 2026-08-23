@@ -15,6 +15,7 @@ import {
   ACCESS_ROUTE,
   DNS_ROUTE,
   EVENTS_ROUTE,
+  POLICY_ROUTE,
   STATUS_ROUTE,
   VIEWS,
   consoleRequestInit,
@@ -294,10 +295,11 @@ test("the shell names six views and each one holds a heading and an empty state"
   }
 });
 
-test("one poll reads the status route, the access route, the event route, and the DNS route", async () => {
+test("one poll reads the status route, the access route, the event route, the DNS route, and the policy route", async () => {
   assert.equal(ACCESS_ROUTE, "/api/access");
   assert.equal(EVENTS_ROUTE, "/api/events");
   assert.equal(DNS_ROUTE, "/api/dns");
+  assert.equal(POLICY_ROUTE, "/api/policy");
 
   const asked = [];
   const bodies = {
@@ -305,6 +307,9 @@ test("one poll reads the status route, the access route, the event route, and th
     "/api/access": { mode: "enforce", rules: [], nodes: [] },
     "/api/events": { events: [{ Time: "2026-08-05T14:02:19Z", Type: "reconcile_complete" }] },
     "/api/dns": { mode: "unified", namespaces: [], upstreams: [] },
+    "/api/policy": {
+      tailnets: [{ id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" }],
+    },
   };
 
   const body = await fetchConsoleState((route) => {
@@ -316,6 +321,7 @@ test("one poll reads the status route, the access route, the event route, and th
     "/api/access",
     "/api/dns",
     "/api/events",
+    "/api/policy",
     "/api/status",
   ]);
   assert.equal(body.server_version, "1.0.0");
@@ -323,6 +329,21 @@ test("one poll reads the status route, the access route, the event route, and th
   assert.deepEqual(body.access_model, bodies["/api/access"]);
   assert.equal(body.events.length, 1);
   assert.deepEqual(body.dns, bodies["/api/dns"]);
+  assert.deepEqual(body.policy, bodies["/api/policy"].tailnets);
+});
+
+test("a poll body with no policy route reply reports an empty policy list", async () => {
+  // GET /api/policy always answers, unlike GET /api/policy/{id}, so this guards the
+  // fallback rather than a real daemon response.
+  const bodies = {
+    "/api/status": { server_version: "1.0.0" },
+    "/api/access": { mode: "enforce", rules: [], nodes: [] },
+    "/api/events": { events: [] },
+    "/api/dns": { mode: "unified", namespaces: [], upstreams: [] },
+    "/api/policy": {},
+  };
+  const body = await fetchConsoleState((route) => Promise.resolve(bodies[route]));
+  assert.deepEqual(body.policy, []);
 });
 
 test("a poll that reads one route with an error fails the whole poll", async () => {

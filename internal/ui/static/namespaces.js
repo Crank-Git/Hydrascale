@@ -81,6 +81,25 @@ function reachabilityOf(status, id) {
   return { word: "not probed", tone: "" };
 }
 
+/**
+ * credentialOf returns the upstream policy credential problem of one tailnet as a dot
+ * tone and its reason, word for word, and null when the credential is usable or the poll
+ * holds no policy entry for the tailnet yet.
+ *
+ * status.policy is the field that fetchConsoleState merges from GET /api/policy. Local
+ * reachability and upstream policy are two independent systems (see
+ * docs/specs/features/08-upstream-policy.md), so this state never replaces stateOf or
+ * reachabilityOf; it is a second, additional line. See issue #287.
+ */
+function credentialOf(status, id) {
+  const entries = (status && status.policy) || [];
+  const entry = entries.find((tailnet) => tailnet.id === id);
+  if (!entry || entry.credential_state === "usable") {
+    return null;
+  }
+  return { tone: "crit", word: entry.reason || "" };
+}
+
 /** addressOf returns the first tailnet address of a namespace, or the absent marker. */
 function addressOf(detail) {
   if (detail && detail.tailscale_ips && detail.tailscale_ips.length > 0) {
@@ -117,6 +136,7 @@ export function buildRows(status, details, options = {}) {
         id,
         state: stateOf(status, detail, id, isRemoving),
         reachability: reachabilityOf(status, id),
+        credential: credentialOf(status, id),
         peerCount: count,
         peers: count === null ? "no peer count yet" : peerWord(count),
         address: addressOf(detail),
@@ -150,16 +170,18 @@ export function buildPanel(status, details, events, id) {
   const desired = status.desired[id];
   const actual = (status.actual && status.actual[id]) || null;
   const peers = (detail && detail.peers) || [];
+  const credential = credentialOf(status, id);
 
   return {
     id,
     state: stateOf(status, detail, id, false),
     reachability: reachabilityOf(status, id),
+    credential,
     fields: [
       { label: "namespace", value: (actual && actual.NsName) || `ns-${id}` },
       { label: "address", value: addressOf(detail) },
       { label: "magicdns", value: (detail && detail.magic_dns_name) || ABSENT },
-      { label: "control server", value: desired.ControlURL || ABSENT },
+      { label: "control server", value: desired.ControlURL || (credential && credential.word) || ABSENT },
       { label: "host access", value: hostAccessWord(desired) },
       { label: "exit node", value: desired.ExitNode || ABSENT },
     ],
@@ -426,6 +448,9 @@ function drawRow(row) {
   node.append(el("span", "ns-id mono", row.id));
   node.append(stateSpan(row.state));
   node.append(stateSpan(row.reachability));
+  if (row.credential) {
+    node.append(stateSpan(row.credential));
+  }
   node.append(el("span", "ns-peers mono", row.peers));
 
   const address = el("span", "ns-addr mono");
@@ -468,6 +493,9 @@ function drawPanel(panel) {
   const states = el("div", "ns-panel-states");
   states.append(stateSpan(panel.state));
   states.append(stateSpan(panel.reachability));
+  if (panel.credential) {
+    states.append(stateSpan(panel.credential));
+  }
   aside.append(states);
 
   const list = el("dl", "ns-kv");
