@@ -17,6 +17,7 @@ import {
   OBSERVE_LOG_COMMAND,
   SQUARE_SIDE,
   SQUARE_SIDE_DENSE,
+  accessSectionOrder,
   activePathWarning,
   applyFailureStatement,
   applyStagedRules,
@@ -931,6 +932,56 @@ test("a staged list of 40 edits holds 40 rows, it scrolls, and the count is exac
 
   const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
   assert.match(style, /\.ac-stagedlist\{[^}]*overflow-y:auto/);
+});
+
+// ---------------------------------------------------------------------------
+// The section order
+// ---------------------------------------------------------------------------
+
+test("the matrix and the flow overview hold the same position whether or not an edit is staged", () => {
+  // Issue #289. drawStagedList grows the section above it, so a section before the staged
+  // list moves down the page when the operator stages the first edit. The matrix and the
+  // flow overview must not be that section, therefore the staged list renders last among
+  // the sections that a value can turn on or off.
+  const shown = {
+    warning: false,
+    offer: false,
+    dropped: false,
+    applyError: false,
+    observe: false,
+    empty: false,
+    matrixRows: true,
+    ruleRows: true,
+    stagedCount: 0,
+  };
+
+  const withoutStaged = accessSectionOrder(shown);
+  const withStaged = accessSectionOrder({ ...shown, stagedCount: 1 });
+
+  assert.equal(withoutStaged.indexOf("matrix"), withStaged.indexOf("matrix"));
+  assert.equal(withoutStaged.indexOf("flow"), withStaged.indexOf("flow"));
+  assert.ok(!withoutStaged.includes("staged"));
+  assert.equal(withStaged.indexOf("staged"), withStaged.length - 1);
+});
+
+test("the active-path warning and the apply action still read above the staged list", () => {
+  // FR-editor-28. The apply action lives in the header, which the order always places
+  // first, so this test asserts the ordering constraint that remains: the warning above
+  // the staged list.
+  const order = accessSectionOrder({
+    warning: true,
+    offer: false,
+    dropped: false,
+    applyError: false,
+    observe: false,
+    empty: false,
+    matrixRows: false,
+    ruleRows: false,
+    stagedCount: 1,
+  });
+
+  assert.ok(order.indexOf("header") < order.indexOf("staged"));
+  assert.ok(order.indexOf("warning") < order.indexOf("staged"));
 });
 
 // ---------------------------------------------------------------------------
