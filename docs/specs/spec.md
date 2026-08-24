@@ -821,6 +821,7 @@ its own addressing scheme, which Epic 13 added. `features/11-policy-document-mod
 `features/12-visual-acl-editor.md`, and `features/13-visual-policy-advanced.md` all
 advance to `status: built`. |
 | 2026-08-23 | 2 | **Correction: this work is version 1.2, not version 1.1.** The `/spec-update` round and the Epic 11-13 build both called it version 1.1, and the tag names `v1.1.0` and `v1.1.1` already belong to the console fixes and credential-state work that shipped between Epic 9 and Epic 10, before this round started. The Feature map and Milestone M7 now name it version 1.2. |
+| 2026-08-24 | 2 | **Project review 2026-08-23-v1.2 found version 1.2 not ready to tag.** 13 defects filed (issues #345-357). Batch #360 (issues #345, #356, #357) shipped as a ship-partial merge: the fourth member, #353 ("a failing staged test blocks Push"), stays open because the Tailscale control server itself refuses to write a document whose test fails, so **FR-vadv-14 as written ("a failing test does not block Push") cannot be satisfied by the console alone** — the upstream write route decides first. The maintainer has not yet chosen between keeping FR-vadv-14 literally (Push proceeds, the operator reads the control server's own refusal) or correcting it to match the upstream limit (Push stays disabled, the console states the true reason, following the FR-vadv-11 precedent). See issue #353 for the open question. |
 
 ## Issue map
 
