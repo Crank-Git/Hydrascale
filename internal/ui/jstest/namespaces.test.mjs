@@ -268,11 +268,14 @@ test("app.css keeps the address of a row inside the row", async () => {
   // short.
   const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
 
-  const row = style.match(/\.ns-row\{([^}]*)\}/);
+  // The pattern holds the anchor ^, because app.css holds the rule .ns-row + .ns-row and
+  // the rule .ns-addr of the media block as well. Each one ends in the same characters,
+  // so a pattern with no anchor reads whichever rule comes first in the file.
+  const row = style.match(/^\.ns-row\{([^}]*)\}/m);
   assert.ok(row, "app.css holds no rule .ns-row");
   assert.match(row[1], /flex-wrap:\s*wrap/);
 
-  const address = style.match(/\.ns-addr\{([^}]*)\}/);
+  const address = style.match(/^\.ns-addr\{([^}]*)\}/m);
   assert.ok(address, "app.css holds no rule .ns-addr");
   assert.match(address[1], /min-width:\s*0/);
   assert.match(address[1], /overflow:\s*hidden/);

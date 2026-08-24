@@ -376,9 +376,9 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-grid{display:grid; grid-template-columns:1fr var(--w-side); gap:var(--sp-3); align-items:start}
 .ns-list{min-width:0}
 
-/* The panel takes 320 pixels of the grid, so the row keeps what remains. The row wraps,
-   because a line that is too short for every item draws the last item outside the row,
-   under the panel. See issue #354. */
+/* The panel takes 320 pixels of the grid, so the row keeps what remains. A line that is
+   too short for every item draws the last item outside the row, under the panel. The row
+   therefore wraps. See issue #354. */
 .ns-row{
   display:flex;
   flex-wrap:wrap;
@@ -401,9 +401,9 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-state{display:flex; align-items:center; gap:var(--sp-2); min-width:130px}
 .ns-word{color:var(--text-secondary); font-size:var(--fs-sm)}
 .ns-peers{color:var(--text-secondary); font-size:var(--fs-micro); min-width:76px}
-/* The address holds one space, which breaks it no further than its own width. The
-   minimum width lets it shrink, and the ellipsis states the cut when its own line is
-   too short as well. */
+/* The longest part of the address is the address of the node, which no line break
+   divides. The minimum width lets the item shrink below that part, and the ellipsis
+   states the cut when the line of the address is too short as well. */
 .ns-addr{
   color:var(--text-tertiary);
   font-size:var(--fs-micro);
