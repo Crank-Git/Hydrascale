@@ -271,9 +271,9 @@ function policyCredentialNote(entries) {
  * The daemon keeps the newest 1000 events in memory, and the view drew every one of them.
  * A capture of the page reached 44500 pixels, which is 30 viewports. See issue #355.
  *
- * The view draws a count of the events that it hides, and it holds no control that draws
- * the rest. The poll rewrites the whole section on every tick, therefore a control that
- * opens the rest loses its state within one poll interval.
+ * The view draws a count of the log, and it holds no control that draws the rest. Such a
+ * control needs state that survives the poll, because activity.js draws the whole section
+ * again on every tick.
  */
 export const ACTIVITY_ROW_LIMIT = 100;
 
