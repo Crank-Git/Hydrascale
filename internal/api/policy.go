@@ -254,6 +254,7 @@ var mapSectionNames = map[string]bool{
 	"hosts":     true,
 	"tagOwners": true,
 	"ipsets":    true,
+	"postures":  true,
 }
 
 // The two addressing schemes that POST /api/policy/{id}/sections/edit gives the

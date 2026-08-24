@@ -166,11 +166,11 @@ type PolicySectionsResponse struct {
 // PolicySectionsEditRequest is the request body of POST /api/policy/{id}/sections/edit.
 //
 // Op holds "add", "replace", "remove", or "rename". A list-shaped section (`acls`,
-// `grants`, `ssh`, `nodeAttrs`, `postures`, `tests`, `sshTests`) addresses its entry by
+// `grants`, `ssh`, `nodeAttrs`, `tests`, `sshTests`) addresses its entry by
 // Index, which "add" omits and "replace"/"remove" require. A map-shaped section
-// (`groups`, `hosts`, `tagOwners`, `ipsets`) addresses its entry by Key, which every op
-// requires; "rename" also requires NewKey and carries no Entry. Entry is required for
-// "add" and "replace", and it is omitted for "remove" and "rename".
+// (`groups`, `hosts`, `tagOwners`, `ipsets`, `postures`) addresses its entry by Key, which
+// every op requires; "rename" also requires NewKey and carries no Entry. Entry is required
+// for "add" and "replace", and it is omitted for "remove" and "rename".
 //
 // The section "autoApprovers.routes" addresses one route by Key, the route's CIDR, and
 // it takes "add", "replace", or "remove"; it takes no "rename". The section
