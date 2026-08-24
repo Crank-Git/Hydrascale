@@ -77,6 +77,11 @@ export function policyValidateRoute(id) {
   return `${policyDocumentRoute(id)}/validate`;
 }
 
+/** policySectionsRoute returns the route that parses one document into its sections. */
+export function policySectionsRoute(id) {
+  return `${policyDocumentRoute(id)}/sections`;
+}
+
 /** messageOf returns the message that a rejected request stated, word for word. */
 function messageOf(err) {
   return err && err.message ? err.message : String(err);
@@ -284,6 +289,75 @@ export function editorModel(state, id) {
   return model;
 }
 
+/**
+ * toggleModel returns the state of the Visual/Text control of the header, per
+ * FR-vacl-1.
+ *
+ * id is the identifier that the operator selected. The Visual control stays present
+ * and it disables only while the last attempt to parse the staged text failed, per
+ * FR-vacl-2: sectionsError then names the parse error, and view stays "text" because
+ * the visual editor cannot draw a document it cannot parse.
+ */
+export function toggleModel(state, id) {
+  const entry = state.entry(id);
+  return {
+    view: entry.view,
+    visualDisabled: entry.sectionsError !== "",
+    error: entry.sectionsError,
+    sections: entry.sections,
+  };
+}
+
+/**
+ * toggleMarkup returns the Visual/Text control, and the parse error beside it.
+ *
+ * toggle is the value that toggleModel returned. The parse error reaches the screen
+ * word for word, because .claude/rules/ste.md treats an error message as evidence, and
+ * it names the line and the column that internal/policy.Parse returns per FR-model-4.
+ */
+export function toggleMarkup(toggle) {
+  const visualSelected = toggle.view === "visual";
+  const error = toggle.error ? `<p class="note pol-parse-error mono">${esc(toggle.error)}</p>` : "";
+  return (
+    `<span class="seg" role="tablist" aria-label="Editor view">` +
+    `<button type="button" role="tab" aria-selected="${visualSelected}" data-view="visual"${toggle.visualDisabled ? " disabled" : ""}>Visual</button>` +
+    `<button type="button" role="tab" aria-selected="${!visualSelected}" data-view="text">Text</button>` +
+    `</span>` +
+    error
+  );
+}
+
+/**
+ * visualMarkup returns the visual editor region, drawn from the sections that the
+ * daemon parsed out of the staged text.
+ *
+ * features/12-visual-acl-editor.md's sibling issues #315 to #317 build the matrix, the
+ * rule list, and the named-set editors. This issue draws only the count of each
+ * section, which proves that a toggle to Visual re-parses and re-renders the current
+ * text, per FR-vacl-2 and FR-vacl-3. The opaque keys reach the screen once, per
+ * FR-vacl-18, so the operator knows to use Text for them.
+ */
+export function visualMarkup(sections) {
+  if (!sections) {
+    return `<div class="pol-visual"></div>`;
+  }
+  const count = (value) => (Array.isArray(value) ? value.length : Object.keys(value || {}).length);
+  const rows = [
+    ["Groups", count(sections.groups)],
+    ["Hosts", count(sections.hosts)],
+    ["Tag owners", count(sections.tagOwners)],
+    ["IP sets", count(sections.ipsets)],
+    ["Rules", count(sections.acls) + count(sections.grants)],
+  ];
+  const items = rows
+    .map(([label, n]) => `<div class="setrow"><span class="name">${esc(label)}</span><span class="mono">${n}</span></div>`)
+    .join("");
+  const opaque = sections.opaque_keys && sections.opaque_keys.length
+    ? `<p class="note">Use Text to read or change ${esc(sections.opaque_keys.join(", "))}.</p>`
+    : "";
+  return `<div class="pol-visual">${items}${opaque}</div>`;
+}
+
 /** The label of the validate action while the control server checks the document. */
 export const VALIDATING_LABEL = "The control server checks the document";
 
@@ -454,8 +528,12 @@ export function resultMarkup(result) {
  * The statement of FR-policy-28 comes first in every state, therefore the operator reads
  * it before the document. The serializer escapes every value that the daemon reported: a
  * policy document is text of a control server and the console has no authentication.
+ *
+ * toggle is the value that toggleModel returned, and it is null before a tailnet holds a
+ * document. It draws the Visual/Text control of FR-vacl-1, and it selects the visual
+ * editor region or the text editor region below it, per FR-vacl-2 and FR-vacl-3.
  */
-export function editorMarkup(model) {
+export function editorMarkup(model, toggle = null) {
   const warning = `<p class="note pol-warning">${esc(EVERY_DEVICE_STATEMENT)}</p>`;
 
   if (model.state !== "document") {
@@ -474,16 +552,21 @@ export function editorMarkup(model) {
   const chip = `<span class="chip mono"${model.edited ? "" : " hidden"}>edited</span>`;
   const etag = model.etag ? `<span class="chip mono">etag ${esc(model.etag)}</span>` : "";
   const readOnly = model.readOnly ? " readonly" : "";
+  const showVisual = toggle && toggle.view === "visual";
+  const body = showVisual
+    ? visualMarkup(toggle.sections)
+    : `<div class="pol-ed">` +
+      `<div class="pol-bar"><span class="pol-name mono">${esc(model.id)} &middot; policy.hujson</span>${chip}</div>` +
+      `<div class="pol-code">${gutterMarkup(model.lines)}` +
+      // The rows attribute holds the line count, therefore the text area needs no
+      // scrolling box of its own and the line numbers stay beside their lines.
+      `<textarea class="pol-doc mono"${readOnly} rows="${model.lines}" spellcheck="false" wrap="off" aria-label="The policy document of ${esc(model.id)}">${esc(model.text)}</textarea>` +
+      `</div></div>`;
   return (
     `<div class="pol-region">${warning}` +
     noteMarkup(model.sentence) +
-    `<div class="pol-ed">` +
-    `<div class="pol-bar"><span class="pol-name mono">${esc(model.id)} &middot; policy.hujson</span>${chip}</div>` +
-    `<div class="pol-code">${gutterMarkup(model.lines)}` +
-    // The rows attribute holds the line count, therefore the text area needs no scrolling
-    // box of its own and the line numbers stay beside their lines.
-    `<textarea class="pol-doc mono"${readOnly} rows="${model.lines}" spellcheck="false" wrap="off" aria-label="The policy document of ${esc(model.id)}">${esc(model.text)}</textarea>` +
-    `</div></div>` +
+    (toggle ? toggleMarkup(toggle) : "") +
+    body +
     (etag ? `<div class="pol-meta">${etag}</div>` : "") +
     actionsMarkup(actionsModel(model)) +
     resultMarkup(resultModel(model)) +
@@ -515,16 +598,28 @@ export function createPolicyState(options = {}) {
   function entryOf(id) {
     let entry = entries.get(id);
     if (!entry) {
-      entry = { loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "", stage: "read", result: "" };
+      entry = {
+        loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "", stage: "read", result: "",
+        // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
+        // of POST .../sections, and sectionsError names the parse error of the last
+        // attempt to open Visual, per FR-vacl-2. sectionsPending is true while that
+        // request runs.
+        view: "text", sections: null, sectionsError: "", sectionsPending: false,
+      };
       entries.set(id, entry);
     }
     return entry;
   }
 
-  /** rest returns the entry to the stage read, which disables the push. */
+  /**
+   * rest returns the entry to the stage read, which disables the push. It clears the
+   * parse error of the last attempt to open Visual, because that error covers text the
+   * entry no longer holds.
+   */
   function rest(entry) {
     entry.stage = "read";
     entry.result = "";
+    entry.sectionsError = "";
   }
 
   return {
@@ -612,6 +707,47 @@ export function createPolicyState(options = {}) {
     /** select marks one identifier, and null marks none. It opens no request. */
     select(id) {
       selectedId = id;
+    },
+
+    /** setView switches between the Text editor and the Visual editor. It sends no request. */
+    setView(id, view) {
+      entryOf(id).view = view;
+    },
+
+    /**
+     * loadSections sends the staged text to POST .../sections, per FR-vacl-2 and
+     * FR-vacl-3. On success, it switches the entry to the visual view and it holds the
+     * parsed sections. On a parse failure, it keeps the entry on the text view and it
+     * states the parse error inline, because the visual editor cannot draw a document
+     * it cannot parse. loadSections sends one request, and it sends no second request
+     * while the previous one runs.
+     * The operator edits the text while the request runs, therefore loadSections reads
+     * the text again when the answer arrives. A text that changed applies neither the
+     * sections nor the error of the stale answer.
+     */
+    async loadSections(id) {
+      const entry = entryOf(id);
+      if (entry.sectionsPending) {
+        return;
+      }
+      const sent = entry.text;
+      entry.sectionsPending = true;
+      try {
+        const answer = await request(policySectionsRoute(id), "POST", { document: sent });
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.sections = answer;
+        entry.sectionsError = "";
+        entry.view = "visual";
+      } catch (err) {
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.sectionsError = messageOf(err);
+      } finally {
+        entry.sectionsPending = false;
+      }
     },
 
     /** loadList reads GET /api/policy. */
@@ -703,6 +839,7 @@ export function createPolicyState(options = {}) {
         entry.text = entry.base;
         entry.etag = (answer && answer.etag) || "";
         entry.stage = "pushed";
+        entry.sectionsError = "";
       } catch (err) {
         entry.stage = err && err.status === CONFLICT_STATUS ? "conflict" : "push-failed";
         entry.result = messageOf(err);
@@ -850,6 +987,28 @@ function bindActions(holder, id) {
 }
 
 /**
+ * bindToggle wires the Visual and the Text control to the state, per FR-vacl-1.
+ *
+ * Selecting Text switches the view and it sends no request, because the two editors
+ * share one staged string. Selecting Visual sends the staged text to
+ * POST .../sections, per FR-vacl-2.
+ */
+function bindToggle(holder, id) {
+  for (const button of holder.querySelectorAll("[data-view]")) {
+    const view = button.getAttribute("data-view");
+    button.addEventListener("click", () => {
+      if (view === "text") {
+        state.setView(id, "text");
+        caret = null;
+        redraw();
+        return;
+      }
+      runAction(state.loadSections(id));
+    });
+  }
+}
+
+/**
  * syncActions draws the controls and the result of the editor region again.
  *
  * An edit changes the stage, therefore it changes which controls the operator reaches.
@@ -965,10 +1124,15 @@ function draw(section, snapshot) {
   grid.append(list);
 
   const editor = element("div", "pol-main");
-  editor.innerHTML = editorMarkup(editorModel(state, state.selected()));
-  if (state.selected()) {
-    bindEditor(editor, state.selected());
-    bindActions(editor, state.selected());
+  const selected = state.selected();
+  const model = editorModel(state, selected);
+  editor.innerHTML = editorMarkup(model, selected ? toggleModel(state, selected) : null);
+  if (selected) {
+    bindToggle(editor, selected);
+    if (model.state === "document") {
+      bindEditor(editor, selected);
+      bindActions(editor, selected);
+    }
   }
   grid.append(editor);
 

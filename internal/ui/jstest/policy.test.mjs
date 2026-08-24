@@ -26,11 +26,15 @@ import {
   policyDocumentRoute,
   policyListMarkup,
   policyRows,
+  policySectionsRoute,
   policyValidateRoute,
   readFailure,
   resultMarkup,
   resultModel,
+  toggleMarkup,
+  toggleModel,
   validateErrors,
+  visualMarkup,
 } from "../static/policy.js";
 
 // refusal returns the error that requestJSON rejects with: the message of the daemon word
@@ -82,6 +86,27 @@ function documentBody(overrides = {}) {
 // entryOf returns the editor model of one identifier out of a state.
 function entryOf(state, id) {
   return editorModel(state, id);
+}
+
+// sectionsBody is one answer of POST /api/policy/{id}/sections, as internal/api/types.go
+// declares it.
+function sectionsBody(overrides = {}) {
+  return {
+    groups: { "group:admins": ["alice@example.com"] },
+    hosts: {},
+    tagOwners: {},
+    ipsets: {},
+    acls: [{ action: "accept", src: ["group:admins"], dst: ["*:*"] }],
+    grants: [],
+    ssh: [],
+    autoApprovers: {},
+    nodeAttrs: [],
+    postures: {},
+    tests: [],
+    sshTests: [],
+    opaque_keys: [],
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,4 +1045,200 @@ test("a usable credential still reads as read and write", () => {
   const row = policyRows(body, null)[0];
   assert.equal(row.word, "read and write");
   assert.equal(row.tone, "ok");
+});
+
+// ---------------------------------------------------------------------------
+// The Visual/Text toggle (FR-vacl-1 to FR-vacl-3)
+// ---------------------------------------------------------------------------
+
+test("the route of the sections action encodes the identifier", () => {
+  assert.equal(policySectionsRoute("jbones"), "/api/policy/jbones/sections");
+  assert.equal(policySectionsRoute("lab hs/1"), "/api/policy/lab%20hs%2F1/sections");
+});
+
+test("a document that holds no toggle attempt shows the Text view and no disabled Visual control", () => {
+  const state = loaded(async () => documentBody());
+  const toggle = toggleModel(state, "jbones");
+
+  assert.equal(toggle.view, "text");
+  assert.equal(toggle.visualDisabled, false);
+
+  const markup = toggleMarkup(toggle);
+  assert.match(markup, /<button type="button" role="tab" aria-selected="false" data-view="visual">Visual<\/button>/);
+  assert.match(markup, /<button type="button" role="tab" aria-selected="true" data-view="text">Text<\/button>/);
+});
+
+test("a successful load of the sections switches the entry to the visual view", async () => {
+  const state = loaded(async () => sectionsBody());
+
+  await state.loadSections("jbones");
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "visual");
+  assert.equal(toggle.visualDisabled, false);
+  assert.deepEqual(toggle.sections, sectionsBody());
+});
+
+test("the sections request sends the staged text, per FR-vacl-2", async () => {
+  const sent = [];
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    return sectionsBody();
+  });
+  state.setText("jbones", "the text of the operator");
+
+  await state.loadSections("jbones");
+
+  assert.deepEqual(sent, [{
+    route: "/api/policy/jbones/sections",
+    method: "POST",
+    body: { document: "the text of the operator" },
+  }]);
+});
+
+test("a parse failure keeps the Visual control present but disabled, and states the error inline", async () => {
+  const state = loaded(async () => {
+    throw refusal(400, "policy: parsing document: hujson: line 3, column 1: parsing value: unexpected EOF");
+  });
+
+  await state.loadSections("jbones");
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "text");
+  assert.equal(toggle.visualDisabled, true);
+  assert.match(toggle.error, /line 3, column 1/);
+
+  const markup = toggleMarkup(toggle);
+  assert.match(markup, /<button type="button" role="tab" aria-selected="false" data-view="visual" disabled>Visual<\/button>/);
+  assert.match(markup, /line 3, column 1/);
+});
+
+test("an edit after a parse failure clears the error and re-enables the Visual control", async () => {
+  const state = loaded(async () => {
+    throw refusal(400, "line 3, column 1: unexpected EOF");
+  });
+  await state.loadSections("jbones");
+  assert.equal(toggleModel(state, "jbones").visualDisabled, true);
+
+  state.setText("jbones", '{\n  "acls": [],\n}');
+
+  assert.equal(toggleModel(state, "jbones").visualDisabled, false);
+  assert.equal(toggleModel(state, "jbones").error, "");
+});
+
+test("selecting Text switches the view and sends no request", () => {
+  const sent = [];
+  const state = loaded(async (route) => {
+    sent.push(route);
+    return sectionsBody();
+  });
+
+  state.setView("jbones", "visual");
+  assert.equal(toggleModel(state, "jbones").view, "visual");
+
+  state.setView("jbones", "text");
+  assert.equal(toggleModel(state, "jbones").view, "text");
+  assert.deepEqual(sent, []);
+});
+
+test("a text edit after a visual edit toggles to Visual again and matches the new text", async () => {
+  // FR-vacl-2. loadSections always sends the current staged text, so a toggle to
+  // Visual after an edit re-parses that text and never a stale answer.
+  const requests = [];
+  const state = loaded(async (route, method, body) => {
+    requests.push(body.document);
+    return sectionsBody({ acls: body.document.includes("tag:laptop") ? [{ action: "accept", src: ["tag:laptop"], dst: ["*:*"] }] : [] });
+  });
+
+  await state.loadSections("jbones");
+  assert.equal(toggleModel(state, "jbones").sections.acls.length, 0);
+
+  state.setView("jbones", "text");
+  state.setText("jbones", '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["*:*"]}],\n}');
+  await state.loadSections("jbones");
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "visual");
+  assert.equal(toggle.sections.acls.length, 1);
+  assert.equal(toggle.sections.acls[0].src[0], "tag:laptop");
+});
+
+test("a sections request that returns after an edit applies neither the sections nor the error", async () => {
+  let release = () => {};
+  const state = loaded(() => new Promise((resolve) => {
+    release = () => resolve(sectionsBody());
+  }));
+
+  const running = state.loadSections("jbones");
+  state.setText("jbones", "the text of the operator");
+  release();
+  await running;
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "text");
+  assert.equal(toggle.sections, null);
+});
+
+test("loadSections sends one request, and no second request while the first runs", async () => {
+  let calls = 0;
+  let release = () => {};
+  const state = loaded(() => new Promise((resolve) => {
+    calls += 1;
+    release = () => resolve(sectionsBody());
+  }));
+
+  const first = state.loadSections("jbones");
+  const second = state.loadSections("jbones");
+  release();
+  await Promise.all([first, second]);
+
+  assert.equal(calls, 1);
+});
+
+test("the visual region draws the count of each section", () => {
+  const markup = visualMarkup(sectionsBody({
+    groups: { "group:admins": [], "group:eng": [] },
+    hosts: { server: "100.64.0.1" },
+    acls: [{ action: "accept", src: ["a"], dst: ["b"] }],
+    grants: [{ src: ["c"], dst: ["d"] }],
+  }));
+
+  assert.match(markup, /<span class="name">Groups<\/span><span class="mono">2<\/span>/);
+  assert.match(markup, /<span class="name">Hosts<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Rules<\/span><span class="mono">2<\/span>/);
+});
+
+test("the visual region names an opaque key once, per FR-vacl-18", () => {
+  const markup = visualMarkup(sectionsBody({ opaque_keys: ["randomizeClientPort"] }));
+
+  assert.match(markup, /randomizeClientPort/);
+});
+
+test("the visual region draws nothing before the first load", () => {
+  assert.equal(visualMarkup(null), `<div class="pol-visual"></div>`);
+});
+
+test("the editor draws the visual region when the toggle selects Visual", async () => {
+  const state = loaded(async () => sectionsBody());
+  await state.loadSections("jbones");
+
+  const markup = editorMarkup(entryOf(state, "jbones"), toggleModel(state, "jbones"));
+  assert.ok(markup.includes(`<div class="pol-visual">`), markup);
+  assert.ok(!markup.includes("<textarea"), markup);
+});
+
+test("the editor draws the text region when the toggle selects Text", () => {
+  const state = loaded(async () => documentBody());
+
+  const markup = editorMarkup(entryOf(state, "jbones"), toggleModel(state, "jbones"));
+  assert.ok(markup.includes("<textarea"), markup);
+  assert.ok(!markup.includes(`<div class="pol-visual">`), markup);
+});
+
+test("the editor draws no toggle before a tailnet is selected", () => {
+  const state = createPolicyState({ request: async () => documentBody() });
+  state.setList(listBody());
+
+  const markup = editorMarkup(entryOf(state, null));
+  assert.ok(!markup.includes('role="tablist"'), markup);
 });

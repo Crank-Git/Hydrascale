@@ -107,6 +107,8 @@ func NewServer(socketPath string, r *reconciler.Reconciler) *Server {
 	mux.HandleFunc("PUT /api/policy/{id}", s.handlePolicyWrite)
 	mux.HandleFunc("POST /api/policy/{id}/validate", s.handlePolicyValidate)
 	mux.HandleFunc("PUT /api/policy/{id}/credentials", s.handlePolicyCredentials)
+	mux.HandleFunc("POST /api/policy/{id}/sections", s.handlePolicySections)
+	mux.HandleFunc("POST /api/policy/{id}/sections/edit", s.handlePolicySectionsEdit)
 
 	s.mux = mux
 	s.httpServer = &http.Server{Handler: mux}
