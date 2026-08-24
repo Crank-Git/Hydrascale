@@ -148,11 +148,11 @@ type PolicySectionsRequest struct {
 // FR-model-6. OpaqueKeys names every top-level key of the document that FR-model-2 does
 // not resolve, per FR-vacl-18.
 //
-// SectionKeys names every top-level key that FR-model-2 does resolve and the document
-// holds, in the order of sectionNames. An empty section and an absent section both decode
-// into an empty map or an empty list, so SectionKeys is the only field that separates
-// them. FR-vadv-11 needs that separation: it disables Push while a Headscale document
-// holds a postures key, whether or not the key holds an entry.
+// SectionKeys names every top-level key that FR-model-2 resolves and the document holds,
+// in the order of sectionNames. An empty section and an absent section decode into the
+// same empty map or empty list. SectionKeys alone separates the two.
+// FR-vadv-11 needs that separation. It disables Push while a Headscale document holds a
+// postures key, whether or not the key holds an entry.
 type PolicySectionsResponse struct {
 	Groups        map[string][]string  `json:"groups"`
 	Hosts         map[string]string    `json:"hosts"`

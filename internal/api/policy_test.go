@@ -501,9 +501,9 @@ func TestPolicySectionsAnAbsentSectionReturnsAnEmptyListNotNull(t *testing.T) {
 	}
 }
 
-// FR-vadv-11 disables Push while the document holds a postures key, therefore the
-// response must separate an empty postures key from an absent one. Both decode into the
-// same empty map, so SectionKeys carries the signal.
+// FR-vadv-11 disables Push while the document holds a postures key. The response must
+// separate an empty postures key from an absent one. Both decode into the same empty map,
+// therefore SectionKeys carries the signal.
 func TestPolicySectionsNamesEveryNamedSectionKeyTheDocumentHolds(t *testing.T) {
 	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
 

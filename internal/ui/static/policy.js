@@ -1917,10 +1917,10 @@ export const PUSHING_LABEL = "The control server takes the document";
  * A tailnet that takes no write gets every control disabled, and a request that runs
  * disables every control until the answer arrives.
  * Push also stays disabled while a Headscale document holds a postures key, per
- * FR-vadv-11, because the control server does not support the key that a push would send.
- * The trigger is the key, not the entry count: the answer field section_keys names every
- * key the document holds, because an empty postures key and an absent one both parse into
- * an empty map.
+ * FR-vadv-11. The control server does not support that key.
+ * The trigger is the key, not the entry count. The answer field section_keys names every
+ * key that the document holds. An empty postures key and an absent one parse into the
+ * same empty map.
  */
 export function actionsModel(model) {
   if (model.state !== "document") {
