@@ -101,9 +101,11 @@ when it does not.
 
 ![The staged test, marked pass after Run](screenshots/postures-tests/08-tests-pass.png)
 
-> **Known limitation:** This review found that a failing test blocks Push for the
-> whole document, even when the operator wants to push every other staged edit. Remove
-> the failing test, or fix the rule it tests, before you push.
+> **A failing test disables Push.** The control server accepts no document whose test
+> fails, therefore the console offers no push of such a document. Click **Validate**
+> after a row marks `fail`. The result region reads `test failed` and it names that
+> reason, and Push stays disabled. Correct the rule that the test names, or remove the
+> test, then click **Run** again.
 
 Click **Discard** to remove the staged test and return the document to its original
 text.

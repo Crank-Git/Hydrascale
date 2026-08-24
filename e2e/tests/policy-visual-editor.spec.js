@@ -136,21 +136,35 @@ test("stages a posture from the New posture row", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Discard", exact: true })).toBeEnabled();
 });
 
-// Review finding: a failing test blocks Push for the whole document, contradicting
-// FR-vadv-14 ("a failing test does not block Push"). This test asserts the intended
-// behaviour and stays skipped until Validate stops treating a failing test as a document
-// error (#353).
-test.fixme("leaves Push available with a failing test staged", async ({ page }) => {
+// Issue #353 decided FR-vadv-14: a failing test disables Push, because the control server
+// accepts no document whose test fails. Run marks the row alone, therefore this test
+// clicks Validate to reach the stage that the result region reads.
+test("keeps Push disabled with a failing test staged", async ({ page }) => {
   await page.locator('.setrow[data-nav="tests"]').click();
+
+  const testsCount = page.locator('.setrow[data-nav="tests"] .mono');
+  await expect(testsCount).toHaveText("0");
 
   await page.getByLabel("New test source").fill("smoke-fail@example.test");
   await page.getByLabel("New test expected result").selectOption("deny");
   await page.getByLabel("New test destination").fill("100.64.0.2:443");
   await page.getByRole("button", { name: "Add", exact: true }).click();
 
+  await expect(testsCount).toHaveText("1");
+
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.locator('.setentry[data-section="tests"] .dot.crit')).toBeVisible();
 
   await page.getByRole("button", { name: "Validate", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Push", exact: true })).toBeEnabled();
+
+  // FR-vadv-15 and FR-vadv-16: the result region names the failed test, and it reads
+  // apart from the word that a malformed document produces, which is "validate failed".
+  await expect(page.locator(".pol-result .pol-word")).toHaveText("test failed");
+  await expect(page.getByRole("button", { name: "Push", exact: true })).toBeDisabled();
+
+  // Leave the tailnet's policy document exactly as this test found it.
+  const discard = page.getByRole("button", { name: "Discard", exact: true });
+  await discard.click();
+  await expect(testsCount).toHaveText("0");
+  await expect(discard).toBeDisabled();
 });
