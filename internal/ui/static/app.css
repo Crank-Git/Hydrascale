@@ -424,6 +424,9 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-event-text{color:var(--text-secondary); font-size:var(--fs-sm)}
 
 .ns-notice{margin-top:var(--sp-4)}
+/* The credential reason names an environment variable of 33 characters, which no space
+   breaks. The rule breaks it inside the panel. See issue #347. */
+.ns-reason{overflow-wrap:anywhere}
 .ns-cmds{
   display:flex;
   flex-direction:column;
