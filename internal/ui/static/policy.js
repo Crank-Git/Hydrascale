@@ -1555,7 +1555,8 @@ export function matrixClickPlan(sections, from, to) {
  * model is the value that matrixModel returned. The square is a button, so it reaches
  * focus by keyboard, and an inert square carries the disabled attribute per FR-vacl-7. The
  * console binds the click, the hover, the focus, and the blur handlers after it sets
- * this markup, because a handler that a string carries never runs.
+ * this markup, because a handler that a string carries never runs. The wrapper `.ac-mtx-wrap`
+ * carries the horizontal scroll, so a wide matrix stays inside its own card.
  */
 export function matrixMarkup(model) {
   const columns = model.nodes.map((node) => `<th class="col" scope="col">${esc(node)}</th>`).join("");
@@ -1576,7 +1577,7 @@ export function matrixMarkup(model) {
     `<div class="card ac-matrix">` +
     `<span class="label">Reachability</span>` +
     `<p class="note">A filled square means that an acls entry or a grants entry allows the path. The ports live in the rule list.</p>` +
-    `<table class="ac-mtx"><thead><tr><th></th>${columns}</tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class="ac-mtx-wrap"><table class="ac-mtx"><thead><tr><th></th>${columns}</tr></thead><tbody>${rows}</tbody></table></div>` +
     `</div>`
   );
 }
