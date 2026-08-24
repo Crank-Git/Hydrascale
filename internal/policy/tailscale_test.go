@@ -360,6 +360,37 @@ func TestTheValidateResultCarriesTheControlServerMessageOnAFailure(t *testing.T)
 	}
 }
 
+func TestTheValidateResultMarksAFailedTestAssertion(t *testing.T) {
+	f := newFakeControlServer(t)
+	f.validateBody = `{"message":"test(s) failed","data":[{"user":"user1@example.com","errors":["address \"2.2.2.2:22\": want: Drop, got: Accept"]}]}`
+	client := newTestClient(f)
+
+	result, err := client.ValidatePolicy(context.Background(), testDocument)
+	if err != nil {
+		t.Fatalf("ValidatePolicy returned an error: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("the result is passed, and an assertion of the document failed")
+	}
+	if !result.TestsFailed {
+		t.Errorf("the result marks no failed test, and the control server stated test(s) failed")
+	}
+}
+
+func TestTheValidateResultMarksNoFailedTestForAWarning(t *testing.T) {
+	f := newFakeControlServer(t)
+	f.validateBody = `{"message":"warning(s) found","data":[{"user":"group:unknown@example.com"}]}`
+	client := newTestClient(f)
+
+	result, err := client.ValidatePolicy(context.Background(), testDocument)
+	if err != nil {
+		t.Fatalf("ValidatePolicy returned an error: %v", err)
+	}
+	if result.TestsFailed {
+		t.Errorf("the result marks a failed test, and the control server stated warning(s) found")
+	}
+}
+
 func TestTheClientSendsNoRequestWhenTheCredentialIsAbsent(t *testing.T) {
 	f := newFakeControlServer(t)
 	client := NewTailscaleClient(f.server.URL, testTailnet, func() (secrets.Tailnet, error) {

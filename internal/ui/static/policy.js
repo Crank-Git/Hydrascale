@@ -345,11 +345,13 @@ export function readFailure(message) {
  * null. The state field names one of unselected, no-credential, loading, document,
  * read-only, and failed. Each one reads a value that the daemon reported.
  * The stage field names the stage of the two actions, and the result field holds the
- * answer of the last action word for word.
+ * answer of the last action word for word. The testsFailed field is true when an
+ * assertion of the document failed. The result region states that reason apart from a
+ * document error, per FR-vadv-16.
  */
 export function editorModel(state, id) {
   if (!id) {
-    return { id: "", state: "unselected", stage: "read", result: "", lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
+    return { id: "", state: "unselected", stage: "read", result: "", testsFailed: false, lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
   }
 
   const row = state.rows().find((entry) => entry.id === id);
@@ -360,6 +362,7 @@ export function editorModel(state, id) {
     state: "loading",
     stage: held.stage,
     result: held.result,
+    testsFailed: held.testsFailed,
     lines: 0,
     text: held.text,
     edited: held.text !== held.base,
@@ -1197,7 +1200,7 @@ function bindPosturesList(holder, id) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests (#325, FR-vadv-12 to FR-vadv-14)
+// Tests (#325, FR-vadv-12 to FR-vadv-17)
 // ---------------------------------------------------------------------------
 
 /** RUNNING_TESTS_LABEL is the label of the Run action while the control server checks
@@ -2036,6 +2039,14 @@ export function resultModel(model) {
       return result("ok", "validated", "The control server accepted the document.", detail);
     }
     case "validate-failed":
+      if (model.testsFailed) {
+        // The control server refuses a write whose test fails, which the OpenAPI schema of
+        // operationId setPolicyFile states. Push therefore stays disabled, and this
+        // sentence names that reason rather than the reason of a malformed document.
+        return result("crit", "test failed", "The control server accepts no document whose test fails. Push stays disabled while a test of this document fails.", {
+          errors: validateErrors(model.result),
+        });
+      }
       return result("crit", "validate failed", "The control server rejected the document.", {
         errors: validateErrors(model.result),
       });
@@ -2222,6 +2233,10 @@ export function createPolicyState(options = {}) {
     if (!entry) {
       entry = {
         loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "", stage: "read", result: "",
+        // testsFailed is true when the last validate failed because an assertion of the
+        // tests section failed. The result region states that reason apart from a
+        // document error, per FR-vadv-16.
+        testsFailed: false,
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last
         // attempt to open Visual, per FR-vacl-2, or the message of a failed edit to a
@@ -2242,8 +2257,9 @@ export function createPolicyState(options = {}) {
         nav: "", pendingRemoval: null, baseSections: null, sectionsText: null,
         // testsPending is true while the Tests section's Run action runs, and
         // testsAnswer holds its last answer, or null before a run. These fields sit
-        // apart from stage and result, so a failing test never touches the field Push
-        // reads, per FR-vadv-14.
+        // apart from stage and result, so a run of the tests advances no stage. Validate
+        // alone advances the stage, and a failed assertion holds it at validate-failed,
+        // per FR-vadv-14.
         testsPending: false, testsAnswer: null,
       };
       entries.set(id, entry);
@@ -2260,6 +2276,7 @@ export function createPolicyState(options = {}) {
   function rest(entry) {
     entry.stage = "read";
     entry.result = "";
+    entry.testsFailed = false;
     entry.sectionsError = "";
     entry.testsAnswer = null;
   }
@@ -2693,6 +2710,7 @@ export function createPolicyState(options = {}) {
       const sent = entry.text;
       entry.stage = "validating";
       entry.result = "";
+      entry.testsFailed = false;
       try {
         const answer = await request(policyValidateRoute(id), "POST", { document: sent });
         if (entry.text !== sent) {
@@ -2700,6 +2718,7 @@ export function createPolicyState(options = {}) {
         }
         entry.stage = answer && answer.passed ? "validated" : "validate-failed";
         entry.result = (answer && answer.result) || "";
+        entry.testsFailed = Boolean(answer && answer.tests_failed);
       } catch (err) {
         if (entry.text !== sent) {
           return;
@@ -2713,10 +2732,10 @@ export function createPolicyState(options = {}) {
      * runTests sends the text of the operator to POST /api/policy/{id}/validate and
      * holds the answer for the Tests section to read, per FR-vadv-13.
      *
-     * runTests touches no field of entry.stage or entry.result, which the top Validate
-     * action and the Push action read, so a failing test row never disables Push, per
-     * FR-vadv-14. runTests sends one request, and it sends no second request while the
-     * previous one runs.
+     * runTests touches no field of entry.stage or entry.result. The top Validate action
+     * and the Push action read those two fields, therefore a run of the tests advances no
+     * stage and it enables no push, per FR-vadv-14. runTests sends one request, and it
+     * sends no second request while the previous one runs.
      * The operator edits while the request runs, therefore runTests reads the text
      * again when the answer arrives. A text that changed holds no answer of a document
      * the entry no longer holds.
