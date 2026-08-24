@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -65,18 +66,19 @@ type wireACLRule struct {
 }
 
 type wireSections struct {
-	Groups     map[string][]string `json:"groups"`
-	Hosts      map[string]string   `json:"hosts"`
-	TagOwners  map[string][]string `json:"tagOwners"`
-	IPSets     map[string][]string `json:"ipsets"`
-	ACLs       []wireACLRule       `json:"acls"`
-	Grants     []json.RawMessage   `json:"grants"`
-	SSH        []json.RawMessage   `json:"ssh"`
-	NodeAttrs  []json.RawMessage   `json:"nodeAttrs"`
-	Postures   map[string][]string `json:"postures"`
-	Tests      []json.RawMessage   `json:"tests"`
-	SSHTests   []json.RawMessage   `json:"sshTests"`
-	OpaqueKeys []string            `json:"opaque_keys"`
+	Groups      map[string][]string `json:"groups"`
+	Hosts       map[string]string   `json:"hosts"`
+	TagOwners   map[string][]string `json:"tagOwners"`
+	IPSets      map[string][]string `json:"ipsets"`
+	ACLs        []wireACLRule       `json:"acls"`
+	Grants      []json.RawMessage   `json:"grants"`
+	SSH         []json.RawMessage   `json:"ssh"`
+	NodeAttrs   []json.RawMessage   `json:"nodeAttrs"`
+	Postures    map[string][]string `json:"postures"`
+	Tests       []json.RawMessage   `json:"tests"`
+	SSHTests    []json.RawMessage   `json:"sshTests"`
+	OpaqueKeys  []string            `json:"opaque_keys"`
+	SectionKeys []string            `json:"section_keys"`
 }
 
 type wireSectionsEdit struct {
@@ -496,6 +498,40 @@ func TestPolicySectionsAnAbsentSectionReturnsAnEmptyListNotNull(t *testing.T) {
 		if !strings.Contains(string(payload), want) {
 			t.Errorf("body %s does not hold %s", payload, want)
 		}
+	}
+}
+
+// FR-vadv-11 disables Push while the document holds a postures key, therefore the
+// response must separate an empty postures key from an absent one. Both decode into the
+// same empty map, so SectionKeys carries the signal.
+func TestPolicySectionsNamesEveryNamedSectionKeyTheDocumentHolds(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	cases := []struct {
+		name     string
+		document string
+		want     bool
+	}{
+		{name: "an empty postures key", document: `{"postures": {}}`, want: true},
+		{name: "a postures key with one entry", document: `{"postures": {"posture:latest": ["node:os == 'linux'"]}}`, want: true},
+		{name: "no postures key", document: `{"groups": {}}`, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := json.Marshal(map[string]string{"document": tc.document})
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+			if code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+			}
+			var got wireSections
+			decodePolicy(t, payload, &got)
+			if slices.Contains(got.SectionKeys, "postures") != tc.want {
+				t.Errorf("SectionKeys = %v, want it to hold %q = %v", got.SectionKeys, "postures", tc.want)
+			}
+		})
 	}
 }
 

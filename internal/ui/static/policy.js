@@ -1916,8 +1916,11 @@ export const PUSHING_LABEL = "The control server takes the document";
  * because the push is the affirmative action of this view.
  * A tailnet that takes no write gets every control disabled, and a request that runs
  * disables every control until the answer arrives.
- * Push also stays disabled while a Headscale document holds a posture, per FR-vadv-11,
- * because the control server does not support the key that a push would send.
+ * Push also stays disabled while a Headscale document holds a postures key, per
+ * FR-vadv-11, because the control server does not support the key that a push would send.
+ * The trigger is the key, not the entry count: the answer field section_keys names every
+ * key the document holds, because an empty postures key and an absent one both parse into
+ * an empty map.
  */
 export function actionsModel(model) {
   if (model.state !== "document") {
@@ -1925,11 +1928,11 @@ export function actionsModel(model) {
   }
   const busy = model.stage === "validating" || model.stage === "pushing";
   const writable = !model.readOnly && !busy;
-  const postures = model.sections && model.sections.postures;
+  const sectionKeys = (model.sections && model.sections.section_keys) || [];
   const holdsUnsupportedPosture =
     model.kind === "headscale" &&
     HEADSCALE_UNSUPPORTED_SECTIONS.has("postures") &&
-    Boolean(postures && Object.keys(postures).length > 0);
+    sectionKeys.includes("postures");
   return [
     {
       id: "validate",

@@ -308,7 +308,7 @@ func (s *Server) handlePolicySections(w http.ResponseWriter, r *http.Request) {
 }
 
 // policySections reads every named section of doc, plus the list of opaque top-level
-// keys. Groups, ACLs, SSH, and AutoApprovers use the typed accessors of #310; a section
+// keys and the list of named section keys that the document holds. Groups, ACLs, SSH, and AutoApprovers use the typed accessors of #310; a section
 // FR-model-2 names with no typed accessor yet is read from the raw top-level key, so
 // that the response holds every section the plan promises to the sibling issues.
 func policySections(doc *policy.Document) (PolicySectionsResponse, error) {
@@ -374,9 +374,15 @@ func policySections(doc *policy.Document) (PolicySectionsResponse, error) {
 	}
 
 	known := make(map[string]bool, len(sectionNames))
+	present := make([]string, 0, len(sectionNames))
 	for _, name := range sectionNames {
 		known[name] = true
+		if _, ok := raw[name]; ok {
+			present = append(present, name)
+		}
 	}
+	response.SectionKeys = present
+
 	opaque := make([]string, 0, len(raw))
 	for key := range raw {
 		if !known[key] {

@@ -147,6 +147,12 @@ type PolicySectionsRequest struct {
 // A section absent from the document is an empty map or an empty list, never null, per
 // FR-model-6. OpaqueKeys names every top-level key of the document that FR-model-2 does
 // not resolve, per FR-vacl-18.
+//
+// SectionKeys names every top-level key that FR-model-2 does resolve and the document
+// holds, in the order of sectionNames. An empty section and an absent section both decode
+// into an empty map or an empty list, so SectionKeys is the only field that separates
+// them. FR-vadv-11 needs that separation: it disables Push while a Headscale document
+// holds a postures key, whether or not the key holds an entry.
 type PolicySectionsResponse struct {
 	Groups        map[string][]string  `json:"groups"`
 	Hosts         map[string]string    `json:"hosts"`
@@ -161,6 +167,7 @@ type PolicySectionsResponse struct {
 	Tests         []json.RawMessage    `json:"tests"`
 	SSHTests      []json.RawMessage    `json:"sshTests"`
 	OpaqueKeys    []string             `json:"opaque_keys"`
+	SectionKeys   []string             `json:"section_keys"`
 }
 
 // PolicySectionsEditRequest is the request body of POST /api/policy/{id}/sections/edit.
