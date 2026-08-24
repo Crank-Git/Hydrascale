@@ -1637,9 +1637,23 @@ function aclPortsOf(entry) {
  * empty list for an entry that allows every port. A grants entry's ip field carries the
  * protocol and the port together, separated by a colon, for example tcp:443; the rule
  * list states the same value with a slash, matching FR-vacl-12's format.
+ *
+ * An ip field that holds the wildcard names every port, so grantPortsOf returns an empty
+ * list for it, in the manner of aclPortsOf. The row then states the words all ports, and
+ * the raw wildcard reaches no field of the console.
  */
 function grantPortsOf(entry) {
-  return ((entry && entry.ip) || []).map((one) => String(one).replace(":", "/"));
+  const ip = (entry && entry.ip) || [];
+  if (ip.includes("*")) {
+    return [];
+  }
+  return ip.map((one) => String(one).replace(":", "/"));
+}
+
+/** grantAllPortsWildcard reports whether one grants entry's ip field is the wildcard alone. */
+function grantAllPortsWildcard(entry) {
+  const ip = (entry && entry.ip) || [];
+  return ip.length === 1 && ip[0] === "*";
 }
 
 /**
@@ -1688,12 +1702,19 @@ export function renameGrantCapability(entry, oldName, newName) {
 /**
  * ruleEntryWithPorts returns row's entry with its port list replaced by ports, in the
  * form parseRulePorts returned. FR-editor-19's equivalent for the rule list.
+ *
+ * An empty port list on a grants entry whose ip field is the wildcard keeps the wildcard.
+ * The words all ports name both an absent ip field and the wildcard, and Tailscale states
+ * no meaning for an absent ip field, so a rewrite of one form into the other changes the
+ * document for no gain.
  */
 export function ruleEntryWithPorts(row, ports) {
   if (row.section === "grants") {
     const next = { ...row.entry };
     if (ports.length === 0) {
-      delete next.ip;
+      if (!grantAllPortsWildcard(row.entry)) {
+        delete next.ip;
+      }
     } else {
       next.ip = ports.map((port) => port.replace("/", ":"));
     }
