@@ -1405,9 +1405,9 @@ test("the section nav lists the five Epic 13 sections with their entry counts", 
   assert.match(markup, /<span class="name">Tests<\/span><span class="mono">2<\/span>/);
 });
 
-test("selecting Auto-approvers, Postures, or Tests states the section is not yet built, and never crashes", () => {
+test("selecting Auto-approvers or Tests states the section is not yet built, and never crashes", () => {
   const sections = sectionsBody();
-  for (const nav of ["autoApprovers", "postures", "tests"]) {
+  for (const nav of ["autoApprovers", "tests"]) {
     const markup = visualMarkup(sections, nav);
     assert.match(markup, /not yet built/);
   }
@@ -1576,6 +1576,131 @@ test("nodeAttrsEntryWithField replaces one field of a nodeAttrs entry and keeps 
     target: ["*"],
     attr: ["funnel"],
   });
+});
+
+// ---------------------------------------------------------------------------
+// Postures (#324, FR-vadv-10, FR-vadv-11)
+// ---------------------------------------------------------------------------
+
+test("the Postures section shows one row per entry with its name and its expression", () => {
+  const sections = sectionsBody({
+    postures: { "posture:latest": ["node:os == 'macos'", "node:tsVersion >= '1.40'"] },
+  });
+
+  const markup = visualMarkup(sections, "postures");
+
+  assert.match(markup, /posture:latest/);
+  assert.match(markup, /node:os == &#39;macos&#39; &amp;&amp; node:tsVersion &gt;= &#39;1\.40&#39;/);
+});
+
+test("a Postures section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ postures: {} }), "postures");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the Postures section escapes a hostile name and expression", () => {
+  const markup = visualMarkup(
+    sectionsBody({ postures: { '"><script>': ['"><script>'] } }),
+    "postures",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("addSetEntry adds a posture through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } });
+  });
+
+  await state.addSetEntry("jbones", "postures", "posture:latest", ["node:os == 'linux'"]);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "postures",
+      op: "add",
+      key: "posture:latest",
+      entry: '["node:os == \'linux\'"]',
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.postures, {
+    "posture:latest": ["node:os == 'linux'"],
+  });
+});
+
+test("a Headscale tailnet's Postures section shows every entry read-only and states the reason, per FR-vadv-11", () => {
+  const markup = visualMarkup(
+    sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } }),
+    "postures",
+    null,
+    null,
+    "headscale",
+  );
+
+  assert.match(markup, /does not support/);
+  assert.match(markup, /posture:latest/);
+  assert.match(markup, /node:os == &#39;linux&#39;/);
+  assert.ok(!markup.includes("data-add-key"));
+  assert.ok(!markup.includes("rename-posture"));
+});
+
+test("a Tailscale tailnet still edits Postures normally", () => {
+  const markup = visualMarkup(
+    sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } }),
+    "postures",
+    null,
+    null,
+    "tailscale",
+  );
+
+  assert.match(markup, /posture:latest/);
+  assert.match(markup, /data-add-key/);
+});
+
+test("push disables while a Headscale document holds a postures key, per FR-vadv-11", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("homelab")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", kind: "headscale" }));
+
+  await state.validate("homelab");
+  await state.loadSections("homelab");
+
+  const model = entryOf(state, "homelab");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+});
+
+test("push stays enabled when a Tailscale document holds a postures key", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("jbones")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("jbones", documentBody());
+
+  await state.validate("jbones");
+  await state.loadSections("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
 });
 
 test("referencingRules finds a group or a tag named in an acls or a grants src or dst", () => {
