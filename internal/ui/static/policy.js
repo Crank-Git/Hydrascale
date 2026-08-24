@@ -348,7 +348,7 @@ export function readFailure(message) {
  * answer of the last action word for word. The testsFailed field is true when an
  * assertion of the document failed. The result region states that reason apart from a
  * document error, per FR-vadv-16. The warning field is true when the control server
- * accepted the document and it stated a warning, per FR-vadv-18.
+ * accepted the document and it stated a warning, per FR-vadv-18 and FR-vadv-19.
  */
 export function editorModel(state, id) {
   if (!id) {
@@ -2246,8 +2246,8 @@ export function createPolicyState(options = {}) {
         // document error, per FR-vadv-16.
         testsFailed: false,
         // warning is true when the last validate passed and the control server stated a
-        // warning. The stage stays validated, therefore Push stays available, and the
-        // result region names the answer as a warning, per FR-vadv-18.
+        // warning. The stage stays validated, therefore Push stays available, per
+        // FR-vadv-18.
         warning: false,
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last

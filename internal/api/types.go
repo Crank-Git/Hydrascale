@@ -129,8 +129,7 @@ type PolicyValidateRequest struct {
 // the Headscale path leaves this field false.
 // Warning is true when the control server accepted the document and it stated a warning.
 // Passed is also true then, and the console keeps Push available, per FR-vadv-18. The
-// Headscale check route states no warning, therefore the Headscale path leaves this
-// field false.
+// Headscale path leaves this field false for the same reason.
 type PolicyValidateResponse struct {
 	Passed      bool   `json:"passed"`
 	Result      string `json:"result,omitempty"`

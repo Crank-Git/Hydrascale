@@ -1138,6 +1138,27 @@ func TestPutOnePolicyRefusesADocumentThatValidateRejected(t *testing.T) {
 	}
 }
 
+// The write route validates before it writes, therefore a warning that reads as a
+// rejection blocks the write as well as Push. This test covers the whole path of
+// FR-vadv-18: the control server accepts a document that holds a warning.
+func TestPutOnePolicyWritesADocumentThatHoldsAWarning(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	tailscale.mu.Lock()
+	tailscale.validateResult = `{"message":"warning(s) found","data":[{"user":"group:unknown@example.com","warnings":["group is not syncing from SCIM and will be ignored by rules in the policy file"]}]}`
+	tailscale.mu.Unlock()
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	code, payload := callAccess(t, fixture.client, http.MethodPut, "/api/policy/alpha", `{"document":"{\"acls\":[]}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	if !tailscale.sent("POST /tailnet/-/acl") {
+		t.Error("the daemon wrote no document, and the control server accepts one that holds a warning")
+	}
+}
+
 func TestPutOnePolicyRefusesAHeadscaleDocumentThatCheckRejected(t *testing.T) {
 	headscale := newFakeHeadscale(t, "{}")
 	headscale.mu.Lock()
