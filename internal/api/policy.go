@@ -645,7 +645,12 @@ func (s *Server) validate(ctx context.Context, target policyTarget, document str
 	if err != nil {
 		return PolicyValidateResponse{}, err
 	}
-	return PolicyValidateResponse{Passed: result.Passed, Result: result.Body, TestsFailed: result.TestsFailed}, nil
+	return PolicyValidateResponse{
+		Passed:      result.Passed,
+		Result:      result.Body,
+		TestsFailed: result.TestsFailed,
+		Warning:     result.Warning,
+	}, nil
 }
 
 // policyTarget holds the facts that one policy route needs about one tailnet.

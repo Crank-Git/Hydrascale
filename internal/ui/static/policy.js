@@ -347,11 +347,12 @@ export function readFailure(message) {
  * The stage field names the stage of the two actions, and the result field holds the
  * answer of the last action word for word. The testsFailed field is true when an
  * assertion of the document failed. The result region states that reason apart from a
- * document error, per FR-vadv-16.
+ * document error, per FR-vadv-16. The warning field is true when the control server
+ * accepted the document and it stated a warning, per FR-vadv-18 and FR-vadv-19.
  */
 export function editorModel(state, id) {
   if (!id) {
-    return { id: "", state: "unselected", stage: "read", result: "", testsFailed: false, lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
+    return { id: "", state: "unselected", stage: "read", result: "", testsFailed: false, warning: false, lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
   }
 
   const row = state.rows().find((entry) => entry.id === id);
@@ -363,6 +364,7 @@ export function editorModel(state, id) {
     stage: held.stage,
     result: held.result,
     testsFailed: held.testsFailed,
+    warning: held.warning,
     lines: 0,
     text: held.text,
     edited: held.text !== held.base,
@@ -2036,6 +2038,12 @@ export function resultModel(model) {
   switch (model.stage) {
     case "validated": {
       const detail = model.result && model.result !== "{}" ? { message: model.result } : {};
+      if (model.warning) {
+        // The control server accepts a write of a document that holds a warning, which the
+        // OpenAPI schema of operationId validateAndTestPolicyFile states. Push therefore
+        // stays available, and this sentence names a warning rather than a rejection.
+        return result("warn", "warning", "The control server accepted the document, and it stated a warning. Push stays available.", detail);
+      }
       return result("ok", "validated", "The control server accepted the document.", detail);
     }
     case "validate-failed":
@@ -2237,6 +2245,10 @@ export function createPolicyState(options = {}) {
         // tests section failed. The result region states that reason apart from a
         // document error, per FR-vadv-16.
         testsFailed: false,
+        // warning is true when the last validate passed and the control server stated a
+        // warning. The stage stays validated, therefore Push stays available, per
+        // FR-vadv-18.
+        warning: false,
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last
         // attempt to open Visual, per FR-vacl-2, or the message of a failed edit to a
@@ -2277,6 +2289,7 @@ export function createPolicyState(options = {}) {
     entry.stage = "read";
     entry.result = "";
     entry.testsFailed = false;
+    entry.warning = false;
     entry.sectionsError = "";
     entry.testsAnswer = null;
   }
@@ -2711,6 +2724,7 @@ export function createPolicyState(options = {}) {
       entry.stage = "validating";
       entry.result = "";
       entry.testsFailed = false;
+      entry.warning = false;
       try {
         const answer = await request(policyValidateRoute(id), "POST", { document: sent });
         if (entry.text !== sent) {
@@ -2719,6 +2733,7 @@ export function createPolicyState(options = {}) {
         entry.stage = answer && answer.passed ? "validated" : "validate-failed";
         entry.result = (answer && answer.result) || "";
         entry.testsFailed = Boolean(answer && answer.tests_failed);
+        entry.warning = Boolean(answer && answer.warning);
       } catch (err) {
         if (entry.text !== sent) {
           return;
