@@ -1936,8 +1936,11 @@ export const PUSHING_LABEL = "The control server takes the document";
  * because the push is the affirmative action of this view.
  * A tailnet that takes no write gets every control disabled, and a request that runs
  * disables every control until the answer arrives.
- * Push also stays disabled while a Headscale document holds a posture, per FR-vadv-11,
- * because the control server does not support the key that a push would send.
+ * Push also stays disabled while a Headscale document holds a postures key, per
+ * FR-vadv-11. The control server does not support that key.
+ * The trigger is the key, not the entry count. The answer field section_keys names every
+ * key that the document holds. An empty postures key and an absent one parse into the
+ * same empty map.
  */
 export function actionsModel(model) {
   if (model.state !== "document") {
@@ -1945,11 +1948,11 @@ export function actionsModel(model) {
   }
   const busy = model.stage === "validating" || model.stage === "pushing";
   const writable = !model.readOnly && !busy;
-  const postures = model.sections && model.sections.postures;
+  const sectionKeys = (model.sections && model.sections.section_keys) || [];
   const holdsUnsupportedPosture =
     model.kind === "headscale" &&
     HEADSCALE_UNSUPPORTED_SECTIONS.has("postures") &&
-    Boolean(postures && Object.keys(postures).length > 0);
+    sectionKeys.includes("postures");
   return [
     {
       id: "validate",
@@ -2190,10 +2193,12 @@ export function createPolicyState(options = {}) {
         // FR-vacl-6 paused for confirmation, or null. baseSections holds the sections
         // of the document the console read, captured the first time loadSections
         // parses that exact text, so the rule list marks a staged row with no second
-        // request. See ruleRows.
+        // request. See ruleRows. sectionsText holds the text that sections describes,
+        // or null before the first parse. push reads it to know whether sections
+        // describes the document that the control server accepted.
         view: "text", sections: null, sectionsError: "", sectionsPending: false,
         sectionsSent: "", sectionsAgain: false,
-        nav: "", pendingRemoval: null, baseSections: null,
+        nav: "", pendingRemoval: null, baseSections: null, sectionsText: null,
         // testsPending is true while the Tests section's Run action runs, and
         // testsAnswer holds its last answer, or null before a run. These fields sit
         // apart from stage and result, so a failing test never touches the field Push
@@ -2233,6 +2238,7 @@ export function createPolicyState(options = {}) {
         return;
       }
       entry.sections = answer;
+      entry.sectionsText = sent;
       entry.sectionsError = "";
       entry.view = "visual";
       // sent equal to base means this answer describes the document the console read, so
@@ -2331,6 +2337,7 @@ export function createPolicyState(options = {}) {
       entry.text = entry.base;
       if (entry.baseSections) {
         entry.sections = entry.baseSections;
+        entry.sectionsText = entry.base;
       }
       rest(entry);
     },
@@ -2724,7 +2731,12 @@ export function createPolicyState(options = {}) {
         entry.etag = (answer && answer.etag) || "";
         entry.stage = "pushed";
         entry.sectionsError = "";
-        entry.baseSections = null;
+        // The document that the control server accepted is the new baseline. A null
+        // baseline marks no row staged and names no staged edit. push therefore takes
+        // the sections that the entry already holds, and it sends no second request.
+        // An answer that rewrote the document describes a text that the console never
+        // parsed. The baseline is then empty until loadSections parses that text.
+        entry.baseSections = entry.sectionsText === entry.base ? entry.sections : null;
       } catch (err) {
         entry.stage = err && err.status === CONFLICT_STATUS ? "conflict" : "push-failed";
         entry.result = messageOf(err);

@@ -111,7 +111,7 @@ function entryOf(state, id) {
 // sectionsBody is one answer of POST /api/policy/{id}/sections, as internal/api/types.go
 // declares it.
 function sectionsBody(overrides = {}) {
-  return {
+  const body = {
     groups: { "group:admins": ["alice@example.com"] },
     hosts: {},
     tagOwners: {},
@@ -127,6 +127,28 @@ function sectionsBody(overrides = {}) {
     opaque_keys: [],
     ...overrides,
   };
+  // The server names every section key that the document holds, per FR-vadv-11. This
+  // helper derives that list from the sections it answers, because a section that holds
+  // an entry certainly holds its key. A test that needs an empty key present, or an
+  // absent key, passes section_keys itself.
+  if (!overrides.section_keys) {
+    body.section_keys = SECTION_NAMES.filter((name) => sectionHoldsEntry(body[name]));
+  }
+  return body;
+}
+
+/** SECTION_NAMES lists every top-level key that FR-model-2 resolves into a section. */
+const SECTION_NAMES = [
+  "groups", "hosts", "tagOwners", "ipsets", "acls", "grants",
+  "ssh", "autoApprovers", "nodeAttrs", "postures", "tests", "sshTests",
+];
+
+/** sectionHoldsEntry states whether one section of a sectionsBody answer holds an entry. */
+function sectionHoldsEntry(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return Boolean(value) && Object.keys(value).length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1819,6 +1841,51 @@ test("push disables while a Headscale document holds a postures key, per FR-vadv
   assert.equal(controlOf(actionsModel(model), "push").disabled, true);
 });
 
+test("push disables while a Headscale document holds an empty postures key, per FR-vadv-11", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("homelab")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: {}, section_keys: ["postures"] });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", kind: "headscale" }));
+
+  await state.validate("homelab");
+  await state.loadSections("homelab");
+
+  const model = entryOf(state, "homelab");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+});
+
+test("the section nav counts an empty postures key as no entry, per FR-vadv-2", () => {
+  const markup = visualMarkup(sectionsBody({ postures: {}, section_keys: ["postures"] }));
+
+  assert.match(markup, /<span class="name">Postures<\/span><span class="mono">0<\/span>/);
+});
+
+test("push re-enables when a Headscale document holds no postures key", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("homelab")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: {}, section_keys: ["groups", "acls"] });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", kind: "headscale" }));
+
+  await state.validate("homelab");
+  await state.loadSections("homelab");
+
+  const model = entryOf(state, "homelab");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+});
+
 test("push stays enabled when a Tailscale document holds a postures key", async () => {
   const state = createPolicyState({
     request: async (route) => {
@@ -3045,4 +3112,110 @@ test("a sections read that starts while another runs reads the text of the entry
   await running;
 
   assert.deepEqual(state.entry("jbones").sections.hosts, { server: "100.64.0.1" });
+});
+
+// pushed returns a state that staged one rule and pushed it. Each answer of
+// POST .../sections describes the document that the request holds. Every matrix click
+// adds one rule, up to three.
+async function pushed() {
+  const rule = (src) => ({ action: "accept", src: [src], dst: ["tag:server:*"] });
+  const documentOf = (rules) => `{\n  "acls": ${JSON.stringify(rules)},\n}`;
+  const read = documentOf([]);
+  const one = documentOf([rule("tag:laptop")]);
+  const two = documentOf([rule("tag:laptop"), rule("tag:phone")]);
+  const three = documentOf([rule("tag:laptop"), rule("tag:phone"), rule("tag:router")]);
+  const sections = {
+    [read]: sectionsBody({ acls: [] }),
+    [one]: sectionsBody({ acls: [rule("tag:laptop")] }),
+    [two]: sectionsBody({ acls: [rule("tag:laptop"), rule("tag:phone")] }),
+    [three]: sectionsBody({ acls: [rule("tag:laptop"), rule("tag:phone"), rule("tag:router")] }),
+  };
+  const next = { [read]: one, [one]: two, [two]: three };
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: next[body.document] };
+    }
+    if (route.endsWith("/sections")) {
+      return sections[body.document];
+    }
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    return documentBody({ document: body.document, etag: "e0b2816b419" });
+  }, { document: read });
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+  await state.validate("jbones");
+  await state.push("jbones");
+  return state;
+}
+
+test("a rule staged after a push shows the staged chip, per FR-vacl-10", async () => {
+  const state = await pushed();
+
+  await state.stageMatrixClick("jbones", "tag:phone", "tag:server");
+
+  const toggle = toggleModel(state, "jbones");
+  const rows = ruleRows(toggle.sections, toggle.baseSections);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.staged), [false, true]);
+  assert.match(ruleListMarkup(rows), /<span class="chip mono">staged<\/span>/);
+});
+
+test("the staged summary names a rule staged after a push, per FR-vacl-14", async () => {
+  const state = await pushed();
+
+  await state.stageMatrixClick("jbones", "tag:phone", "tag:server");
+
+  const toggle = toggleModel(state, "jbones");
+  assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), ["1 rule added"]);
+  assert.match(visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections), /diffbar/);
+});
+
+test("the staged summary counts every rule staged after the same push", async () => {
+  const state = await pushed();
+
+  await state.stageMatrixClick("jbones", "tag:phone", "tag:server");
+  await state.stageMatrixClick("jbones", "tag:router", "tag:server");
+
+  const toggle = toggleModel(state, "jbones");
+  const rows = ruleRows(toggle.sections, toggle.baseSections);
+  assert.deepEqual(rows.map((row) => row.staged), [false, true, true]);
+  assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), ["2 rules added"]);
+});
+
+test("the staged summary is empty directly after a push", async () => {
+  const state = await pushed();
+
+  const toggle = toggleModel(state, "jbones");
+  assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), []);
+  assert.deepEqual(ruleRows(toggle.sections, toggle.baseSections).map((row) => row.staged), [false]);
+});
+
+test("a push that the control server rewrote stages no rule of its own", async () => {
+  const rewritten = '{\n  // the control server wrote this comment\n  "acls": [],\n}';
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}' };
+    }
+    if (route.endsWith("/sections")) {
+      return sectionsBody({ acls: body.document === rewritten ? [] : [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }] });
+    }
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    return documentBody({ document: rewritten, etag: "e0b2816b419" });
+  }, { document: '{\n  "acls": [],\n}' });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  // The document that the answer holds is not the document that the sections describe.
+  // The baseline is therefore empty, and the rule list marks no row staged.
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.baseSections, null);
+  assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), []);
+  assert.deepEqual(ruleRows(toggle.sections, toggle.baseSections).map((row) => row.staged), [false]);
 });
