@@ -120,11 +120,9 @@ test.fixme("stages a Node attributes entry from the New entry row", async ({ pag
   await expect(page.getByRole("button", { name: "Discard", exact: true })).toBeEnabled();
 });
 
-// Review finding: adding a posture serializes the entry as a malformed array instead of a
-// name/expression map. The control server rejects it, and the Visual tab locks until the
-// page reloads. This test asserts the intended behaviour and stays skipped until the add
-// action is fixed (#345).
-test.fixme("stages a posture from the New posture row", async ({ page }) => {
+// The postures section is map-shaped, so the add action sends a name and an expression.
+// Issue #345 fixed the serialization that sent a malformed array here.
+test("stages a posture from the New posture row", async ({ page }) => {
   await page.locator('.setrow[data-nav="postures"]').click();
 
   const posturesCount = page.locator('.setrow[data-nav="postures"] .mono');
