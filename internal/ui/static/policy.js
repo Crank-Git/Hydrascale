@@ -82,6 +82,11 @@ export function policySectionsRoute(id) {
   return `${policyDocumentRoute(id)}/sections`;
 }
 
+/** policySectionsEditRoute returns the route that applies one edit to a document. */
+export function policySectionsEditRoute(id) {
+  return `${policySectionsRoute(id)}/edit`;
+}
+
 /** messageOf returns the message that a rejected request stated, word for word. */
 function messageOf(err) {
   return err && err.message ? err.message : String(err);
@@ -355,7 +360,175 @@ export function visualMarkup(sections) {
   const opaque = sections.opaque_keys && sections.opaque_keys.length
     ? `<p class="note">Use Text to read or change ${esc(sections.opaque_keys.join(", "))}.</p>`
     : "";
-  return `<div class="pol-visual">${items}${opaque}</div>`;
+  const matrix = matrixMarkup(matrixModel(sections));
+  return `<div class="pol-visual">${items}${opaque}${matrix}</div>`;
+}
+
+/**
+ * destHost returns the destination of one acls entry with its port removed.
+ *
+ * dst is one entry of an acls entry's dst field, in the form tag:server:* or
+ * tag:server:443. The port comes after the last colon. A grants entry carries no port
+ * in its dst field, because the Tailscale grants syntax holds the port in the ip field
+ * instead, so destHost applies to an acls entry alone.
+ */
+function destHost(dst) {
+  const at = dst.lastIndexOf(":");
+  return at === -1 ? dst : dst.slice(0, at);
+}
+
+/** aclPairs returns one {src, dst} pair for every source and destination that one acls
+ *  entry names, with the port removed from each destination. */
+function aclPairs(rule) {
+  const srcs = (rule && rule.src) || [];
+  const dsts = ((rule && rule.dst) || []).map(destHost);
+  const pairs = [];
+  for (const src of srcs) {
+    for (const dst of dsts) {
+      pairs.push({ src, dst });
+    }
+  }
+  return pairs;
+}
+
+/** grantPairs returns one {src, dst} pair for every source and destination that one
+ *  grants entry names. A grants entry's dst field carries no port. */
+function grantPairs(entry) {
+  const srcs = (entry && entry.src) || [];
+  const dsts = (entry && entry.dst) || [];
+  const pairs = [];
+  for (const src of srcs) {
+    for (const dst of dsts) {
+      pairs.push({ src, dst });
+    }
+  }
+  return pairs;
+}
+
+/** reachabilityPairs returns one {src, dst} pair for every path that an acls entry or a
+ *  grants entry of sections allows. */
+function reachabilityPairs(sections) {
+  const acls = (sections && sections.acls) || [];
+  const grants = (sections && sections.grants) || [];
+  return [...acls.flatMap(aclPairs), ...grants.flatMap(grantPairs)];
+}
+
+/**
+ * matrixSquare returns one square of the reachability matrix.
+ *
+ * allowed holds the key "source destination" of every allowed path. The diagonal is
+ * inert, in the manner of FR-editor-10 of features/07-console-access-editor.md, because
+ * a path from one node to itself names nothing to allow or to deny.
+ */
+function matrixSquare(from, to, allowed) {
+  const inert = from === to;
+  const on = !inert && allowed.has(`${from} ${to}`);
+  let label = `${from} to ${to}, no rule`;
+  if (inert) {
+    label = `${from} to ${to}, not applicable`;
+  } else if (on) {
+    label = `${from} to ${to}, allowed`;
+  }
+  return { from, to, allowed: on, inert, label };
+}
+
+/**
+ * matrixModel returns the grid of squares of the reachability matrix, per FR-vacl-7.
+ *
+ * sections is the answer of POST .../sections. The matrix places every tag, group, and
+ * autogroup that an acls entry or a grants entry references on both axes, sorted so the
+ * grid draws the same order on every call. matrixModel carries no port, because the
+ * ports live in the rule list that features/12-visual-acl-editor.md's issue #317 builds.
+ */
+export function matrixModel(sections) {
+  const pairs = reachabilityPairs(sections);
+  const nodeSet = new Set();
+  for (const pair of pairs) {
+    nodeSet.add(pair.src);
+    nodeSet.add(pair.dst);
+  }
+  const nodes = [...nodeSet].sort();
+  const allowed = new Set(pairs.map((pair) => `${pair.src} ${pair.dst}`));
+  return {
+    nodes,
+    rows: nodes.map((source) => ({
+      source,
+      squares: nodes.map((destination) => matrixSquare(source, destination, allowed)),
+    })),
+  };
+}
+
+/**
+ * matrixClickPlan returns the edit that one click on a matrix square stages, and null
+ * for the diagonal, per FR-vacl-7.
+ *
+ * An empty square plans one acls entry that allows every port from the row's source to
+ * the column's destination, per FR-vacl-8. A filled square plans the removal of every
+ * acls entry and every grants entry that names that path, per FR-vacl-9. Removing an
+ * entry at index i shifts every later index of its own section down by one, so the plan
+ * orders each section's removals from the highest index to the lowest.
+ */
+export function matrixClickPlan(sections, from, to) {
+  if (from === to) {
+    return null;
+  }
+  const acls = (sections && sections.acls) || [];
+  const grants = (sections && sections.grants) || [];
+  const matches = (entries, pairsOf) =>
+    entries.reduce((indices, entry, index) => {
+      if (pairsOf(entry).some((pair) => pair.src === from && pair.dst === to)) {
+        indices.push(index);
+      }
+      return indices;
+    }, []);
+  const removals = [
+    ...matches(acls, aclPairs)
+      .sort((a, b) => b - a)
+      .map((index) => ({ section: "acls", index })),
+    ...matches(grants, grantPairs)
+      .sort((a, b) => b - a)
+      .map((index) => ({ section: "grants", index })),
+  ];
+  if (removals.length > 0) {
+    return { op: "remove", removals };
+  }
+  return {
+    op: "add",
+    section: "acls",
+    entry: { action: "accept", src: [from], dst: [`${to}:*`] },
+  };
+}
+
+/**
+ * matrixMarkup returns the reachability matrix region.
+ *
+ * model is the value that matrixModel returned. The square is a button, so it reaches
+ * focus by keyboard, and the diagonal carries the disabled attribute per FR-vacl-7. The
+ * console binds the click, the hover, the focus, and the blur handlers after it sets
+ * this markup, because a handler that a string carries never runs.
+ */
+export function matrixMarkup(model) {
+  const columns = model.nodes.map((node) => `<th class="col" scope="col">${esc(node)}</th>`).join("");
+  const rows = model.rows
+    .map((row) => {
+      const cells = row.squares
+        .map((square) => {
+          const className = square.inert ? "ac-square inert" : square.allowed ? "ac-square on" : "ac-square";
+          const disabled = square.inert ? " disabled" : "";
+          const data = square.inert ? "" : ` data-from="${esc(square.from)}" data-to="${esc(square.to)}"`;
+          return `<td><button type="button" class="${className}" aria-label="${esc(square.label)}"${disabled}${data}></button></td>`;
+        })
+        .join("");
+      return `<tr><th class="row" scope="row">${esc(row.source)}</th>${cells}</tr>`;
+    })
+    .join("");
+  return (
+    `<div class="card ac-matrix">` +
+    `<span class="label">Reachability</span>` +
+    `<p class="note">A filled square means that an acls entry or a grants entry allows the path. The ports live in the rule list.</p>` +
+    `<table class="ac-mtx"><thead><tr><th></th>${columns}</tr></thead><tbody>${rows}</tbody></table>` +
+    `</div>`
+  );
 }
 
 /** The label of the validate action while the control server checks the document. */
@@ -750,6 +923,50 @@ export function createPolicyState(options = {}) {
       }
     },
 
+    /**
+     * stageMatrixClick applies the edit that one click on a matrix square stages, per
+     * FR-vacl-8 and FR-vacl-9.
+     *
+     * id is the tailnet identifier, and from and to name the row's source and the
+     * column's destination. stageMatrixClick sends one edit request for an add, or one
+     * request per removal for a remove, each one against the document text that the
+     * previous request returned, because /sections/edit is stateless and every request
+     * after the first must see the earlier request's result. It sends no request for
+     * the diagonal. After the last edit, it reads the sections again, per the Interfaces
+     * section of features/12-visual-acl-editor.md.
+     */
+    async stageMatrixClick(id, from, to) {
+      const entry = entryOf(id);
+      if (!entry.sections) {
+        return;
+      }
+      const plan = matrixClickPlan(entry.sections, from, to);
+      if (!plan) {
+        return;
+      }
+      if (plan.op === "add") {
+        const answer = await request(policySectionsEditRoute(id), "POST", {
+          document: entry.text,
+          section: plan.section,
+          op: "add",
+          entry: plan.entry,
+        });
+        entry.text = answer.document;
+      } else {
+        for (const removal of plan.removals) {
+          const answer = await request(policySectionsEditRoute(id), "POST", {
+            document: entry.text,
+            section: removal.section,
+            op: "remove",
+            index: removal.index,
+          });
+          entry.text = answer.document;
+        }
+      }
+      rest(entry);
+      await this.loadSections(id);
+    },
+
     /** loadList reads GET /api/policy. */
     async loadList() {
       this.setList(await request(POLICY_ROUTE));
@@ -1009,6 +1226,42 @@ function bindToggle(holder, id) {
 }
 
 /**
+ * bindMatrix wires the reachability matrix to the state, per FR-vacl-7 to FR-vacl-9.
+ *
+ * The square is a button, so the pointer and the keyboard both reach it. Hovering or
+ * focusing a square marks its row label and its column label alone, per FR-vacl-7, and
+ * a click stages the add or the remove that matrixClickPlan names. The diagonal carries
+ * no data-from attribute, so bindMatrix wires it to no handler.
+ */
+function bindMatrix(holder, id) {
+  const table = holder.querySelector(".ac-mtx");
+  if (!table) {
+    return;
+  }
+  const rowLabels = new Map([...table.querySelectorAll("th.row")].map((th) => [th.textContent, th]));
+  const colLabels = new Map([...table.querySelectorAll("th.col")].map((th) => [th.textContent, th]));
+  for (const button of table.querySelectorAll("button[data-from]")) {
+    const from = button.getAttribute("data-from");
+    const to = button.getAttribute("data-to");
+    const mark = (on) => {
+      const rowLabel = rowLabels.get(from);
+      const colLabel = colLabels.get(to);
+      if (rowLabel) {
+        rowLabel.classList.toggle("hot", on);
+      }
+      if (colLabel) {
+        colLabel.classList.toggle("hot", on);
+      }
+    };
+    button.addEventListener("mouseenter", () => mark(true));
+    button.addEventListener("mouseleave", () => mark(false));
+    button.addEventListener("focus", () => mark(true));
+    button.addEventListener("blur", () => mark(false));
+    button.addEventListener("click", () => runAction(state.stageMatrixClick(id, from, to)));
+  }
+}
+
+/**
  * syncActions draws the controls and the result of the editor region again.
  *
  * An edit changes the stage, therefore it changes which controls the operator reaches.
@@ -1129,6 +1382,7 @@ function draw(section, snapshot) {
   editor.innerHTML = editorMarkup(model, selected ? toggleModel(state, selected) : null);
   if (selected) {
     bindToggle(editor, selected);
+    bindMatrix(editor, selected);
     if (model.state === "document") {
       bindEditor(editor, selected);
       bindActions(editor, selected);

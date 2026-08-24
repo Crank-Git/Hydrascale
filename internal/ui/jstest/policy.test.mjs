@@ -23,9 +23,13 @@ import {
   editorMarkup,
   editorModel,
   emptyStatement,
+  matrixClickPlan,
+  matrixMarkup,
+  matrixModel,
   policyDocumentRoute,
   policyListMarkup,
   policyRows,
+  policySectionsEditRoute,
   policySectionsRoute,
   policyValidateRoute,
   readFailure,
@@ -1241,4 +1245,221 @@ test("the editor draws no toggle before a tailnet is selected", () => {
 
   const markup = editorMarkup(entryOf(state, null));
   assert.ok(!markup.includes('role="tablist"'), markup);
+});
+
+// ---------------------------------------------------------------------------
+// The reachability matrix (FR-vacl-7 to FR-vacl-9)
+// ---------------------------------------------------------------------------
+
+// squareAt returns the square of a matrix model at one row and one column.
+function squareAt(model, from, to) {
+  const row = model.rows.find((entry) => entry.source === from);
+  return row.squares.find((square) => square.to === to);
+}
+
+test("the matrix places every tag, group, and autogroup that a rule references on both axes", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [{ src: ["group:eng"], dst: ["tag:server"], ip: ["tcp:22"] }],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.deepEqual(model.nodes, ["group:eng", "tag:laptop", "tag:server"]);
+  assert.equal(model.rows.length, 3);
+  for (const row of model.rows) {
+    assert.equal(row.squares.length, 3);
+  }
+});
+
+test("a filled square means at least one acls or grants entry allows the path", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [{ src: ["group:eng"], dst: ["tag:server"], ip: ["tcp:22"] }],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.equal(squareAt(model, "tag:laptop", "tag:server").allowed, true);
+  assert.equal(squareAt(model, "group:eng", "tag:server").allowed, true);
+});
+
+test("an empty square means no acls or grants entry allows the path", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.equal(squareAt(model, "tag:server", "tag:laptop").allowed, false);
+});
+
+test("the matrix drops the port that an acls destination carries, and draws no separate node for it", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] }],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.deepEqual(model.nodes, ["tag:laptop", "tag:server"]);
+  assert.equal(squareAt(model, "tag:laptop", "tag:server").allowed, true);
+});
+
+test("the diagonal square is inert, per FR-vacl-7", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  const diagonal = squareAt(model, "tag:laptop", "tag:laptop");
+  assert.equal(diagonal.inert, true);
+  assert.equal(diagonal.allowed, false);
+});
+
+test("hovering a square marks the row label and the column label alone", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.match(markup, /data-from="tag:laptop" data-to="tag:server"/);
+  assert.ok(!markup.includes("denied"), markup);
+});
+
+test("the matrix markup escapes a hostile node name", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ['<img src=x onerror="alert(1)">'], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.ok(!markup.includes("<img"), markup);
+  assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+});
+
+test("the route of the sections edit action encodes the identifier", () => {
+  assert.equal(policySectionsEditRoute("jbones"), "/api/policy/jbones/sections/edit");
+  assert.equal(policySectionsEditRoute("lab hs/1"), "/api/policy/lab%20hs%2F1/sections/edit");
+});
+
+test("the diagonal accepts no click", () => {
+  // FR-vacl-7, in the manner of FR-editor-10 of features/07-console-access-editor.md.
+  const sections = sectionsBody({ acls: [], grants: [] });
+
+  assert.equal(matrixClickPlan(sections, "tag:laptop", "tag:laptop"), null);
+});
+
+test("a click on an empty square plans an acls entry that allows every port, per FR-vacl-8", () => {
+  const sections = sectionsBody({ acls: [], grants: [] });
+
+  const plan = matrixClickPlan(sections, "tag:laptop", "tag:server");
+
+  assert.deepEqual(plan, {
+    op: "add",
+    section: "acls",
+    entry: { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+  });
+});
+
+test("a click on a filled square plans the removal of every acls and grants entry for that path, per FR-vacl-9", () => {
+  // The correction on issue #316 (posted after the batch cross-check): removing index i
+  // shifts every later index down by one, so the plan removes each section's matching
+  // entries highest index first.
+  const sections = sectionsBody({
+    acls: [
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:other:*"] },
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] },
+    ],
+    grants: [
+      { src: ["tag:other"], dst: ["tag:server"] },
+      { src: ["tag:laptop"], dst: ["tag:server"] },
+    ],
+  });
+
+  const plan = matrixClickPlan(sections, "tag:laptop", "tag:server");
+
+  assert.deepEqual(plan, {
+    op: "remove",
+    removals: [
+      { section: "acls", index: 2 },
+      { section: "acls", index: 0 },
+      { section: "grants", index: 1 },
+    ],
+  });
+});
+
+test("clicking an empty matrix square stages an acls entry", async () => {
+  const sent = [];
+  const editedDocument = '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: editedDocument };
+    }
+    return body.document === editedDocument
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }] })
+      : sectionsBody({ acls: [] });
+  });
+  state.setText("jbones", '{\n  "acls": [],\n}');
+  await state.loadSections("jbones");
+  assert.equal(toggleModel(state, "jbones").sections.acls.length, 0);
+
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  assert.deepEqual(sent[1], {
+    route: "/api/policy/jbones/sections/edit",
+    method: "POST",
+    body: {
+      document: '{\n  "acls": [],\n}',
+      section: "acls",
+      op: "add",
+      entry: { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+    },
+  });
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.sections.acls.length, 1);
+  assert.equal(state.edited("jbones"), true);
+});
+
+test("clicking a filled matrix square removes every matching entry, highest index first", async () => {
+  const sent = [];
+  const documents = [
+    '{\n  "acls": [{"a":1},{"a":2},{"a":3}],\n}',
+    '{\n  "acls": [{"a":1},{"a":2}],\n}',
+    '{\n  "acls": [{"a":2}],\n}',
+  ];
+  let editCall = 0;
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      editCall += 1;
+      return { document: documents[editCall] };
+    }
+    return sectionsBody({
+      acls: [
+        { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+        { action: "accept", src: ["tag:laptop"], dst: ["tag:other:*"] },
+        { action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] },
+      ],
+    });
+  });
+  state.setText("jbones", documents[0]);
+  await state.loadSections("jbones");
+
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  const edits = sent.filter((one) => one.route.endsWith("/sections/edit"));
+  assert.equal(edits.length, 2);
+  assert.equal(edits[0].body.index, 2);
+  assert.equal(edits[0].body.document, documents[0]);
+  assert.equal(edits[1].body.index, 0);
+  assert.equal(edits[1].body.document, documents[1]);
 });
