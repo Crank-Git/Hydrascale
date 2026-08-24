@@ -683,7 +683,7 @@ const SECTION_MARKUP = {
   tagOwners: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "tagOwners", pendingRemoval, kind),
   ipsets: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "ipsets", pendingRemoval, kind),
   ssh: (sections) => sshSectionMarkup(sections),
-  autoApprovers: () => placeholderSectionMarkup(),
+  autoApprovers: (sections) => autoApproversSectionMarkup(sections),
   nodeAttrs: () => placeholderSectionMarkup(),
   postures: () => placeholderSectionMarkup(),
   tests: () => placeholderSectionMarkup(),
@@ -892,6 +892,61 @@ function sshSectionMarkup(sections) {
   return (
     `<div class="setlist" data-section="ssh">${rows}${empty}` +
     `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-ssh">Add</button></div>` +
+    `</div>`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Auto-approvers (#322)
+// ---------------------------------------------------------------------------
+
+/** AUTO_APPROVER_EXIT_NODE_KEY names the exit node row's approver list to
+ *  membersMarkup, so the row shares markup and wiring with a route's approver list.
+ *  The exit node holds no CIDR key, per FR-vadv-6. */
+const AUTO_APPROVER_EXIT_NODE_KEY = "the exit node";
+
+/** autoApproverRouteMarkup returns one row of the auto-approvers section for one route,
+ *  per FR-vadv-6: the route's CIDR and its approver list. */
+function autoApproverRouteMarkup(cidr, approvers) {
+  return (
+    `<div class="setentry" data-cidr="${esc(cidr)}">` +
+    `<div class="setentry-head">` +
+    `<span class="field mono setentry-key">${esc(cidr)}</span>` +
+    `<button type="button" class="btn" data-act="remove-route">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">${membersMarkup(cidr, approvers)}</div>` +
+    `</div>`
+  );
+}
+
+/** autoApproverExitNodeMarkup returns the exit node row of the auto-approvers section,
+ *  per FR-vadv-6: the exit node's approver list. */
+function autoApproverExitNodeMarkup(approvers) {
+  return (
+    `<div class="setentry" data-exit-node>` +
+    `<div class="setentry-head"><span class="field mono setentry-key">exit node</span></div>` +
+    `<div class="setentry-value">${membersMarkup(AUTO_APPROVER_EXIT_NODE_KEY, approvers)}</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * autoApproversSectionMarkup returns the auto-approvers section: one row per route
+ * CIDR and one row for the exit node, per FR-vadv-6. The operator adds a route CIDR
+ * with an empty approver list, then adds an approver to it through the row, per
+ * FR-vadv-7.
+ */
+function autoApproversSectionMarkup(sections) {
+  const autoApprovers = (sections && sections.autoApprovers) || {};
+  const routes = autoApprovers.routes || {};
+  const exitNode = autoApprovers.exitNode || [];
+  const routeRows = Object.entries(routes)
+    .map(([cidr, approvers]) => autoApproverRouteMarkup(cidr, approvers))
+    .join("");
+  const addFields = `<input type="text" class="field mono" data-add-cidr placeholder="CIDR" aria-label="New route CIDR">`;
+  return (
+    `<div class="setlist" data-section="autoApprovers">${routeRows}${autoApproverExitNodeMarkup(exitNode)}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-route">Add a route</button></div>` +
     `</div>`
   );
 }
@@ -2021,6 +2076,31 @@ export function createPolicyState(options = {}) {
       return this.editSection(id, section, "add", { entry });
     },
 
+    /** addAutoApproverRoute adds one route to the auto-approvers section, keyed by
+     *  cidr, per FR-vadv-6 and FR-vadv-7. */
+    addAutoApproverRoute(id, cidr, approvers) {
+      return this.editSection(id, "autoApprovers.routes", "add", { key: cidr, entry: JSON.stringify(approvers) });
+    },
+
+    /** replaceAutoApproverRoute replaces the approver list of one route, keeping its
+     *  cidr, per FR-vadv-7. */
+    replaceAutoApproverRoute(id, cidr, approvers) {
+      return this.editSection(id, "autoApprovers.routes", "replace", { key: cidr, entry: JSON.stringify(approvers) });
+    },
+
+    /** removeAutoApproverRoute removes one route from the auto-approvers section, per
+     *  FR-vadv-7. */
+    removeAutoApproverRoute(id, cidr) {
+      return this.editSection(id, "autoApprovers.routes", "remove", { key: cidr });
+    },
+
+    /** setAutoApproverExitNode replaces the whole approver list of the exit node, per
+     *  FR-vadv-7. The exit node carries no key, because it is a single field rather
+     *  than a keyed collection. */
+    setAutoApproverExitNode(id, approvers) {
+      return this.editSection(id, "autoApprovers.exitNode", "replace", { entry: JSON.stringify(approvers) });
+    },
+
     /** loadList reads GET /api/policy. */
     async loadList() {
       this.setList(await request(POLICY_ROUTE));
@@ -2495,6 +2575,69 @@ function bindSSHList(holder, id, sections) {
 }
 
 /**
+ * bindAutoApproversList wires the add-route, remove-route, and approver-list controls
+ * of the auto-approvers section, per FR-vadv-6 and FR-vadv-7. Adding or removing one
+ * approver of a route or of the exit node replaces the whole approver list, in the
+ * manner of bindNamedSetList's member field.
+ */
+function bindAutoApproversList(holder, id, sections) {
+  const list = holder.querySelector('.setlist[data-section="autoApprovers"]');
+  if (!list) {
+    return;
+  }
+  const autoApprovers = (sections && sections.autoApprovers) || {};
+  const routes = autoApprovers.routes || {};
+  const exitNode = autoApprovers.exitNode || [];
+
+  const cidrField = list.querySelector("[data-add-cidr]");
+  const addButton = list.querySelector('.setadd [data-act="add-route"]');
+  if (addButton && cidrField) {
+    addButton.addEventListener("click", () => {
+      const cidr = cidrField.value.trim();
+      if (!cidr) {
+        return;
+      }
+      runAction(state.addAutoApproverRoute(id, cidr, []));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry[data-cidr]")) {
+    const cidr = row.getAttribute("data-cidr");
+    const removeButton = row.querySelector('[data-act="remove-route"]');
+    if (removeButton) {
+      removeButton.addEventListener("click", () => runAction(state.removeAutoApproverRoute(id, cidr)));
+    }
+    bindApproverList(row, routes[cidr] || [], (next) => state.replaceAutoApproverRoute(id, cidr, next));
+  }
+
+  const exitRow = list.querySelector(".setentry[data-exit-node]");
+  if (exitRow) {
+    bindApproverList(exitRow, exitNode, (next) => state.setAutoApproverExitNode(id, next));
+  }
+}
+
+/** bindApproverList wires the add-member and remove-member controls of one approver
+ *  list, per FR-vadv-7. current is the approver list of the row that holder draws, and
+ *  replace applies the whole list back to the state after an add or a remove. */
+function bindApproverList(holder, current, replace) {
+  const memberField = holder.querySelector("[data-add-member]");
+  const addMemberButton = holder.querySelector('[data-act="add-member"]');
+  if (addMemberButton && memberField) {
+    addMemberButton.addEventListener("click", () => {
+      const member = memberField.value.trim();
+      if (!member) {
+        return;
+      }
+      runAction(replace([...current, member]));
+    });
+  }
+  for (const removeMemberButton of holder.querySelectorAll('[data-act="remove-member"]')) {
+    const member = removeMemberButton.getAttribute("data-member");
+    removeMemberButton.addEventListener("click", () => runAction(replace(current.filter((one) => one !== member))));
+  }
+}
+
+/**
  * bindMatrix wires the reachability matrix to the state, per FR-vacl-7 to FR-vacl-9.
  *
  * The square is a button, so the pointer and the keyboard both reach it. Hovering or
@@ -2662,6 +2805,7 @@ function draw(section, snapshot) {
       bindSectionNav(editor, selected);
       bindNamedSetList(editor, selected);
       bindSSHList(editor, selected, toggle.sections);
+      bindAutoApproversList(editor, selected, toggle.sections);
     }
   }
   grid.append(editor);

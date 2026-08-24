@@ -1404,9 +1404,9 @@ test("the section nav lists the five Epic 13 sections with their entry counts", 
   assert.match(markup, /<span class="name">Tests<\/span><span class="mono">2<\/span>/);
 });
 
-test("selecting Auto-approvers, Node attributes, Postures, or Tests states the section is not yet built, and never crashes", () => {
+test("selecting Node attributes, Postures, or Tests states the section is not yet built, and never crashes", () => {
   const sections = sectionsBody();
-  for (const nav of ["autoApprovers", "nodeAttrs", "postures", "tests"]) {
+  for (const nav of ["nodeAttrs", "postures", "tests"]) {
     const markup = visualMarkup(sections, nav);
     assert.match(markup, /not yet built/);
   }
@@ -1457,6 +1457,124 @@ test("the SSH access section escapes a hostile source", () => {
     "ssh",
   );
   assert.ok(!markup.includes("<script>"));
+});
+
+// ---------------------------------------------------------------------------
+// Auto-approvers (#322, FR-vadv-6, FR-vadv-7)
+// ---------------------------------------------------------------------------
+
+test("the Auto-approvers section shows one row per route CIDR and one row for the exit node", () => {
+  const sections = sectionsBody({
+    autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] }, exitNode: ["group:eng"] },
+  });
+
+  const markup = visualMarkup(sections, "autoApprovers");
+
+  assert.match(markup, /10\.0\.0\.0\/8/);
+  assert.match(markup, /tag:router/);
+  assert.match(markup, /exit node/);
+  assert.match(markup, /group:eng/);
+});
+
+test("an Auto-approvers section with no route still draws the exit node row", () => {
+  const markup = visualMarkup(sectionsBody({ autoApprovers: {} }), "autoApprovers");
+  assert.match(markup, /exit node/);
+});
+
+test("the Auto-approvers section escapes a hostile CIDR and a hostile approver", () => {
+  const markup = visualMarkup(
+    sectionsBody({ autoApprovers: { routes: { '"><script>': ['"><script>'] } } }),
+    "autoApprovers",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("addAutoApproverRoute adds a route through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: { routes: { "10.0.0.0/8": [] } } });
+  });
+
+  await state.addAutoApproverRoute("jbones", "10.0.0.0/8", []);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "autoApprovers.routes",
+      op: "add",
+      key: "10.0.0.0/8",
+      entry: "[]",
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.autoApprovers.routes, { "10.0.0.0/8": [] });
+});
+
+test("replaceAutoApproverRoute stages an approver added to a route's list", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] } } });
+  });
+
+  await state.replaceAutoApproverRoute("jbones", "10.0.0.0/8", ["tag:router"]);
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "autoApprovers.routes",
+    op: "replace",
+    key: "10.0.0.0/8",
+    entry: '["tag:router"]',
+  });
+});
+
+test("removeAutoApproverRoute removes a route through sections/edit", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: {} });
+  });
+
+  await state.removeAutoApproverRoute("jbones", "10.0.0.0/8");
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "autoApprovers.routes",
+    op: "remove",
+    key: "10.0.0.0/8",
+  });
+});
+
+test("setAutoApproverExitNode replaces the whole exit node approver list, and carries no key", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: { exitNode: ["group:eng"] } });
+  });
+
+  await state.setAutoApproverExitNode("jbones", ["group:eng"]);
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "autoApprovers.exitNode",
+    op: "replace",
+    entry: '["group:eng"]',
+  });
 });
 
 test("parseSSHCheckPeriod accepts a duration in the control server's documented form", () => {

@@ -372,6 +372,157 @@ func (d *Document) RenameMapEntry(section, oldKey, newKey string) error {
 	return nil
 }
 
+// AddAutoApproverRoute adds one route to autoApprovers.routes, keyed by cidr, per
+// FR-vadv-6 and FR-vadv-7. AddAutoApproverRoute creates the autoApprovers section, the
+// routes section, or both, when the document holds neither yet. It returns an error
+// when autoApprovers.routes already holds cidr.
+func (d *Document) AddAutoApproverRoute(cidr string, approvers []string) error {
+	routes, indent, err := d.autoApproverRoutesObject(true)
+	if err != nil {
+		return fmt.Errorf("policy: adding an auto-approver route: %w", err)
+	}
+	if mapMemberIndex(routes, cidr) >= 0 {
+		return fmt.Errorf("policy: adding an auto-approver route: autoApprovers.routes already holds key %q", cidr)
+	}
+	value, err := autoApproverListValue(approvers)
+	if err != nil {
+		return fmt.Errorf("policy: adding an auto-approver route: %w", err)
+	}
+	routes.Members = append(routes.Members, newMapMember(cidr, value, indent, newMapTrailingComma(routes)))
+	return nil
+}
+
+// ReplaceAutoApproverRoute replaces the approver list at cidr in autoApprovers.routes,
+// keeping the key, the indentation, and the comment that surround the entry. It returns
+// an error when the document holds no autoApprovers.routes section, or when the section
+// holds no such cidr.
+func (d *Document) ReplaceAutoApproverRoute(cidr string, approvers []string) error {
+	routes, _, err := d.autoApproverRoutesObject(false)
+	if err != nil {
+		return fmt.Errorf("policy: replacing an auto-approver route: %w", err)
+	}
+	index := mapMemberIndex(routes, cidr)
+	if index < 0 {
+		return fmt.Errorf("policy: replacing an auto-approver route: autoApprovers.routes holds no key %q", cidr)
+	}
+	value, err := autoApproverListValue(approvers)
+	if err != nil {
+		return fmt.Errorf("policy: replacing an auto-approver route: %w", err)
+	}
+	routes.Members[index].Value.Value = value
+	return nil
+}
+
+// RemoveAutoApproverRoute removes the route at cidr from autoApprovers.routes.
+// RemoveAutoApproverRoute keeps the routes key when the removal empties the section. It
+// returns an error when the document holds no autoApprovers.routes section, or when the
+// section holds no such cidr.
+func (d *Document) RemoveAutoApproverRoute(cidr string) error {
+	routes, _, err := d.autoApproverRoutesObject(false)
+	if err != nil {
+		return fmt.Errorf("policy: removing an auto-approver route: %w", err)
+	}
+	index := mapMemberIndex(routes, cidr)
+	if index < 0 {
+		return fmt.Errorf("policy: removing an auto-approver route: autoApprovers.routes holds no key %q", cidr)
+	}
+	routes.Members = append(routes.Members[:index], routes.Members[index+1:]...)
+	return nil
+}
+
+// SetAutoApproverExitNode replaces the whole approver list of autoApprovers.exitNode,
+// per FR-vadv-6 and FR-vadv-7. The exit node is a single field, not a keyed collection,
+// so SetAutoApproverExitNode always replaces its whole value; an empty approvers list
+// clears it. SetAutoApproverExitNode creates the autoApprovers section when the document
+// holds none yet.
+func (d *Document) SetAutoApproverExitNode(approvers []string) error {
+	approversObj, indent, err := d.autoApproversObject(true)
+	if err != nil {
+		return fmt.Errorf("policy: setting the auto-approver exit node: %w", err)
+	}
+	value, err := autoApproverListValue(approvers)
+	if err != nil {
+		return fmt.Errorf("policy: setting the auto-approver exit node: %w", err)
+	}
+	for i := range approversObj.Members {
+		if memberName(approversObj.Members[i]) == "exitNode" {
+			approversObj.Members[i].Value.Value = value
+			return nil
+		}
+	}
+	approversObj.Members = append(approversObj.Members, newMapMember("exitNode", value, indent, newMapTrailingComma(approversObj)))
+	return nil
+}
+
+// autoApproverListValue parses approvers as the huJSON value that an autoApprovers
+// route or the exit node holds.
+func autoApproverListValue(approvers []string) (hujson.ValueTrimmed, error) {
+	raw, err := json.Marshal(approvers)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling the approver list: %w", err)
+	}
+	value, err := hujson.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parsing the approver list: %w", err)
+	}
+	return value.Value, nil
+}
+
+// autoApproversObject returns the object behind the top-level autoApprovers section,
+// and the indentation that a new entry of that object matches. It creates the section,
+// holding an empty object, when create is true and the document holds no autoApprovers
+// section yet, per FR-model-7 extended one level deeper: adding the first route or
+// setting the exit node creates the section key.
+func (d *Document) autoApproversObject(create bool) (*hujson.Object, []byte, error) {
+	root, ok := d.root.Value.(*hujson.Object)
+	if !ok {
+		return nil, nil, fmt.Errorf("the document root is not an object")
+	}
+	for i := range root.Members {
+		if memberName(root.Members[i]) != "autoApprovers" {
+			continue
+		}
+		inner, ok := root.Members[i].Value.Value.(*hujson.Object)
+		if !ok {
+			return nil, nil, fmt.Errorf("section %q is not an object", "autoApprovers")
+		}
+		return inner, mapEntryIndent(root.Members[i]), nil
+	}
+	if !create {
+		return nil, nil, fmt.Errorf("the document holds no section %q", "autoApprovers")
+	}
+	sectionIndent := topLevelIndent(root)
+	inner := &hujson.Object{AfterExtra: append([]byte("\n"), sectionIndent...)}
+	root.Members = append(root.Members, newMapMember("autoApprovers", inner, sectionIndent, true))
+	return inner, mapEntryIndent(root.Members[len(root.Members)-1]), nil
+}
+
+// autoApproverRoutesObject returns the object behind autoApprovers.routes, and the
+// indentation that a new route entry matches. It creates autoApprovers, routes, or
+// both, when create is true and the document holds neither yet.
+func (d *Document) autoApproverRoutesObject(create bool) (*hujson.Object, []byte, error) {
+	approvers, indent, err := d.autoApproversObject(create)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range approvers.Members {
+		if memberName(approvers.Members[i]) != "routes" {
+			continue
+		}
+		routes, ok := approvers.Members[i].Value.Value.(*hujson.Object)
+		if !ok {
+			return nil, nil, fmt.Errorf("section %q is not an object", "autoApprovers.routes")
+		}
+		return routes, mapEntryIndent(approvers.Members[i]), nil
+	}
+	if !create {
+		return nil, nil, fmt.Errorf("the document holds no section %q", "autoApprovers.routes")
+	}
+	routes := &hujson.Object{AfterExtra: append([]byte("\n"), indent...)}
+	approvers.Members = append(approvers.Members, newMapMember("routes", routes, indent, newMapTrailingComma(approvers)))
+	return routes, mapEntryIndent(approvers.Members[len(approvers.Members)-1]), nil
+}
+
 // mapSection returns the object behind the named top-level section.
 func (d *Document) mapSection(section string) (*hujson.Object, error) {
 	obj, ok := d.root.Value.(*hujson.Object)

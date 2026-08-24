@@ -693,6 +693,127 @@ func TestPolicySectionsEditReplacesAMapEntryValueByKey(t *testing.T) {
 	}
 }
 
+func TestPolicySectionsEditAddsReplacesAndRemovesAnAutoApproverRouteByCIDR(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "autoApprovers.routes",
+		"op":       "add",
+		"key":      "10.0.1.0/24",
+		"entry":    []string{"tag:router"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var added wireSectionsEdit
+	decodePolicy(t, payload, &added)
+	if !strings.Contains(added.Document, "10.0.1.0/24") {
+		t.Errorf("Document = %q, want the new route added", added.Document)
+	}
+	if !strings.Contains(added.Document, "10.0.0.0/24") {
+		t.Errorf("Document = %q, want the existing route unchanged", added.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": added.Document,
+		"section":  "autoApprovers.routes",
+		"op":       "replace",
+		"key":      "10.0.1.0/24",
+		"entry":    []string{"tag:router", "tag:backup"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var replaced wireSectionsEdit
+	decodePolicy(t, payload, &replaced)
+	if !strings.Contains(replaced.Document, "tag:backup") {
+		t.Errorf("Document = %q, want tag:backup added to the route", replaced.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": replaced.Document,
+		"section":  "autoApprovers.routes",
+		"op":       "remove",
+		"key":      "10.0.0.0/24",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, "10.0.0.0/24") {
+		t.Errorf("Document = %q, want 10.0.0.0/24 removed", removed.Document)
+	}
+	if !strings.Contains(removed.Document, "10.0.1.0/24") {
+		t.Errorf("Document = %q, want 10.0.1.0/24 unchanged", removed.Document)
+	}
+}
+
+func TestPolicySectionsEditReplacesTheWholeAutoApproverExitNodeList(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{"autoApprovers": {"exitNode": ["tag:exit"]}}`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "autoApprovers.exitNode",
+		"op":       "replace",
+		"entry":    []string{"tag:exit", "tag:backup-exit"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireSectionsEdit
+	decodePolicy(t, payload, &got)
+	if !strings.Contains(got.Document, "tag:backup-exit") {
+		t.Errorf("Document = %q, want the new exit node approver added", got.Document)
+	}
+}
+
+func TestPolicySectionsEditRejectsAnAutoApproverRouteAddWithNoKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit",
+		`{"document":"{}","section":"autoApprovers.routes","op":"add","entry":["tag:router"]}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+}
+
+func TestPolicySectionsEditRejectsAnAutoApproverExitNodeAddOp(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit",
+		`{"document":"{}","section":"autoApprovers.exitNode","op":"add","entry":["tag:exit"]}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+}
+
 func TestPolicySectionsEditRejectsABadOpBeforeAnyChange(t *testing.T) {
 	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
 

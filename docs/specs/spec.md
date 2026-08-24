@@ -807,6 +807,7 @@ document, returns every named section) and `POST /api/policy/{id}/sections/edit`
 (applies one add/replace/remove to a section, returns the new document text). Both are
 stateless, matching the document model's own Data touched section. Caught before any
 Epic 12 code was written. |
+| 2026-08-23 | 2 | Issue #322. **`autoApprovers` needed a new addressing scheme on the existing `POST /api/policy/{id}/sections/edit` route.** `internal/policy/document.go`'s `AddMapEntry`/`AddEntry` family operates on a top-level array or a top-level map alone, and `autoApprovers` is neither: it is a top-level object holding a map (`routes`) and a single field (`exitNode`). `Document` gains `AddAutoApproverRoute`, `ReplaceAutoApproverRoute`, `RemoveAutoApproverRoute`, and `SetAutoApproverExitNode`, and the route gains two `section` values, `autoApprovers.routes` (keyed by CIDR) and `autoApprovers.exitNode` (no key; `replace` alone). `features/13-visual-policy-advanced.md`'s Interfaces section records the addressing scheme. |
 
 ## Issue map
 
