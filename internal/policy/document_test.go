@@ -387,3 +387,104 @@ func TestReplacingAnEntryOutOfRangeReturnsAnError(t *testing.T) {
 		t.Fatal("ReplaceEntry: got no error for an out-of-range index")
 	}
 }
+
+func TestSerializingAnUneditedDocumentReturnsTheExactInputBytes(t *testing.T) {
+	text := `{
+  // a comment the visual editor must keep
+  "groups": {
+    "group:admins": ["alice@example.com"],
+  },
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+  ],
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := string(doc.Bytes()); got != text {
+		t.Fatalf("Bytes: got %q, want the original text %q", got, text)
+	}
+}
+
+func TestSerializingAfterOneEditPreservesEveryOtherByte(t *testing.T) {
+	text := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+    {"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]},
+    {"action": "accept", "src": ["group:ops"], "dst": ["10.0.1.0/8:22"]},
+    {"action": "accept", "src": ["group:sre"], "dst": ["10.0.2.0/8:22"]},
+  ],
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceEntry("acls", 1, `{"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:2222"]}`); err != nil {
+		t.Fatalf("ReplaceEntry: %v", err)
+	}
+	want := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+    {"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:2222"]},
+    {"action": "accept", "src": ["group:ops"], "dst": ["10.0.1.0/8:22"]},
+    {"action": "accept", "src": ["group:sre"], "dst": ["10.0.2.0/8:22"]},
+  ],
+}
+`
+	if got := string(doc.Bytes()); got != want {
+		t.Fatalf("Bytes: got %q, want %q", got, want)
+	}
+}
+
+func TestParseEditSerializeIsAPureFunction(t *testing.T) {
+	text := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+  ],
+}
+`
+	edit := `{"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]}`
+
+	first, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := first.AddEntry("acls", edit); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+
+	second, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := second.AddEntry("acls", edit); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+
+	if string(first.Bytes()) != string(second.Bytes()) {
+		t.Fatalf("Bytes: two parses of the same text with the same edit produced different output: %q vs %q", first.Bytes(), second.Bytes())
+	}
+}
+
+func TestAnUnmodelledKeyRoundTripsUnchangedThroughAnEditAndSerialize(t *testing.T) {
+	text := `{
+  "randomizeClientPort": true,
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+  ],
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddEntry("acls", `{"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]}`); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	if got := string(doc.Bytes()); !strings.Contains(got, `"randomizeClientPort": true,`) {
+		t.Fatalf("Bytes: got %q, want the unmodelled key randomizeClientPort unchanged", got)
+	}
+}

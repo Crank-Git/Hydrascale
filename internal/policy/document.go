@@ -31,6 +31,15 @@ func Parse(text string) (*Document, error) {
 	return &Document{root: root}, nil
 }
 
+// Bytes serializes the document back to huJSON text.
+// Bytes returns the exact input bytes when the document received no edit.
+// After an edit, Bytes returns the original bytes outside the edited range,
+// and valid huJSON inside it. Bytes is a pure function of the document's
+// input bytes and the edits applied to it.
+func (d *Document) Bytes() []byte {
+	return d.root.Pack()
+}
+
 // rejectDuplicateTopLevelKeys returns an error naming the line and the
 // column of the second occurrence of a top-level key that the document
 // holds twice. huJSON grammar allows a duplicate key inside one object; the
