@@ -147,6 +147,12 @@ type PolicySectionsRequest struct {
 // A section absent from the document is an empty map or an empty list, never null, per
 // FR-model-6. OpaqueKeys names every top-level key of the document that FR-model-2 does
 // not resolve, per FR-vacl-18.
+//
+// SectionKeys names every top-level key that FR-model-2 resolves and the document holds,
+// in the order of sectionNames. An empty section and an absent section decode into the
+// same empty map or empty list. SectionKeys alone separates the two.
+// FR-vadv-11 needs that separation. It disables Push while a Headscale document holds a
+// postures key, whether or not the key holds an entry.
 type PolicySectionsResponse struct {
 	Groups        map[string][]string  `json:"groups"`
 	Hosts         map[string]string    `json:"hosts"`
@@ -161,16 +167,17 @@ type PolicySectionsResponse struct {
 	Tests         []json.RawMessage    `json:"tests"`
 	SSHTests      []json.RawMessage    `json:"sshTests"`
 	OpaqueKeys    []string             `json:"opaque_keys"`
+	SectionKeys   []string             `json:"section_keys"`
 }
 
 // PolicySectionsEditRequest is the request body of POST /api/policy/{id}/sections/edit.
 //
 // Op holds "add", "replace", "remove", or "rename". A list-shaped section (`acls`,
-// `grants`, `ssh`, `nodeAttrs`, `postures`, `tests`, `sshTests`) addresses its entry by
+// `grants`, `ssh`, `nodeAttrs`, `tests`, `sshTests`) addresses its entry by
 // Index, which "add" omits and "replace"/"remove" require. A map-shaped section
-// (`groups`, `hosts`, `tagOwners`, `ipsets`) addresses its entry by Key, which every op
-// requires; "rename" also requires NewKey and carries no Entry. Entry is required for
-// "add" and "replace", and it is omitted for "remove" and "rename".
+// (`groups`, `hosts`, `tagOwners`, `ipsets`, `postures`) addresses its entry by Key, which
+// every op requires; "rename" also requires NewKey and carries no Entry. Entry is required
+// for "add" and "replace", and it is omitted for "remove" and "rename".
 //
 // The section "autoApprovers.routes" addresses one route by Key, the route's CIDR, and
 // it takes "add", "replace", or "remove"; it takes no "rename". The section

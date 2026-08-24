@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -65,18 +66,19 @@ type wireACLRule struct {
 }
 
 type wireSections struct {
-	Groups     map[string][]string `json:"groups"`
-	Hosts      map[string]string   `json:"hosts"`
-	TagOwners  map[string][]string `json:"tagOwners"`
-	IPSets     map[string][]string `json:"ipsets"`
-	ACLs       []wireACLRule       `json:"acls"`
-	Grants     []json.RawMessage   `json:"grants"`
-	SSH        []json.RawMessage   `json:"ssh"`
-	NodeAttrs  []json.RawMessage   `json:"nodeAttrs"`
-	Postures   map[string][]string `json:"postures"`
-	Tests      []json.RawMessage   `json:"tests"`
-	SSHTests   []json.RawMessage   `json:"sshTests"`
-	OpaqueKeys []string            `json:"opaque_keys"`
+	Groups      map[string][]string `json:"groups"`
+	Hosts       map[string]string   `json:"hosts"`
+	TagOwners   map[string][]string `json:"tagOwners"`
+	IPSets      map[string][]string `json:"ipsets"`
+	ACLs        []wireACLRule       `json:"acls"`
+	Grants      []json.RawMessage   `json:"grants"`
+	SSH         []json.RawMessage   `json:"ssh"`
+	NodeAttrs   []json.RawMessage   `json:"nodeAttrs"`
+	Postures    map[string][]string `json:"postures"`
+	Tests       []json.RawMessage   `json:"tests"`
+	SSHTests    []json.RawMessage   `json:"sshTests"`
+	OpaqueKeys  []string            `json:"opaque_keys"`
+	SectionKeys []string            `json:"section_keys"`
 }
 
 type wireSectionsEdit struct {
@@ -499,6 +501,40 @@ func TestPolicySectionsAnAbsentSectionReturnsAnEmptyListNotNull(t *testing.T) {
 	}
 }
 
+// FR-vadv-11 disables Push while the document holds a postures key. The response must
+// separate an empty postures key from an absent one. Both decode into the same empty map,
+// therefore SectionKeys carries the signal.
+func TestPolicySectionsNamesEveryNamedSectionKeyTheDocumentHolds(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	cases := []struct {
+		name     string
+		document string
+		want     bool
+	}{
+		{name: "an empty postures key", document: `{"postures": {}}`, want: true},
+		{name: "a postures key with one entry", document: `{"postures": {"posture:latest": ["node:os == 'linux'"]}}`, want: true},
+		{name: "no postures key", document: `{"groups": {}}`, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := json.Marshal(map[string]string{"document": tc.document})
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+			if code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+			}
+			var got wireSections
+			decodePolicy(t, payload, &got)
+			if slices.Contains(got.SectionKeys, "postures") != tc.want {
+				t.Errorf("SectionKeys = %v, want it to hold %q = %v", got.SectionKeys, "postures", tc.want)
+			}
+		})
+	}
+}
+
 // --- POST /api/policy/{id}/sections/edit ---
 
 func TestPolicySectionsEditAddsAnEntryAndKeepsEveryOtherByte(t *testing.T) {
@@ -690,6 +726,119 @@ func TestPolicySectionsEditReplacesAMapEntryValueByKey(t *testing.T) {
 	decodePolicy(t, payload, &got)
 	if !strings.Contains(got.Document, "bob@example.com") {
 		t.Errorf("Document = %q, want the new member added", got.Document)
+	}
+}
+
+// The postures section is map-shaped, per features/13-visual-policy-advanced.md
+// FR-vadv-10. Issue #345 records the defect: the route wrote an array, the key reached
+// the document never, and the sections route then refused the result.
+func TestPolicySectionsEditAddsAPostureAsAMapEntryAndReadsItBack(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	req, err := json.Marshal(map[string]interface{}{
+		"document": "{}",
+		"section":  "postures",
+		"op":       "add",
+		"key":      "posture:test",
+		"entry":    []string{"node:os == 'macos'"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var added wireSectionsEdit
+	decodePolicy(t, payload, &added)
+	if !strings.Contains(added.Document, "posture:test") {
+		t.Errorf("Document = %q, want it to hold the posture name", added.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{"document": added.Document})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("sections status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var sections wireSections
+	decodePolicy(t, payload, &sections)
+	got := sections.Postures["posture:test"]
+	if len(got) != 1 || got[0] != "node:os == 'macos'" {
+		t.Errorf("Postures = %#v, want the key %q with one expression", sections.Postures, "posture:test")
+	}
+}
+
+func TestPolicySectionsEditReplacesRenamesAndRemovesAPostureByKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "postures": {
+    "posture:latestMac": ["node:os == 'macos'"],
+  },
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "postures",
+		"op":       "replace",
+		"key":      "posture:latestMac",
+		"entry":    []string{"node:os == 'macos'", "node:os == 'linux'"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("replace status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var replaced wireSectionsEdit
+	decodePolicy(t, payload, &replaced)
+	if !strings.Contains(replaced.Document, "node:os == 'linux'") {
+		t.Errorf("Document = %q, want the new expression", replaced.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": replaced.Document,
+		"section":  "postures",
+		"op":       "rename",
+		"key":      "posture:latestMac",
+		"new_key":  "posture:currentMac",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("rename status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var renamed wireSectionsEdit
+	decodePolicy(t, payload, &renamed)
+	if strings.Contains(renamed.Document, "posture:latestMac") || !strings.Contains(renamed.Document, "posture:currentMac") {
+		t.Errorf("Document = %q, want posture:latestMac renamed to posture:currentMac", renamed.Document)
+	}
+
+	// The console sends a remove with the key alone. Issue #345 records the refusal
+	// "index is required for op \"remove\"" that the array-shaped branch returned.
+	req, err = json.Marshal(map[string]interface{}{
+		"document": renamed.Document,
+		"section":  "postures",
+		"op":       "remove",
+		"key":      "posture:currentMac",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("remove status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, "posture:currentMac") {
+		t.Errorf("Document = %q, want posture:currentMac removed", removed.Document)
 	}
 }
 
