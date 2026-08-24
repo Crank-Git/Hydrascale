@@ -310,6 +310,7 @@ export function toggleModel(state, id) {
     visualDisabled: entry.sectionsError !== "",
     error: entry.sectionsError,
     sections: entry.sections,
+    baseSections: entry.baseSections,
   };
 }
 
@@ -342,7 +343,7 @@ export function toggleMarkup(toggle) {
  * text, per FR-vacl-2 and FR-vacl-3. The opaque keys reach the screen once, per
  * FR-vacl-18, so the operator knows to use Text for them.
  */
-export function visualMarkup(sections) {
+export function visualMarkup(sections, baseSections = null) {
   if (!sections) {
     return `<div class="pol-visual"></div>`;
   }
@@ -361,7 +362,8 @@ export function visualMarkup(sections) {
     ? `<p class="note">Use Text to read or change ${esc(sections.opaque_keys.join(", "))}.</p>`
     : "";
   const matrix = matrixMarkup(matrixModel(sections));
-  return `<div class="pol-visual">${items}${opaque}${matrix}</div>`;
+  const rules = ruleListMarkup(ruleRows(sections, baseSections));
+  return `<div class="pol-visual">${items}${opaque}${matrix}${rules}</div>`;
 }
 
 /**
@@ -529,6 +531,368 @@ export function matrixMarkup(model) {
     `<table class="ac-mtx"><thead><tr><th></th>${columns}</tr></thead><tbody>${rows}</tbody></table>` +
     `</div>`
   );
+}
+
+// ---------------------------------------------------------------------------
+// The rule list. FR-vacl-10 to FR-vacl-12.
+// ---------------------------------------------------------------------------
+
+/** ruleAllPorts is the label a row states when its entry names no port. */
+const RULE_ALL_PORTS = "all ports";
+
+/**
+ * rulePortPattern matches one port entry: a protocol, one port, and an optional second
+ * port. It repeats internal/access/rules.go's pattern word for word, per FR-vacl-12.
+ */
+const rulePortPattern = /^(tcp|udp)\/([0-9]{1,5})(?:-([0-9]{1,5}))?$/;
+
+/**
+ * rulePortFailure returns the message of a bad port entry, and null for a good entry.
+ *
+ * entry is one item of the port list of a row, in the form tcp/22 or udp/1-1024. The
+ * three messages repeat internal/ui/static/access.js's portFailure word for word, which
+ * itself repeats internal/access/rules.go, per FR-vacl-12 and issue #290.
+ */
+function rulePortFailure(entry) {
+  const match = rulePortPattern.exec(entry);
+  if (match === null) {
+    return `invalid port ${JSON.stringify(entry)}: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22`;
+  }
+  const range = `invalid port ${JSON.stringify(entry)}: a port number is between 1 and 65535`;
+  const low = Number(match[2]);
+  if (low < 1 || low > 65535) {
+    return range;
+  }
+  if (match[3] !== undefined) {
+    const high = Number(match[3]);
+    if (high < 1 || high > 65535) {
+      return range;
+    }
+    if (high < low) {
+      return `invalid port ${JSON.stringify(entry)}: the second number is lower than the first`;
+    }
+  }
+  return null;
+}
+
+/**
+ * parseRulePorts returns the port list that one port field of the rule list holds.
+ *
+ * text is the text of the field. The comma separates the entries, and parseRulePorts
+ * removes the space around each entry. An empty field returns an empty port list, which
+ * allows every port. parseRulePorts returns {ports: null, error: "<message>"} for a bad
+ * entry, so one bad entry rejects the whole field. FR-vacl-12.
+ */
+export function parseRulePorts(text) {
+  const entries = String(text)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+  for (const entry of entries) {
+    const failure = rulePortFailure(entry);
+    if (failure !== null) {
+      return { ports: null, error: failure };
+    }
+  }
+  return { ports: entries, error: null };
+}
+
+/**
+ * destHostPort returns the destination of one acls entry's dst with its port split out.
+ *
+ * dst is one entry of an acls entry's dst field, in the form tag:server:* or
+ * tag:server:443. The port comes after the last colon.
+ */
+function destHostPort(dst) {
+  const at = dst.lastIndexOf(":");
+  return at === -1 ? { host: dst, port: "*" } : { host: dst.slice(0, at), port: dst.slice(at + 1) };
+}
+
+/**
+ * aclPortsOf returns the port list of one acls entry, in the tcp/<n> form, and an empty
+ * list for an entry that allows every port. An acls entry carries one protocol for the
+ * whole entry, in its proto field.
+ */
+function aclPortsOf(entry) {
+  const proto = (entry && entry.proto) || "";
+  const ports = new Set();
+  for (const dst of (entry && entry.dst) || []) {
+    ports.add(destHostPort(dst).port);
+  }
+  if (ports.size === 0 || ports.has("*")) {
+    return [];
+  }
+  return [...ports].sort().map((port) => (proto ? `${proto}/${port}` : port));
+}
+
+/**
+ * grantPortsOf returns the port list of one grants entry, in the tcp/<n> form, and an
+ * empty list for an entry that allows every port. A grants entry's ip field carries the
+ * protocol and the port together, separated by a colon, for example tcp:443; the rule
+ * list states the same value with a slash, matching FR-vacl-12's format.
+ */
+function grantPortsOf(entry) {
+  return ((entry && entry.ip) || []).map((one) => String(one).replace(":", "/"));
+}
+
+/**
+ * grantCapabilityNames returns the name of every application capability that one grants
+ * entry's app field carries, and an empty list for an entry that carries none. FR-vacl-11.
+ */
+function grantCapabilityNames(entry) {
+  const app = entry && entry.app;
+  return app && typeof app === "object" ? Object.keys(app) : [];
+}
+
+/**
+ * removeGrantCapability returns a grants entry with the named capability removed. It
+ * removes the whole app field once no capability remains, and it changes no parameter of
+ * a capability it keeps, per FR-vacl-11's out-of-scope statement.
+ */
+export function removeGrantCapability(entry, name) {
+  if (!entry || !entry.app || !(name in entry.app)) {
+    return entry;
+  }
+  const app = { ...entry.app };
+  delete app[name];
+  const next = { ...entry, app };
+  if (Object.keys(app).length === 0) {
+    delete next.app;
+  }
+  return next;
+}
+
+/**
+ * renameGrantCapability returns a grants entry with one capability's name changed. It
+ * keeps the capability's own parameters unchanged, per FR-vacl-11's out-of-scope
+ * statement.
+ */
+export function renameGrantCapability(entry, oldName, newName) {
+  if (!entry || !entry.app || !(oldName in entry.app) || newName === "" || oldName === newName) {
+    return entry;
+  }
+  const app = {};
+  for (const [key, value] of Object.entries(entry.app)) {
+    app[key === oldName ? newName : key] = value;
+  }
+  return { ...entry, app };
+}
+
+/**
+ * ruleEntryWithPorts returns row's entry with its port list replaced by ports, in the
+ * form parseRulePorts returned. FR-editor-19's equivalent for the rule list.
+ */
+export function ruleEntryWithPorts(row, ports) {
+  if (row.section === "grants") {
+    const next = { ...row.entry };
+    if (ports.length === 0) {
+      delete next.ip;
+    } else {
+      next.ip = ports.map((port) => port.replace("/", ":"));
+    }
+    return next;
+  }
+  const hosts = [...new Set((row.entry.dst || []).map((dst) => destHostPort(dst).host))];
+  if (ports.length === 0) {
+    const next = { ...row.entry, dst: hosts.map((host) => `${host}:*`) };
+    delete next.proto;
+    return next;
+  }
+  const protocols = new Set(ports.map((port) => port.split("/")[0]));
+  const proto = protocols.size === 1 ? [...protocols][0] : "";
+  const bare = ports.map((port) => port.split("/").slice(1).join("/"));
+  const dst = hosts.flatMap((host) => bare.map((port) => `${host}:${port}`));
+  const next = { ...row.entry, dst };
+  if (proto) {
+    next.proto = proto;
+  } else {
+    delete next.proto;
+  }
+  return next;
+}
+
+/** entryStaged reports whether entry has no match, by content, in baseList. */
+function entryStaged(baseList, entry) {
+  if (!baseList) {
+    return false;
+  }
+  return !baseList.some((one) => JSON.stringify(one) === JSON.stringify(entry));
+}
+
+/**
+ * aclRow returns one row of the rule list for one acls entry.
+ *
+ * index is the entry's position in the acls array, which /sections/edit takes for a
+ * replace or a remove. baseList is the acls array of the document the console read, or
+ * null when it holds none yet; entryStaged marks the row staged when entry carries no
+ * match there.
+ */
+function aclRow(entry, index, baseList) {
+  const hosts = [...new Set((entry.dst || []).map((dst) => destHostPort(dst).host))];
+  const ports = aclPortsOf(entry);
+  return {
+    section: "acls",
+    index,
+    from: (entry.src || []).join(", "),
+    to: hosts.join(", "),
+    ports,
+    allPorts: ports.length === 0,
+    portsText: ports.join(", "),
+    chip: "acls",
+    caps: [],
+    staged: entryStaged(baseList, entry),
+    entry,
+  };
+}
+
+/** grantRow returns one row of the rule list for one grants entry. See aclRow. */
+function grantRow(entry, index, baseList) {
+  const ports = grantPortsOf(entry);
+  const caps = grantCapabilityNames(entry);
+  return {
+    section: "grants",
+    index,
+    from: (entry.src || []).join(", "),
+    to: (entry.dst || []).join(", "),
+    ports,
+    allPorts: ports.length === 0,
+    portsText: ports.join(", "),
+    chip: caps.length > 0 ? `grants · app: ${caps.join(", ")}` : "grants",
+    caps,
+    staged: entryStaged(baseList, entry),
+    entry,
+  };
+}
+
+/**
+ * ruleRows returns one row per acls entry and per grants entry of sections, per
+ * FR-vacl-10.
+ *
+ * baseSections is the sections of the document the console read, or null before the
+ * console holds one; a row that carries no match there reads staged, in the manner of
+ * access.js's ruleListModel. Two entries with the same source and the same destination
+ * and different ports each get their own row, because ruleRows draws one row per entry
+ * and never merges entries.
+ */
+export function ruleRows(sections, baseSections = null) {
+  const acls = (sections && sections.acls) || [];
+  const grants = (sections && sections.grants) || [];
+  const baseAcls = baseSections ? baseSections.acls || [] : null;
+  const baseGrants = baseSections ? baseSections.grants || [] : null;
+  return [
+    ...acls.map((entry, index) => aclRow(entry, index, baseAcls)),
+    ...grants.map((entry, index) => grantRow(entry, index, baseGrants)),
+  ];
+}
+
+/** capMarkup returns the application capability chips of one grants row. FR-vacl-11. */
+function capMarkup(row) {
+  if (row.caps.length === 0) {
+    return "";
+  }
+  const items = row.caps
+    .map((name) => {
+      const label = `the app capability ${name} of ${row.from} to ${row.to}`;
+      return (
+        `<span class="ac-cap">` +
+        `<input type="text" class="field ac-capfield mono" data-act="cap-rename" data-cap="${esc(name)}" value="${esc(name)}" aria-label="The name of ${esc(label)}">` +
+        `<button type="button" class="btn ac-del" data-act="cap-delete" data-cap="${esc(name)}" aria-label="Remove ${esc(label)}">Delete</button>` +
+        `</span>`
+      );
+    })
+    .join("");
+  return `<div class="ac-caps grant-caps">${items}</div>`;
+}
+
+/** ruleRowMarkup returns one row of the rule list. */
+function ruleRowMarkup(row) {
+  const ports = row.allPorts
+    ? `<span class="ac-noports mono">${RULE_ALL_PORTS}</span>`
+    : `<div class="ac-ports">${row.ports.map((port) => `<span class="chip mono">${esc(port)}</span>`).join("")}</div>`;
+  const staged = row.staged ? `<span class="chip mono">staged</span>` : "";
+  const label = `${row.from} to ${row.to}`;
+  return (
+    `<div class="ac-ruleline" data-section="${esc(row.section)}" data-index="${row.index}">` +
+    `<div class="ac-rule">` +
+    `<span class="ac-end mono">${esc(row.from)}</span>` +
+    `<span class="ac-conn"></span>` +
+    `<span class="ac-end mono">${esc(row.to)}</span>` +
+    ports +
+    `<input type="text" class="field ac-portfield mono" data-act="rule-ports" value="${esc(row.portsText)}" placeholder="${RULE_ALL_PORTS}" aria-label="The ports of ${esc(label)}">` +
+    `<span class="chip mono">${esc(row.chip)}</span>` +
+    staged +
+    `<button type="button" class="btn ac-del" data-act="rule-delete" aria-label="Delete the rule ${esc(label)}">Delete</button>` +
+    `</div>` +
+    capMarkup(row) +
+    `<p class="note ns-error"></p>` +
+    `</div>`
+  );
+}
+
+/**
+ * ruleListMarkup returns the rule list region: one row per acls entry and per grants
+ * entry, per FR-vacl-10. Denial is the absence of a row, so no row exists for a path no
+ * entry allows.
+ */
+export function ruleListMarkup(rows) {
+  const note = `<p class="note">One row per acls entry and per grants entry. The port field takes a list that the comma separates, in the form tcp/22, udp/1-1024.</p>`;
+  if (rows.length === 0) {
+    return `<div class="card ac-rules"><span class="label">Rules</span>${note}<p class="note">No acls entry and no grants entry exist. Click a square of the matrix to stage one.</p></div>`;
+  }
+  const lines = rows.map(ruleRowMarkup).join("");
+  return `<div class="card ac-rules"><span class="label">Rules</span>${note}<div class="ac-rulelist">${lines}</div></div>`;
+}
+
+/**
+ * bindRuleList wires the rule list to the state, per FR-vacl-10 to FR-vacl-12.
+ *
+ * Delete removes the row's entry. Changing the port field validates the entry against
+ * parseRulePorts and states the message inline on a bad entry, without staging
+ * anything, matching access.js's equivalent field. Deleting or renaming a capability
+ * changes the row's app field alone, per FR-vacl-11.
+ */
+function bindRuleList(holder, id, rows) {
+  const list = holder.querySelector(".ac-rulelist");
+  if (!list) {
+    return;
+  }
+  for (const line of list.querySelectorAll(".ac-ruleline")) {
+    const section = line.getAttribute("data-section");
+    const index = Number(line.getAttribute("data-index"));
+    const row = rows.find((one) => one.section === section && one.index === index);
+    const message = line.querySelector(".ns-error");
+
+    const del = line.querySelector('[data-act="rule-delete"]');
+    if (del) {
+      del.addEventListener("click", () => runAction(state.stageRuleRemove(id, section, index)));
+    }
+
+    const field = line.querySelector('[data-act="rule-ports"]');
+    if (field) {
+      field.addEventListener("change", () => {
+        const result = parseRulePorts(field.value);
+        if (result.error) {
+          if (message) {
+            message.textContent = result.error;
+          }
+          field.setAttribute("aria-invalid", "true");
+          return;
+        }
+        runAction(state.stageRuleReplace(id, section, index, ruleEntryWithPorts(row, result.ports)));
+      });
+    }
+
+    for (const del2 of line.querySelectorAll('[data-act="cap-delete"]')) {
+      const name = del2.getAttribute("data-cap");
+      del2.addEventListener("click", () => runAction(state.stageRuleReplace(id, section, index, removeGrantCapability(row.entry, name))));
+    }
+    for (const capField of line.querySelectorAll('[data-act="cap-rename"]')) {
+      const before = capField.getAttribute("data-cap");
+      capField.addEventListener("change", () => {
+        runAction(state.stageRuleReplace(id, section, index, renameGrantCapability(row.entry, before, capField.value)));
+      });
+    }
+  }
 }
 
 /** The label of the validate action while the control server checks the document. */
@@ -727,7 +1091,7 @@ export function editorMarkup(model, toggle = null) {
   const readOnly = model.readOnly ? " readonly" : "";
   const showVisual = toggle && toggle.view === "visual";
   const body = showVisual
-    ? visualMarkup(toggle.sections)
+    ? visualMarkup(toggle.sections, toggle.baseSections)
     : `<div class="pol-ed">` +
       `<div class="pol-bar"><span class="pol-name mono">${esc(model.id)} &middot; policy.hujson</span>${chip}</div>` +
       `<div class="pol-code">${gutterMarkup(model.lines)}` +
@@ -776,8 +1140,10 @@ export function createPolicyState(options = {}) {
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last
         // attempt to open Visual, per FR-vacl-2. sectionsPending is true while that
-        // request runs.
-        view: "text", sections: null, sectionsError: "", sectionsPending: false,
+        // request runs. baseSections holds the sections of the document the console
+        // read, captured the first time loadSections parses that exact text, so the
+        // rule list marks a staged row with no second request. See ruleRows.
+        view: "text", sections: null, sectionsError: "", sectionsPending: false, baseSections: null,
       };
       entries.set(id, entry);
     }
@@ -839,6 +1205,7 @@ export function createPolicyState(options = {}) {
       entry.text = entry.base;
       entry.etag = (body && body.etag) || "";
       entry.writeAvailable = Boolean(body && body.write_available);
+      entry.baseSections = null;
       rest(entry);
     },
 
@@ -913,6 +1280,12 @@ export function createPolicyState(options = {}) {
         entry.sections = answer;
         entry.sectionsError = "";
         entry.view = "visual";
+        // sent equal to base means this answer describes the document the console
+        // read, so it doubles as the baseline the rule list compares against. This
+        // sends no second request; see the entry.baseSections field comment.
+        if (sent === entry.base) {
+          entry.baseSections = answer;
+        }
       } catch (err) {
         if (entry.text !== sent) {
           return;
@@ -963,6 +1336,44 @@ export function createPolicyState(options = {}) {
           entry.text = answer.document;
         }
       }
+      rest(entry);
+      await this.loadSections(id);
+    },
+
+    /**
+     * stageRuleRemove removes one entry of the rule list, per the row's section and
+     * index. It sends one request, then reads the sections again so the row leaves the
+     * list.
+     */
+    async stageRuleRemove(id, section, index) {
+      const entry = entryOf(id);
+      const answer = await request(policySectionsEditRoute(id), "POST", {
+        document: entry.text,
+        section,
+        op: "remove",
+        index,
+      });
+      entry.text = answer.document;
+      rest(entry);
+      await this.loadSections(id);
+    },
+
+    /**
+     * stageRuleReplace replaces one entry of the rule list with nextEntry, at the row's
+     * section and index. The port edit and the capability edit of the rule list both
+     * call this, each with the entry that ruleEntryWithPorts, removeGrantCapability, or
+     * renameGrantCapability returned.
+     */
+    async stageRuleReplace(id, section, index, nextEntry) {
+      const entry = entryOf(id);
+      const answer = await request(policySectionsEditRoute(id), "POST", {
+        document: entry.text,
+        section,
+        op: "replace",
+        index,
+        entry: nextEntry,
+      });
+      entry.text = answer.document;
       rest(entry);
       await this.loadSections(id);
     },
@@ -1057,6 +1468,7 @@ export function createPolicyState(options = {}) {
         entry.etag = (answer && answer.etag) || "";
         entry.stage = "pushed";
         entry.sectionsError = "";
+        entry.baseSections = null;
       } catch (err) {
         entry.stage = err && err.status === CONFLICT_STATUS ? "conflict" : "push-failed";
         entry.result = messageOf(err);
@@ -1383,6 +1795,10 @@ function draw(section, snapshot) {
   if (selected) {
     bindToggle(editor, selected);
     bindMatrix(editor, selected);
+    const toggle = toggleModel(state, selected);
+    if (toggle.sections) {
+      bindRuleList(editor, selected, ruleRows(toggle.sections, toggle.baseSections));
+    }
     if (model.state === "document") {
       bindEditor(editor, selected);
       bindActions(editor, selected);
