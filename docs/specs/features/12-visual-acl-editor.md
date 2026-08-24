@@ -56,8 +56,11 @@ is what lets an edit in one view survive as a normal, readable change to the oth
 
 ### The reachability matrix
 
-- **FR-vacl-7** — The matrix places every tag, group, autogroup, and the wildcard `*`
-  that a rule references on both axes, in the manner of **FR-editor-1** to
+- **FR-vacl-7** — The matrix places two kinds of identity on both axes: every tag, group,
+  autogroup, and the wildcard `*` that a rule references, and every group, tag owner, and
+  host alias that the document's `groups`, `tagOwners`, and `hosts` sections define. An
+  `ipsets` key names no axis, because a rule names an IP set as `ipset:<name>`. The matrix
+  draws each axis in the manner of **FR-editor-1** to
   **FR-editor-15** of `features/07-console-access-editor.md`: a filled square means at
   least one `acls` or `grants` entry allows the path, an empty square means none does, a
   square that names one identity on both axes accepts no click, hovering marks the row
