@@ -315,7 +315,7 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>Visual ACL editor</td><td><code>features/12-visual-acl-editor.md</code></td><td>Epic 12</td><td><code>mockups/06-visual-acl-editor.html</code></td></tr>
 <tr><td>Visual policy editor — SSH and advanced constructs</td><td><code>features/13-visual-policy-advanced.md</code></td><td>Epic 13</td><td><code>mockups/07-advanced-policy-constructs.html</code></td></tr>
 </table></div>
-<p>Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11 to 13 build version 1.1, the visual policy editor, and they follow Epic 10.</p>
+<p>Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1 already covers the console fixes and the credential-state work between Epic 9 and Epic 10, tagged <code>v1.1.0</code> and <code>v1.1.1</code>.)</p>
 <h2 id="architecture-stack">Architecture &amp; stack</h2>
 <h3 id="components-after-version-1-0">Components after version 1.0</h3>
 <div class="table-wrap"><table>
@@ -506,7 +506,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>M4 — Console</td><td>6, 7</td><td>The operator sees and edits local rules in a browser. This is the headline of version 1.0.</td></tr>
 <tr><td>M5 — Upstream and release</td><td>8, 9</td><td>Upstream policy control works and version 1.0 ships.</td></tr>
 <tr><td>M6 — Agent skills</td><td>10</td><td>A coding agent routes a command to the named tailnet. This follows version 1.0.</td></tr>
-<tr><td>M7 — Visual policy editor</td><td>11, 12, 13</td><td>The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.1, and it follows version 1.0.</td></tr>
+<tr><td>M7 — Visual policy editor</td><td>11, 12, 13</td><td>The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (<code>v1.1.0</code>, <code>v1.1.1</code>).</td></tr>
 </table></div>
 <p>M2 is the point at which the release is worth cutting even if nothing else lands. The security and DNS work must not wait behind the console.</p>
 <h2 id="assumptions" class="callout-h">Assumptions</h2>
@@ -717,6 +717,9 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>2026-08-23</td><td>2</td><td><strong>Version 1.1 is built.</strong> Epics 11, 12, and 13 all merged into <code>dev</code>. The</td></tr>
 </table></div>
 <p>operator edits a policy document's tags, groups, reachability rules, SSH access, auto-approvers, node attributes, postures, and tests by drawing them, with the same byte-for-byte preservation guarantee the text editor already held. Three findings during the build, each closed before it reached a later issue: Epic 12's feature file wrongly said no new route was needed; Epic 11's edit methods only handled array-shaped sections, not the map-shaped ones Epic 12 needed; <code>autoApprovers</code>' nested shape needed its own addressing scheme, which Epic 13 added. <code>features/11-policy-document-model.md</code>, <code>features/12-visual-acl-editor.md</code>, and <code>features/13-visual-policy-advanced.md</code> all advance to <code>status: built</code>. |</p>
+<div class="table-wrap"><table>
+<tr><th>2026-08-23</th><th>2</th><th><strong>Correction: this work is version 1.2, not version 1.1.</strong> The <code>/spec-update</code> round and the Epic 11-13 build both called it version 1.1, and the tag names <code>v1.1.0</code> and <code>v1.1.1</code> already belong to the console fixes and credential-state work that shipped between Epic 9 and Epic 10, before this round started. The Feature map and Milestone M7 now name it version 1.2.</th></tr>
+</table></div>
 <h2 id="issue-map">Issue map</h2>
 <p>Every epic of version 1.0 is on the tracker. Epics 5 to 9 were filed on 2026-08-05, after the security audit closed, so that each decomposition carries the audit findings it must fix.</p>
 <div class="table-wrap"><table>

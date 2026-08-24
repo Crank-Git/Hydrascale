@@ -180,7 +180,9 @@ version 1.0.
 | Visual policy editor — SSH and advanced constructs | `features/13-visual-policy-advanced.md` | Epic 13 | `mockups/07-advanced-policy-constructs.html` |
 
 Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11
-to 13 build version 1.1, the visual policy editor, and they follow Epic 10.
+to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1
+already covers the console fixes and the credential-state work between Epic 9 and Epic
+10, tagged `v1.1.0` and `v1.1.1`.)
 
 ## Architecture & stack
 
@@ -599,7 +601,7 @@ key remains. Running Tests marks each assertion `pass` or `fail` without blockin
 | M4 — Console | 6, 7 | The operator sees and edits local rules in a browser. This is the headline of version 1.0. |
 | M5 — Upstream and release | 8, 9 | Upstream policy control works and version 1.0 ships. |
 | M6 — Agent skills | 10 | A coding agent routes a command to the named tailnet. This follows version 1.0. |
-| M7 — Visual policy editor | 11, 12, 13 | The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.1, and it follows version 1.0. |
+| M7 — Visual policy editor | 11, 12, 13 | The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (`v1.1.0`, `v1.1.1`). |
 
 M2 is the point at which the release is worth cutting even if nothing else lands. The
 security and DNS work must not wait behind the console.
@@ -818,6 +820,7 @@ sections, not the map-shaped ones Epic 12 needed; `autoApprovers`' nested shape 
 its own addressing scheme, which Epic 13 added. `features/11-policy-document-model.md`,
 `features/12-visual-acl-editor.md`, and `features/13-visual-policy-advanced.md` all
 advance to `status: built`. |
+| 2026-08-23 | 2 | **Correction: this work is version 1.2, not version 1.1.** The `/spec-update` round and the Epic 11-13 build both called it version 1.1, and the tag names `v1.1.0` and `v1.1.1` already belong to the console fixes and credential-state work that shipped between Epic 9 and Epic 10, before this round started. The Feature map and Milestone M7 now name it version 1.2. |
 
 ## Issue map
 
