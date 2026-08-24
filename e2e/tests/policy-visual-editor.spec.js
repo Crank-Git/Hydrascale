@@ -157,8 +157,8 @@ test("keeps Push disabled with a failing test staged", async ({ page }) => {
 
   await page.getByRole("button", { name: "Validate", exact: true }).click();
 
-  // FR-vadv-15 and FR-vadv-16: the result region names the failed test, and it reads
-  // apart from the word that a malformed document produces, which is "validate failed".
+  // FR-vadv-16: the result region states a failed test apart from a document error. A
+  // malformed document produces the word "validate failed" instead.
   await expect(page.locator(".pol-result .pol-word")).toHaveText("test failed");
   await expect(page.getByRole("button", { name: "Push", exact: true })).toBeDisabled();
 
