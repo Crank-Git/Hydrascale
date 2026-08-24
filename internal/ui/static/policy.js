@@ -82,6 +82,84 @@ export function policySectionsRoute(id) {
   return `${policyDocumentRoute(id)}/sections`;
 }
 
+/** policySectionsEditRoute returns the route that applies one edit to a section. */
+export function policySectionsEditRoute(id) {
+  return `${policyDocumentRoute(id)}/sections/edit`;
+}
+
+/**
+ * The four named-set sections that FR-vacl-4 and FR-vacl-5 draw, in nav order. hosts
+ * maps an alias to one address, so scalar reads true; every other section maps a name
+ * to a member list, so scalar reads false.
+ */
+export const NAMED_SET_SECTIONS = [
+  { key: "groups", label: "Groups", scalar: false },
+  { key: "hosts", label: "Hosts", scalar: true },
+  { key: "tagOwners", label: "Tag owners", scalar: false },
+  { key: "ipsets", label: "IP sets", scalar: false },
+];
+
+/**
+ * REFERENCE_CHECKED_SECTIONS lists the named-set section that FR-vacl-6 checks for a
+ * referencing rule before it stages a removal: a group and a tag, and no other section.
+ */
+const REFERENCE_CHECKED_SECTIONS = new Set(["groups", "tagOwners"]);
+
+/**
+ * namedSetEntries returns one [key, value] pair per entry of a named-set section, in
+ * sorted order, so that the list draws in the same order on every render.
+ */
+export function namedSetEntries(sections, section) {
+  const value = (sections && sections[section]) || {};
+  return Object.keys(value)
+    .sort()
+    .map((key) => [key, value[key]]);
+}
+
+/** ruleEndpoints returns the src list and the dst list of one acls or grants entry. */
+function ruleEndpoints(rule) {
+  return {
+    src: Array.isArray(rule.src) ? rule.src : [],
+    dst: Array.isArray(rule.dst) ? rule.dst : [],
+  };
+}
+
+/**
+ * referencingRules returns one entry per acls or grants rule of sections that names
+ * name in its src list or its dst list. FR-vacl-6 states this before the visual editor
+ * stages a removal, so the operator sees which rule references the name before the
+ * name is gone.
+ */
+export function referencingRules(sections, name) {
+  const found = [];
+  const scan = (section, rules) => {
+    for (const rule of rules || []) {
+      const { src, dst } = ruleEndpoints(rule || {});
+      if (src.includes(name) || dst.includes(name)) {
+        found.push({ section, src: src.join(", "), dst: dst.join(", ") });
+      }
+    }
+  };
+  scan("acls", sections && sections.acls);
+  scan("grants", sections && sections.grants);
+  return found;
+}
+
+/**
+ * referencingSentence states which rule references a name that the operator is about
+ * to remove, per FR-vacl-6. It names the source and the destination of every rule word
+ * for word, because those values come from the document and .claude/rules/ste.md
+ * treats a document value as evidence.
+ */
+export function referencingSentence(rules) {
+  if (rules.length === 0) {
+    return "";
+  }
+  const list = rules.map((rule) => `${rule.section}: ${rule.src} to ${rule.dst}`).join("; ");
+  const lead = rules.length === 1 ? "One rule references this entry" : `${rules.length} rules reference this entry`;
+  return `${lead}: ${list}. Removing the entry does not remove the rule.`;
+}
+
 /** messageOf returns the message that a rejected request stated, word for word. */
 function messageOf(err) {
   return err && err.message ? err.message : String(err);
@@ -305,6 +383,8 @@ export function toggleModel(state, id) {
     visualDisabled: entry.sectionsError !== "",
     error: entry.sectionsError,
     sections: entry.sections,
+    nav: entry.nav,
+    pendingRemoval: entry.pendingRemoval,
   };
 }
 
@@ -331,31 +411,113 @@ export function toggleMarkup(toggle) {
  * visualMarkup returns the visual editor region, drawn from the sections that the
  * daemon parsed out of the staged text.
  *
- * features/12-visual-acl-editor.md's sibling issues #315 to #317 build the matrix, the
- * rule list, and the named-set editors. This issue draws only the count of each
- * section, which proves that a toggle to Visual re-parses and re-renders the current
- * text, per FR-vacl-2 and FR-vacl-3. The opaque keys reach the screen once, per
- * FR-vacl-18, so the operator knows to use Text for them.
+ * nav names which named-set section (Groups, Hosts, Tag owners, IP sets) the section
+ * nav shows below the counts, per FR-vacl-5; an empty nav shows the counts alone.
+ * features/12-visual-acl-editor.md's sibling issue #316 builds the matrix and the rule
+ * list, which the Rules row states the count of but does not open. The opaque keys
+ * reach the screen once, per FR-vacl-18, so the operator knows to use Text for them.
  */
-export function visualMarkup(sections) {
+export function visualMarkup(sections, nav = "", pendingRemoval = null) {
   if (!sections) {
     return `<div class="pol-visual"></div>`;
   }
   const count = (value) => (Array.isArray(value) ? value.length : Object.keys(value || {}).length);
   const rows = [
-    ["Groups", count(sections.groups)],
-    ["Hosts", count(sections.hosts)],
-    ["Tag owners", count(sections.tagOwners)],
-    ["IP sets", count(sections.ipsets)],
-    ["Rules", count(sections.acls) + count(sections.grants)],
+    ["groups", "Groups", count(sections.groups)],
+    ["hosts", "Hosts", count(sections.hosts)],
+    ["tagOwners", "Tag owners", count(sections.tagOwners)],
+    ["ipsets", "IP sets", count(sections.ipsets)],
+    ["rules", "Rules", count(sections.acls) + count(sections.grants)],
   ];
-  const items = rows
-    .map(([label, n]) => `<div class="setrow"><span class="name">${esc(label)}</span><span class="mono">${n}</span></div>`)
-    .join("");
+  const items = rows.map(([key, label, n]) => namedSetNavRowMarkup(key, label, n, nav)).join("");
   const opaque = sections.opaque_keys && sections.opaque_keys.length
     ? `<p class="note">Use Text to read or change ${esc(sections.opaque_keys.join(", "))}.</p>`
     : "";
-  return `<div class="pol-visual">${items}${opaque}</div>`;
+  const body = nav && nav !== "rules" ? namedSetSectionMarkup(sections, nav, pendingRemoval) : "";
+  return `<div class="pol-visual">${items}${opaque}${body}</div>`;
+}
+
+/** namedSetNavRowMarkup returns one row of the section nav. The Rules row states its
+ * count but opens nothing, because #316 owns the matrix and the rule list it opens. */
+function namedSetNavRowMarkup(key, label, count, nav) {
+  if (key === "rules") {
+    return `<div class="setrow"><span class="name">${esc(label)}</span><span class="mono">${count}</span></div>`;
+  }
+  const selected = key === nav;
+  return (
+    `<div class="setrow${selected ? " selected" : ""}" role="button" tabindex="0" data-nav="${esc(key)}" aria-selected="${selected}">` +
+    `<span class="name">${esc(label)}</span><span class="mono">${count}</span></div>`
+  );
+}
+
+/**
+ * namedSetSectionMarkup returns the entry list of one named-set section, per
+ * FR-vacl-4 and FR-vacl-5. Every entry offers Rename and Remove; a list-shaped section
+ * (every one but Hosts) also offers a member to add and a member to remove.
+ */
+function namedSetSectionMarkup(sections, section, pendingRemoval) {
+  const config = NAMED_SET_SECTIONS.find((one) => one.key === section);
+  const entries = namedSetEntries(sections, section);
+  const rows = entries
+    .map(([key, value]) => namedSetEntryMarkup(section, key, value, config.scalar, pendingRemoval))
+    .join("");
+  const empty = entries.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const addFields = config.scalar
+    ? `<input type="text" class="field mono" data-add-key placeholder="alias" aria-label="New ${esc(config.label)} alias">` +
+      `<input type="text" class="field mono" data-add-value placeholder="address" aria-label="New ${esc(config.label)} address">`
+    : `<input type="text" class="field mono" data-add-key placeholder="name" aria-label="New ${esc(config.label)} name">` +
+      `<input type="text" class="field mono" data-add-value placeholder="member, member" aria-label="New ${esc(config.label)} members">`;
+  return (
+    `<div class="setlist" data-section="${esc(section)}">${rows}${empty}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-set">Add</button></div>` +
+    `</div>`
+  );
+}
+
+/** namedSetEntryMarkup returns one entry of a named-set section: its key, its value or
+ * its member list, and the Rename and Remove controls. */
+function namedSetEntryMarkup(section, key, value, scalar, pendingRemoval) {
+  const confirming = pendingRemoval && pendingRemoval.section === section && pendingRemoval.key === key;
+  const removeControl = confirming
+    ? `<div class="setremove-confirm">` +
+      `<p class="note">${esc(referencingSentence(pendingRemoval.rules))}</p>` +
+      `<button type="button" class="btn" data-act="cancel-remove">Cancel</button>` +
+      `<button type="button" class="btn" data-act="confirm-remove">Remove anyway</button>` +
+      `</div>`
+    : `<button type="button" class="btn" data-act="remove-set">Remove</button>`;
+  const valueControl = scalar
+    ? `<input type="text" class="field mono setentry-address" value="${esc(value)}" aria-label="Address of ${esc(key)}">` +
+      `<button type="button" class="btn" data-act="save-value">Save</button>`
+    : membersMarkup(key, value);
+  return (
+    `<div class="setentry" data-key="${esc(key)}">` +
+    `<div class="setentry-head">` +
+    `<input type="text" class="field mono setentry-key" value="${esc(key)}" aria-label="Name">` +
+    `<button type="button" class="btn" data-act="rename-set">Rename</button>` +
+    removeControl +
+    `</div>` +
+    `<div class="setentry-value">${valueControl}</div>` +
+    `</div>`
+  );
+}
+
+/** membersMarkup returns one chip per member of a group, a tag owner mapping, or an IP
+ * set, each with its own remove control, and a field to add one more member. */
+function membersMarkup(key, members) {
+  const list = (members || [])
+    .map(
+      (member) =>
+        `<span class="chip mono">${esc(member)}` +
+        `<button type="button" class="setmember-remove" data-act="remove-member" data-member="${esc(member)}" aria-label="Remove ${esc(member)} from ${esc(key)}">&times;</button>` +
+        `</span>`,
+    )
+    .join("");
+  return (
+    `<div class="setmembers">${list}` +
+    `<input type="text" class="field mono" data-add-member placeholder="Add a member" aria-label="Add a member of ${esc(key)}">` +
+    `<button type="button" class="btn" data-act="add-member">Add member</button>` +
+    `</div>`
+  );
 }
 
 /** The label of the validate action while the control server checks the document. */
@@ -554,7 +716,7 @@ export function editorMarkup(model, toggle = null) {
   const readOnly = model.readOnly ? " readonly" : "";
   const showVisual = toggle && toggle.view === "visual";
   const body = showVisual
-    ? visualMarkup(toggle.sections)
+    ? visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval)
     : `<div class="pol-ed">` +
       `<div class="pol-bar"><span class="pol-name mono">${esc(model.id)} &middot; policy.hujson</span>${chip}</div>` +
       `<div class="pol-code">${gutterMarkup(model.lines)}` +
@@ -602,9 +764,13 @@ export function createPolicyState(options = {}) {
         loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "", stage: "read", result: "",
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last
-        // attempt to open Visual, per FR-vacl-2. sectionsPending is true while that
-        // request runs.
+        // attempt to open Visual, per FR-vacl-2, or the message of a failed edit to a
+        // named-set section. sectionsPending is true while a sections request runs.
+        // nav names the named-set section (Groups, Hosts, Tag owners, IP sets) the
+        // section nav shows, per FR-vacl-5, and pendingRemoval holds the removal that
+        // FR-vacl-6 paused for confirmation, or null.
         view: "text", sections: null, sectionsError: "", sectionsPending: false,
+        nav: "", pendingRemoval: null,
       };
       entries.set(id, entry);
     }
@@ -712,6 +878,96 @@ export function createPolicyState(options = {}) {
     /** setView switches between the Text editor and the Visual editor. It sends no request. */
     setView(id, view) {
       entryOf(id).view = view;
+    },
+
+    /**
+     * selectNav switches which named-set section the section nav shows, per FR-vacl-5.
+     * Selecting the section the operator already selected closes it. selectNav sends
+     * no request, because entry.sections already holds every section's entries, and it
+     * discards a removal FR-vacl-6 paused for confirmation in the section it leaves.
+     */
+    selectNav(id, nav) {
+      const entry = entryOf(id);
+      entry.nav = entry.nav === nav ? "" : nav;
+      entry.pendingRemoval = null;
+    },
+
+    /**
+     * editSection applies one edit to a named-set section through
+     * POST .../sections/edit, then re-reads POST .../sections so the section nav draws
+     * the new state. Per features/12-visual-acl-editor.md's Interfaces section, the
+     * console holds the huJSON text as the single source of truth: it sends the current
+     * text plus the edit, replaces the staged text with the answer, then re-parses it.
+     * editSection sends one request, and it states the message of a refusal in
+     * sectionsError rather than throwing, so a caller never needs a second catch.
+     */
+    async editSection(id, section, op, extra) {
+      const entry = entryOf(id);
+      const body = { document: entry.text, section, op, ...extra };
+      try {
+        const answer = await request(policySectionsEditRoute(id), "POST", body);
+        this.setText(id, answer.document);
+        await this.loadSections(id);
+      } catch (err) {
+        entry.sectionsError = messageOf(err);
+      }
+    },
+
+    /** addSetEntry adds a new key to a named-set section, per FR-vacl-5. value is the
+     *  member list for every section but Hosts, and the address for Hosts. */
+    addSetEntry(id, section, key, value) {
+      return this.editSection(id, section, "add", { key, entry: JSON.stringify(value) });
+    },
+
+    /** renameSetEntry changes the key of one entry and keeps its value, per FR-vacl-5. */
+    renameSetEntry(id, section, oldKey, newKey) {
+      return this.editSection(id, section, "rename", { key: oldKey, new_key: newKey });
+    },
+
+    /** replaceSetValue replaces the value of one entry, keeping its key, per FR-vacl-5.
+     *  Adding or removing one member of a group, a tag owner mapping, or an IP set, and
+     *  changing a host alias's address, each replace the whole value this way. */
+    replaceSetValue(id, section, key, value) {
+      return this.editSection(id, section, "replace", { key, entry: JSON.stringify(value) });
+    },
+
+    /**
+     * removeSetEntry removes one entry of a named-set section, per FR-vacl-5.
+     *
+     * REFERENCE_CHECKED_SECTIONS names Groups and Tag owners: removing an entry of
+     * either one first checks entry.sections for a rule that names it. A referencing
+     * rule pauses the removal in entry.pendingRemoval and sends no request, per
+     * FR-vacl-6; confirmRemoval applies it. An entry no rule references, and every
+     * entry of Hosts and IP sets, removes at once.
+     */
+    removeSetEntry(id, section, key) {
+      const entry = entryOf(id);
+      if (REFERENCE_CHECKED_SECTIONS.has(section)) {
+        const rules = referencingRules(entry.sections, key);
+        if (rules.length > 0) {
+          entry.pendingRemoval = { section, key, rules };
+          return Promise.resolve();
+        }
+      }
+      return this.editSection(id, section, "remove", { key });
+    },
+
+    /** cancelRemoval discards a removal FR-vacl-6 paused for confirmation. It sends no
+     *  request. */
+    cancelRemoval(id) {
+      entryOf(id).pendingRemoval = null;
+    },
+
+    /** confirmRemoval applies a removal that FR-vacl-6 paused for confirmation.
+     *  Confirming removes the entry alone; the rule that named it stays. */
+    async confirmRemoval(id) {
+      const entry = entryOf(id);
+      const pending = entry.pendingRemoval;
+      entry.pendingRemoval = null;
+      if (!pending) {
+        return;
+      }
+      await this.editSection(id, pending.section, "remove", { key: pending.key });
     },
 
     /**
@@ -1008,6 +1264,145 @@ function bindToggle(holder, id) {
   }
 }
 
+/** scalarSection reports whether section maps a name to one address rather than to a
+ *  member list, per NAMED_SET_SECTIONS. */
+function scalarSection(section) {
+  const config = NAMED_SET_SECTIONS.find((one) => one.key === section);
+  return Boolean(config && config.scalar);
+}
+
+/** membersFromInput splits the operator's comma-separated text of the Add field into a
+ *  member list, dropping every empty entry. */
+function membersFromInput(text) {
+  return text
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part !== "");
+}
+
+/** currentMembers returns the member list that entry.sections holds for key, so an
+ *  add-member or a remove-member control replaces the whole value with the one member
+ *  changed. */
+function currentMembers(id, section, key) {
+  const sections = state.entry(id).sections;
+  const value = sections && sections[section] && sections[section][key];
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * bindSectionNav wires each named-set nav row to state.selectNav, per FR-vacl-5. The
+ * Rules row carries no data-nav attribute, so it wires nothing.
+ */
+function bindSectionNav(holder, id) {
+  for (const row of holder.querySelectorAll("[data-nav]")) {
+    const nav = row.getAttribute("data-nav");
+    const select = () => {
+      state.selectNav(id, nav);
+      caret = null;
+      redraw();
+    };
+    row.addEventListener("click", select);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        select();
+      }
+    });
+  }
+}
+
+/**
+ * bindNamedSetList wires the add, rename, remove, and member controls of the open
+ * named-set section's entry list, per FR-vacl-5 and FR-vacl-6.
+ */
+function bindNamedSetList(holder, id) {
+  const list = holder.querySelector(".setlist");
+  if (!list) {
+    return;
+  }
+  const section = list.getAttribute("data-section");
+
+  const addKey = list.querySelector("[data-add-key]");
+  const addValue = list.querySelector("[data-add-value]");
+  const addButton = list.querySelector('.setadd [data-act="add-set"]');
+  if (addButton) {
+    addButton.addEventListener("click", () => {
+      const key = addKey.value.trim();
+      const raw = addValue.value.trim();
+      if (!key || raw === "") {
+        return;
+      }
+      const value = scalarSection(section) ? raw : membersFromInput(raw);
+      runAction(state.addSetEntry(id, section, key, value));
+    });
+  }
+
+  for (const entry of list.querySelectorAll(".setentry")) {
+    const key = entry.getAttribute("data-key");
+
+    const keyField = entry.querySelector(".setentry-key");
+    const renameButton = entry.querySelector('[data-act="rename-set"]');
+    if (renameButton && keyField) {
+      renameButton.addEventListener("click", () => {
+        const newKey = keyField.value.trim();
+        if (!newKey || newKey === key) {
+          return;
+        }
+        runAction(state.renameSetEntry(id, section, key, newKey));
+      });
+    }
+
+    const removeButton = entry.querySelector('[data-act="remove-set"]');
+    if (removeButton) {
+      removeButton.addEventListener("click", () => {
+        runAction(state.removeSetEntry(id, section, key));
+      });
+    }
+
+    const cancelButton = entry.querySelector('[data-act="cancel-remove"]');
+    if (cancelButton) {
+      cancelButton.addEventListener("click", () => {
+        state.cancelRemoval(id);
+        caret = null;
+        redraw();
+      });
+    }
+
+    const confirmButton = entry.querySelector('[data-act="confirm-remove"]');
+    if (confirmButton) {
+      confirmButton.addEventListener("click", () => runAction(state.confirmRemoval(id)));
+    }
+
+    const addressField = entry.querySelector(".setentry-address");
+    const saveButton = entry.querySelector('[data-act="save-value"]');
+    if (saveButton && addressField) {
+      saveButton.addEventListener("click", () => {
+        runAction(state.replaceSetValue(id, section, key, addressField.value.trim()));
+      });
+    }
+
+    const memberField = entry.querySelector("[data-add-member]");
+    const addMemberButton = entry.querySelector('[data-act="add-member"]');
+    if (addMemberButton && memberField) {
+      addMemberButton.addEventListener("click", () => {
+        const member = memberField.value.trim();
+        if (!member) {
+          return;
+        }
+        runAction(state.replaceSetValue(id, section, key, [...currentMembers(id, section, key), member]));
+      });
+    }
+
+    for (const removeMemberButton of entry.querySelectorAll('[data-act="remove-member"]')) {
+      const member = removeMemberButton.getAttribute("data-member");
+      removeMemberButton.addEventListener("click", () => {
+        const kept = currentMembers(id, section, key).filter((one) => one !== member);
+        runAction(state.replaceSetValue(id, section, key, kept));
+      });
+    }
+  }
+}
+
 /**
  * syncActions draws the controls and the result of the editor region again.
  *
@@ -1132,6 +1527,8 @@ function draw(section, snapshot) {
     if (model.state === "document") {
       bindEditor(editor, selected);
       bindActions(editor, selected);
+      bindSectionNav(editor, selected);
+      bindNamedSetList(editor, selected);
     }
   }
   grid.append(editor);
