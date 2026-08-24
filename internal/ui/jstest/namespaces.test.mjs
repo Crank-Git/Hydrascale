@@ -260,6 +260,26 @@ test("app.css breaks the credential reason inside the panel", async () => {
   assert.match(style, /\.ns-reason\{overflow-wrap:anywhere\}/);
 });
 
+test("app.css keeps the address of a row inside the row", async () => {
+  // Issue #354. The row is a flex line, and the address is its last item. The address
+  // holds no space that breaks it below its own width, so a line that is too short
+  // draws the address outside the row, where the panel paints over it. The row
+  // therefore wraps, and the address ends in an ellipsis when even its own line is too
+  // short.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+
+  const row = style.match(/\.ns-row\{([^}]*)\}/);
+  assert.ok(row, "app.css holds no rule .ns-row");
+  assert.match(row[1], /flex-wrap:\s*wrap/);
+
+  const address = style.match(/\.ns-addr\{([^}]*)\}/);
+  assert.ok(address, "app.css holds no rule .ns-addr");
+  assert.match(address[1], /min-width:\s*0/);
+  assert.match(address[1], /overflow:\s*hidden/);
+  assert.match(address[1], /text-overflow:\s*ellipsis/);
+  assert.match(address[1], /white-space:\s*nowrap/);
+});
+
 test("the panel keeps the em dash of the control server row when no policy entry names the tailnet", () => {
   const status = statusOf([{ id: "jbones" }]);
   const panel = buildPanel(status, {}, [], "jbones");
