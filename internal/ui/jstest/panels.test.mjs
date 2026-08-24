@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ACTIVITY_ROW_LIMIT,
   activityMarkup,
   activityRows,
   dnsMarkup,
@@ -292,6 +293,55 @@ test("the activity view shows no credential note when every tailnet holds a usab
 test("the activity view shows no credential note when the poll holds no policy entry yet", () => {
   const markup = activityMarkup(activityRows(events()));
   assert.doesNotMatch(markup, /needs a policy credential/);
+});
+
+// longLog returns count events, oldest first, as the daemon reports them. The message of
+// each event names its index, so a test can name which events reached the markup.
+function longLog(count) {
+  const log = [];
+  for (let i = 0; i < count; i += 1) {
+    log.push({
+      Time: "2026-08-05T13:00:00Z",
+      Type: "access.applied",
+      TailnetID: "jbones",
+      Message: `event ${i}`,
+    });
+  }
+  return log;
+}
+
+function rowCount(markup) {
+  return (markup.match(/<div class="ev">/g) || []).length;
+}
+
+test("the activity view draws no more rows than the row limit", () => {
+  // Issue #355. The daemon holds 1000 events, and every one reached the page as a row.
+  const markup = activityMarkup(activityRows(longLog(ACTIVITY_ROW_LIMIT + 150)));
+  assert.equal(rowCount(markup), ACTIVITY_ROW_LIMIT);
+});
+
+test("the activity view keeps the newest events when the log passes the row limit", () => {
+  const total = ACTIVITY_ROW_LIMIT + 150;
+  const markup = activityMarkup(activityRows(longLog(total)));
+  assert.match(markup, new RegExp(`event ${total - 1}<`));
+  assert.match(markup, new RegExp(`event ${total - ACTIVITY_ROW_LIMIT}<`));
+  assert.doesNotMatch(markup, new RegExp(`event ${total - ACTIVITY_ROW_LIMIT - 1}<`));
+  assert.doesNotMatch(markup, />event 0</);
+});
+
+test("the activity view states the count of the events that it draws and the count of the log", () => {
+  const total = ACTIVITY_ROW_LIMIT + 150;
+  const markup = activityMarkup(activityRows(longLog(total)));
+  assert.match(
+    markup,
+    new RegExp(`The view draws the newest ${ACTIVITY_ROW_LIMIT} events of ${total}\\.`),
+  );
+});
+
+test("the activity view draws every event when the log holds no more than the row limit", () => {
+  const markup = activityMarkup(activityRows(longLog(ACTIVITY_ROW_LIMIT)));
+  assert.equal(rowCount(markup), ACTIVITY_ROW_LIMIT);
+  assert.doesNotMatch(markup, /The view draws the newest/);
 });
 
 test("the activity view escapes the tailnet identifiers of the credential note", () => {
