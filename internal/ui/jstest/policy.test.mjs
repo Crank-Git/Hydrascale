@@ -28,6 +28,7 @@ import {
   matrixMarkup,
   matrixModel,
   namedSetEntries,
+  nodeAttrsEntryWithField,
   parseRulePorts,
   parseSSHCheckPeriod,
   policyDocumentRoute,
@@ -1404,9 +1405,9 @@ test("the section nav lists the five Epic 13 sections with their entry counts", 
   assert.match(markup, /<span class="name">Tests<\/span><span class="mono">2<\/span>/);
 });
 
-test("selecting Auto-approvers, Node attributes, Postures, or Tests states the section is not yet built, and never crashes", () => {
+test("selecting Auto-approvers, Postures, or Tests states the section is not yet built, and never crashes", () => {
   const sections = sectionsBody();
-  for (const nav of ["autoApprovers", "nodeAttrs", "postures", "tests"]) {
+  for (const nav of ["autoApprovers", "postures", "tests"]) {
     const markup = visualMarkup(sections, nav);
     assert.match(markup, /not yet built/);
   }
@@ -1497,6 +1498,84 @@ test("stageListAdd adds an ssh entry through sections/edit, then re-reads sectio
   });
   assert.equal(calls[1].route, policySectionsRoute("jbones"));
   assert.deepEqual(toggleModel(state, "jbones").sections.ssh, [newEntry]);
+});
+
+// ---------------------------------------------------------------------------
+// Node attributes (#323, FR-vadv-8, FR-vadv-9)
+// ---------------------------------------------------------------------------
+
+test("the node attributes section shows one row per nodeAttrs entry with its targets and attributes", () => {
+  const sections = sectionsBody({
+    nodeAttrs: [{ target: ["tag:server", "tag:db"], attr: ["funnel"] }],
+  });
+
+  const markup = visualMarkup(sections, "nodeAttrs");
+
+  assert.match(markup, /tag:server/);
+  assert.match(markup, /tag:db/);
+  assert.match(markup, /funnel/);
+});
+
+test("a target of asterisk shows the literal character, per FR-vadv-8's edge case", () => {
+  const sections = sectionsBody({
+    nodeAttrs: [{ target: ["*"], attr: ["funnel"] }],
+  });
+
+  const markup = visualMarkup(sections, "nodeAttrs");
+
+  assert.match(markup, /value="\*"/);
+});
+
+test("a node attributes section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ nodeAttrs: [] }), "nodeAttrs");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the node attributes section escapes a hostile target", () => {
+  const markup = visualMarkup(
+    sectionsBody({ nodeAttrs: [{ target: ['"><script>'], attr: ["funnel"] }] }),
+    "nodeAttrs",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("stageListAdd adds a nodeAttrs entry through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const newEntry = { target: ["tag:server"], attr: ["funnel"] };
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ nodeAttrs: [newEntry] });
+  });
+
+  await state.stageListAdd("jbones", "nodeAttrs", newEntry);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "nodeAttrs",
+      op: "add",
+      entry: newEntry,
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.nodeAttrs, [newEntry]);
+});
+
+test("nodeAttrsEntryWithField replaces one field of a nodeAttrs entry and keeps the other", () => {
+  const entry = { target: ["tag:server"], attr: ["funnel"] };
+  assert.deepEqual(nodeAttrsEntryWithField(entry, "attr", ["funnel", "webserver"]), {
+    target: ["tag:server"],
+    attr: ["funnel", "webserver"],
+  });
+  assert.deepEqual(nodeAttrsEntryWithField(entry, "target", ["*"]), {
+    target: ["*"],
+    attr: ["funnel"],
+  });
 });
 
 test("referencingRules finds a group or a tag named in an acls or a grants src or dst", () => {
