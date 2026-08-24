@@ -1,16 +1,15 @@
 // Package specs runs the tests of the specification renderer from the Go test suite.
 //
 // render-spec.py writes spec.html and html/, which is the published form of the
-// specification. render-spec-test.py holds the tests of that renderer, and no gate ran
-// them before issue #392: a developer had to remember the command, therefore a change
-// that broke the renderer passed continuous integration. Issue #383 shows the cost —
-// two requirements stated the wrong text on the page for as long as the defect was
-// present.
+// specification. render-spec-test.py holds the tests of that renderer. No gate ran them
+// before issue #392. A developer had to remember the command, so a change that broke the
+// renderer passed continuous integration. Issue #383 shows the cost: two requirements
+// stated the wrong text on the page for as long as the defect was present.
 //
 // The test sits next to the renderer, the way scripts/hygiene_test.go sits next to
-// check-hygiene.sh, and it follows the gate rule of TestTheConsoleJavaScriptTestsPass in
-// internal/ui/shell_test.go: a developer machine that holds no interpreter skips, and a
-// gate that holds no interpreter fails.
+// check-hygiene.sh. It follows the gate rule of TestTheConsoleJavaScriptTestsPass in
+// internal/ui/shell_test.go. A developer machine that holds no python3 skips, and a gate
+// that holds no python3 fails.
 package specs
 
 import (
@@ -35,9 +34,9 @@ func TestTheSpecificationRendererTestsPass(t *testing.T) {
 	}
 
 	// -B writes no bytecode cache. render-spec-test.py loads render-spec.py by path, and a
-	// cache in docs/specs/__pycache__ can hold the previous renderer: the cache is valid
-	// when the source keeps its size and its modification second, which a one-character
-	// correction does. The run then reports a defect that the source no longer holds.
+	// cache in docs/specs/__pycache__ can hold the previous renderer. Python accepts the
+	// cache while the source keeps its size and its modification second. A one-character
+	// correction keeps both, so the run reports a defect that the source no longer holds.
 	out, err := exec.Command(python, "-B", "render-spec-test.py").CombinedOutput()
 	t.Logf("python3 -B render-spec-test.py\n%s", out)
 	if err != nil {

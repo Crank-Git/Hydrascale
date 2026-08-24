@@ -66,8 +66,8 @@ the count from the run and fails when the count falls below the constant
 `minimumRendererTests`.
 
 A developer machine that holds no `node` skips the console tests, and a machine that
-holds no `python3` skips the renderer tests. A gate that holds neither tool fails, because
-a silent loss of these tests reads exactly like success. The environment variable `CI`
+holds no `python3` skips the renderer tests. A gate that holds no `node`, or no `python3`,
+fails, because a silent loss of these tests reads exactly like success. The environment variable `CI`
 marks a gate, and GitHub Actions sets it. The test host gate exports `HYDRASCALE_GATE`,
 which marks a gate the same way.
 
