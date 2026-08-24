@@ -2330,6 +2330,35 @@ test("the diagonal accepts no click", () => {
   assert.equal(matrixClickPlan(sections, "tag:laptop", "tag:laptop"), null);
 });
 
+test("the wildcard square is not inert, because * names every identity and not one identity", () => {
+  // Issue #349. A document whose one rule allows every path holds * on both axes, so the
+  // diagonal rule of FR-vacl-7 hides the one real square of the matrix.
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const square = squareAt(matrixModel(sections), "*", "*");
+
+  assert.equal(square.inert, false);
+  assert.equal(square.allowed, true);
+  assert.equal(square.label, "* to *, allowed");
+});
+
+test("the wildcard square carries the click data that the console binds", () => {
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.match(markup, /data-from="\*" data-to="\*"/);
+  assert.ok(!markup.includes("disabled"), markup);
+});
+
+test("a click on the wildcard square plans the removal of the rule that allows every path", () => {
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const plan = matrixClickPlan(sections, "*", "*");
+
+  assert.deepEqual(plan, { op: "remove", removals: [{ section: "grants", index: 0 }] });
+});
+
 test("a click on an empty square plans an acls entry that allows every port, per FR-vacl-8", () => {
   const sections = sectionsBody({ acls: [], grants: [] });
 
@@ -2436,6 +2465,31 @@ test("clicking a filled matrix square removes every matching entry, highest inde
   assert.equal(edits[0].body.document, documents[0]);
   assert.equal(edits[1].body.index, 0);
   assert.equal(edits[1].body.document, documents[1]);
+});
+
+test("clicking the wildcard square stages the removal of the rule that allows every path", async () => {
+  // Issue #349. The document of a tailnet that allows everything holds this one rule, so
+  // the wildcard square is the operator's only way to remove it.
+  const sent = [];
+  const readDocument = '{\n  "grants": [{"src":["*"],"dst":["*"],"ip":["*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: '{\n  "grants": [],\n}' };
+    }
+    return sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+  });
+  state.setText("jbones", readDocument);
+  await state.loadSections("jbones");
+
+  await state.stageMatrixClick("jbones", "*", "*");
+
+  const edits = sent.filter((one) => one.route.endsWith("/sections/edit"));
+  assert.equal(edits.length, 1);
+  assert.equal(edits[0].body.op, "remove");
+  assert.equal(edits[0].body.section, "grants");
+  assert.equal(edits[0].body.index, 0);
+  assert.equal(edits[0].body.document, readDocument);
 });
 
 // ---------------------------------------------------------------------------
