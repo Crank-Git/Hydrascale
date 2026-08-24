@@ -87,3 +87,9 @@ the list and adds one sentence: "This tailnet needs a credential before the cons
 reads its policy document." The console draws no editor for this tailnet.
 
 ![The detail panel of a tailnet with no credential](screenshots/policy-editor/08-havoc-no-credential.png)
+
+## 10. The Visual editor
+
+Step 3 opens the document in the Text editor. [Use the Visual editor of
+Policy](policy-visual-editor.md) covers the **Visual** tab next to **Text**, which
+shows the document as sections instead of raw text.
