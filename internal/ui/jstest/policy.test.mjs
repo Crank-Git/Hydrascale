@@ -20,6 +20,8 @@ import {
   PUSH_STATEMENT,
   actionsMarkup,
   actionsModel,
+  applyInputMemory,
+  createInputMemory,
   createPolicyState,
   diffSummary,
   editorMarkup,
@@ -51,6 +53,7 @@ import {
   toggleMarkup,
   toggleModel,
   validateErrors,
+  viewKey,
   visualMarkup,
 } from "../static/policy.js";
 
@@ -2831,4 +2834,215 @@ test("push sends the whole staged document through the existing route, after a v
   assert.equal(puts.length, 1);
   assert.equal(puts[0].route, "/api/policy/jbones");
   assert.deepEqual(puts[0].body, { document: added, etag: "e0b2816b418" });
+});
+
+// ---------------------------------------------------------------------------
+// The input memory of the Visual editor
+// ---------------------------------------------------------------------------
+
+// fakeField is one field of the Visual editor, with the members that applyInputMemory
+// reads. The console has no build step and these tests hold no browser, therefore a test
+// builds the field rather than a document. type writes what an operator types.
+function fakeField(attributes) {
+  const handlers = new Map();
+  const start = (attributes.value || "").length;
+  const node = {
+    value: attributes.value || "",
+    selectionStart: start,
+    selectionEnd: start,
+    focused: false,
+    getAttribute: (name) => (name in attributes ? attributes[name] : null),
+    getAttributeNames: () => Object.keys(attributes),
+    addEventListener: (name, handler) => {
+      handlers.set(name, [...(handlers.get(name) || []), handler]);
+    },
+    fire: (name) => {
+      for (const handler of handlers.get(name) || []) {
+        handler();
+      }
+    },
+    focus: () => {
+      node.focused = true;
+      node.fire("focus");
+    },
+    setSelectionRange: (from, to) => {
+      node.selectionStart = from;
+      node.selectionEnd = to;
+    },
+    type: (text) => {
+      node.value = text;
+      node.selectionStart = text.length;
+      node.selectionEnd = text.length;
+      node.fire("input");
+    },
+  };
+  return node;
+}
+
+// fieldsOf reads every input and every select out of one markup string, in the order the
+// markup states them.
+function fieldsOf(markup) {
+  const fields = [];
+  for (const tag of markup.match(/<(?:input|select)\b[^>]*>/g) || []) {
+    const attributes = {};
+    for (const [, name, , quoted] of tag.matchAll(/([a-zA-Z0-9-]+)(="([^"]*)")?/g)) {
+      if (name === "input" || name === "select") {
+        continue;
+      }
+      attributes[name] = quoted === undefined ? "" : quoted;
+    }
+    fields.push(fakeField(attributes));
+  }
+  return fields;
+}
+
+// fakeEditor is one draw of the Visual editor. applyInputMemory asks it for the fields
+// alone, therefore querySelectorAll answers every field and reads no selector.
+function fakeEditor(markup) {
+  const fields = fieldsOf(markup);
+  return { fields, querySelectorAll: () => fields };
+}
+
+// addField returns the field that carries one add marker, for example data-add-key.
+function addField(editor, marker) {
+  return editor.fields.find((field) => field.getAttribute(marker) !== null);
+}
+
+// flush returns after every pending answer reached its caller.
+function flush() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+test("a draw returns the text that the operator typed into a Visual editor field", () => {
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(first, memory);
+  addField(first, "data-add-key").type("group:eng");
+  addField(first, "data-add-value").type("alice@example.com");
+
+  const second = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(second, memory);
+
+  assert.equal(addField(second, "data-add-key").value, "group:eng");
+  assert.equal(addField(second, "data-add-value").value, "alice@example.com");
+});
+
+test("a draw returns the focus and the caret of the operator", () => {
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(first, memory);
+  const typed = addField(first, "data-add-key");
+  typed.type("group:eng");
+  typed.setSelectionRange(6, 6);
+  typed.fire("keyup");
+
+  const second = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(second, memory);
+
+  const returned = addField(second, "data-add-key");
+  assert.equal(returned.focused, true);
+  assert.equal(returned.selectionStart, 6);
+  assert.equal(returned.selectionEnd, 6);
+  assert.equal(addField(second, "data-add-value").focused, false);
+});
+
+test("a draw returns the text of every section that the Visual editor draws", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "accept", src: ["group:admins"], dst: ["tag:server"], users: ["root"] }],
+    nodeAttrs: [{ target: ["tag:server"], attr: ["funnel"] }],
+    postures: { "posture:latest": ["node:os IN ['linux']"] },
+    autoApprovers: { routes: { "10.0.0.0/24": ["tag:router"] } },
+  });
+  const markers = {
+    groups: "data-add-key",
+    ssh: "data-add-src",
+    nodeAttrs: "data-add-target",
+    postures: "data-add-key",
+    autoApprovers: "data-add-cidr",
+  };
+
+  for (const [nav, marker] of Object.entries(markers)) {
+    const memory = createInputMemory();
+    const first = fakeEditor(visualMarkup(sections, nav));
+    applyInputMemory(first, memory);
+    assert.ok(addField(first, marker), `${nav} draws ${marker}`);
+    addField(first, marker).type("typed");
+
+    const second = fakeEditor(visualMarkup(sections, nav));
+    applyInputMemory(second, memory);
+
+    assert.equal(addField(second, marker).value, "typed", `${nav} keeps the text`);
+  }
+});
+
+test("a draw tells two fields that carry one marker apart, row by row", () => {
+  const sections = sectionsBody({
+    ssh: [
+      { action: "accept", src: ["group:admins"], dst: ["tag:server"], users: ["root"] },
+      { action: "accept", src: ["group:eng"], dst: ["tag:lab"], users: ["ubuntu"] },
+    ],
+  });
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sections, "ssh"));
+  applyInputMemory(first, memory);
+  const rows = first.fields.filter((field) => field.getAttribute("data-act") === "ssh-src");
+  assert.equal(rows.length, 2);
+  rows[1].type("group:ops");
+
+  const second = fakeEditor(visualMarkup(sections, "ssh"));
+  applyInputMemory(second, memory);
+
+  const drawn = second.fields.filter((field) => field.getAttribute("data-act") === "ssh-src");
+  assert.equal(drawn[0].value, "group:admins");
+  assert.equal(drawn[1].value, "group:ops");
+});
+
+test("an action that changes the state drops the text that the memory holds", () => {
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(first, memory);
+  addField(first, "data-add-key").type("group:eng");
+
+  memory.forget();
+
+  const second = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(second, memory);
+
+  assert.equal(addField(second, "data-add-key").value, "");
+  assert.equal(addField(second, "data-add-key").focused, false);
+});
+
+test("the view key is equal for two draws of one state, and it differs after an edit", () => {
+  const state = loaded(async () => sectionsBody());
+  const key = () => viewKey(policyListMarkup(state.rows()), editorMarkup(editorModel(state, "jbones"), null));
+
+  const first = key();
+  assert.equal(key(), first);
+
+  state.setText("jbones", "{}");
+  assert.notEqual(key(), first);
+});
+
+test("a sections read that starts while another runs reads the text of the entry again", async () => {
+  const sent = [];
+  const waiting = [];
+  const state = loaded((route, method, body) => {
+    sent.push(body.document);
+    return new Promise((resolve) => waiting.push(() => resolve(sectionsBody({ hosts: { server: "100.64.0.1" } }))));
+  });
+  const base = state.entry("jbones").text;
+
+  const running = state.loadSections("jbones");
+  await flush();
+  state.setText("jbones", "{\n}");
+  await state.loadSections("jbones");
+  waiting.shift()();
+  await flush();
+
+  assert.deepEqual(sent, [base, "{\n}"]);
+
+  waiting.shift()();
+  await running;
+
+  assert.deepEqual(state.entry("jbones").sections.hosts, { server: "100.64.0.1" });
 });
