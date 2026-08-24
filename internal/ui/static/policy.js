@@ -417,6 +417,8 @@ export function toggleModel(state, id) {
     nav: entry.nav,
     pendingRemoval: entry.pendingRemoval,
     baseSections: entry.baseSections,
+    testsPending: entry.testsPending,
+    testsAnswer: entry.testsAnswer,
   };
 }
 
@@ -628,8 +630,12 @@ function diffbarMarkup(summary) {
  * kind is the tailnet's control server kind. A Headscale control server does not
  * support IP sets, so the IP sets section shows the reason in place of its editor
  * instead of the entry list, per FR-vacl-19.
+ *
+ * testsRun holds the state of the Tests section's Run action: {pending, answer}, where
+ * answer is the last POST /api/policy/{id}/validate answer, or null before a run. The
+ * Tests section reads it alone; no other section uses it. See FR-vadv-13.
  */
-export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSections = null, kind = "") {
+export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSections = null, kind = "", testsRun = null) {
   if (!sections) {
     return `<div class="pol-visual"></div>`;
   }
@@ -661,7 +667,7 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
   const activeNav = nav || "rules";
   const body = activeNav === "rules"
     ? matrixMarkup(matrixModel(sections)) + ruleListMarkup(ruleRows(sections, baseSections))
-    : sectionBodyMarkup(activeNav, sections, pendingRemoval, kind);
+    : sectionBodyMarkup(activeNav, sections, pendingRemoval, kind, testsRun);
   return `<div class="pol-visual">${diffbar}${items}${opaque}${body}</div>`;
 }
 
@@ -688,15 +694,15 @@ const SECTION_MARKUP = {
   autoApprovers: (sections) => autoApproversSectionMarkup(sections),
   nodeAttrs: (sections) => nodeAttrsSectionMarkup(sections),
   postures: (sections, pendingRemoval, kind) => posturesSectionMarkup(sections, kind),
-  tests: () => placeholderSectionMarkup(),
+  tests: (sections, pendingRemoval, kind, testsRun) => testsSectionMarkup(sections, testsRun),
 };
 
 /** sectionBodyMarkup draws the body of one non-Rules section of the section nav,
  *  through SECTION_MARKUP. It draws the placeholder for a nav value SECTION_MARKUP
  *  holds no function for, so an unknown nav never crashes the view. */
-function sectionBodyMarkup(nav, sections, pendingRemoval, kind) {
+function sectionBodyMarkup(nav, sections, pendingRemoval, kind, testsRun) {
   const draw = SECTION_MARKUP[nav] || placeholderSectionMarkup;
-  return draw(sections, pendingRemoval, kind);
+  return draw(sections, pendingRemoval, kind, testsRun);
 }
 
 /**
@@ -1179,6 +1185,190 @@ function bindPosturesList(holder, id) {
       saveButton.addEventListener("click", () => {
         runAction(state.replaceSetValue(id, "postures", name, postureClauses(exprInput.value)));
       });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tests (#325, FR-vadv-12 to FR-vadv-14)
+// ---------------------------------------------------------------------------
+
+/** RUNNING_TESTS_LABEL is the label of the Run action while the control server checks
+ *  the staged document's tests, per FR-vadv-13. */
+export const RUNNING_TESTS_LABEL = "The control server checks the tests";
+
+/** testAssertionRows returns one row per tests entry and one row per sshTests entry of
+ *  sections, per FR-vadv-12. Each row carries the section and the index that a Remove
+ *  click, and a match against a validate answer, needs. */
+function testAssertionRows(sections) {
+  const testsEntries = (sections && sections.tests) || [];
+  const sshEntries = (sections && sections.sshTests) || [];
+  return [
+    ...testsEntries.map((entry, index) => ({ section: "tests", index, entry })),
+    ...sshEntries.map((entry, index) => ({ section: "sshTests", index, entry })),
+  ];
+}
+
+/** testExpectedSummary returns the expected-result text of one tests or one sshTests
+ *  entry, joining its accept, check, and deny lists, per FR-vadv-12. A tests entry
+ *  carries accept and deny alone; an sshTests entry also carries check, per the
+ *  Interfaces section of docs/specs/features/13-visual-policy-advanced.md. */
+function testExpectedSummary(entry) {
+  const parts = [];
+  if (entry.accept && entry.accept.length) {
+    parts.push(`accept ${entry.accept.join(", ")}`);
+  }
+  if (entry.check && entry.check.length) {
+    parts.push(`check ${entry.check.join(", ")}`);
+  }
+  if (entry.deny && entry.deny.length) {
+    parts.push(`deny ${entry.deny.join(", ")}`);
+  }
+  return parts.join("; ");
+}
+
+/**
+ * testAssertionResults reads the assertion results that a validate answer carries, per
+ * FR-vadv-13.
+ *
+ * answer is {passed, result}, the value of POST /api/policy/{id}/validate. On a
+ * failure, the Tailscale control server's validate route answers with
+ * {"message": "...", "data": [{"user": "<src>", "errors": ["..."]}]}, confirmed against
+ * the OpenAPI schema of operationId validateAndTestPolicyFile, retrieved 2026-08-23.
+ * testAssertionResults keys its map on "user", which the row's src field matches.
+ *
+ * The result carries no such shape when a syntax error rejects the whole document, or
+ * when the control server is Headscale, whose check route answers with a plain message
+ * and no per-assertion detail. testAssertionResults then returns noData true, and the
+ * caller shows the message in place of the rows, per the edge case of FR-vadv-12.
+ */
+function testAssertionResults(answer) {
+  if (!answer) {
+    return { ran: false, bySource: new Map() };
+  }
+  if (answer.passed) {
+    return { ran: true, bySource: new Map() };
+  }
+  const trimmed = (answer.result || "").trim();
+  if (trimmed !== "") {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed.data)) {
+        const bySource = new Map();
+        for (const item of parsed.data) {
+          if (item && item.user && Array.isArray(item.errors) && item.errors.length > 0) {
+            bySource.set(item.user, item.errors.join("; "));
+          }
+        }
+        return { ran: true, bySource };
+      }
+    } catch {
+      // Falls through to noData: the result is not the structured shape this section
+      // reads, so the section shows it verbatim instead of guessing a row.
+    }
+  }
+  return { ran: true, noData: true, message: answer.result || "The control server reported no assertion result." };
+}
+
+/** testRowMarkup returns one row of the Tests section: its source, its expected result,
+ *  and, once the operator ran the tests, its actual result as a state dot and a word,
+ *  per FR-vadv-12 and .claude/rules/console-brand.md's rule for a state. */
+function testRowMarkup(row, results) {
+  const src = (row.entry && row.entry.src) || "";
+  let actual = "";
+  if (results.ran) {
+    const failure = results.bySource.get(src);
+    actual = failure
+      ? `<span class="dot crit"></span><span class="mono">${esc(failure)}</span>`
+      : `<span class="dot ok"></span><span>pass</span>`;
+  }
+  return (
+    `<div class="setentry" data-section="${esc(row.section)}" data-index="${row.index}">` +
+    `<div class="setentry-head">` +
+    `<span class="name mono">${esc(src)}</span>` +
+    `<button type="button" class="btn" data-act="test-delete">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value"><span class="mono">${esc(testExpectedSummary(row.entry))}</span>${actual}</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * testsSectionMarkup returns the Tests section: one row per tests and sshTests entry,
+ * per FR-vadv-12, a Run action that FR-vadv-13 sends to the validate route, and an Add
+ * action for a new tests entry.
+ *
+ * testsRun is {pending, answer}, or null before the operator ran the tests. When the
+ * answer carries no assertion result, this section shows that message in place of the
+ * rows, per FR-vadv-12's edge case, rather than guess which row failed.
+ */
+function testsSectionMarkup(sections, testsRun) {
+  const run = testsRun || { pending: false, answer: null };
+  const results = testAssertionResults(run.answer);
+  const runLabel = run.pending ? RUNNING_TESTS_LABEL : "Run";
+  const runButton = `<button type="button" class="btn sm" data-act="run-tests"${run.pending ? " disabled" : ""}>${esc(runLabel)}</button>`;
+
+  if (results.noData) {
+    return (
+      `<div class="setlist" data-section="tests">${runButton}` +
+      `<div class="unsup"><span class="dot crit"></span><p class="note">${esc(results.message)}</p></div>` +
+      `</div>`
+    );
+  }
+
+  const rows = testAssertionRows(sections);
+  const rowsMarkup = rows.map((row) => testRowMarkup(row, results)).join("");
+  const empty = rows.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const addFields =
+    `<input type="text" class="field mono" data-add-src placeholder="source" aria-label="New test source">` +
+    `<select class="field mono" data-add-action aria-label="New test expected result">` +
+    `<option value="accept">accept</option><option value="deny">deny</option>` +
+    `</select>` +
+    `<input type="text" class="field mono" data-add-dst placeholder="destination" aria-label="New test destination">`;
+  return (
+    `<div class="setlist" data-section="tests">${runButton}${rowsMarkup}${empty}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-test">Add</button></div>` +
+    `</div>`
+  );
+}
+
+/**
+ * bindTestsList wires the Run, Add, and Remove controls of the Tests section, per
+ * FR-vadv-13 and the staging flow of FR-vadv-12.
+ */
+function bindTestsList(holder, id) {
+  const list = holder.querySelector('.setlist[data-section="tests"]');
+  if (!list) {
+    return;
+  }
+
+  const runButton = list.querySelector('[data-act="run-tests"]');
+  if (runButton) {
+    runButton.addEventListener("click", () => runAction(state.runTests(id)));
+  }
+
+  const srcField = list.querySelector("[data-add-src]");
+  const actionField = list.querySelector("[data-add-action]");
+  const dstField = list.querySelector("[data-add-dst]");
+  const addButton = list.querySelector('[data-act="add-test"]');
+  if (addButton && srcField && actionField && dstField) {
+    addButton.addEventListener("click", () => {
+      const src = srcField.value.trim();
+      const dst = membersFromInput(dstField.value);
+      if (!src || dst.length === 0) {
+        return;
+      }
+      const entry = actionField.value === "deny" ? { src, deny: dst } : { src, accept: dst };
+      runAction(state.stageListAdd(id, "tests", entry));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry")) {
+    const section = row.getAttribute("data-section");
+    const index = Number(row.getAttribute("data-index"));
+    const del = row.querySelector('[data-act="test-delete"]');
+    if (del) {
+      del.addEventListener("click", () => runAction(state.stageRuleRemove(id, section, index)));
     }
   }
 }
@@ -1915,7 +2105,14 @@ export function editorMarkup(model, toggle = null) {
   const readOnly = model.readOnly ? " readonly" : "";
   const showVisual = toggle && toggle.view === "visual";
   const body = showVisual
-    ? visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections, model.kind)
+    ? visualMarkup(
+        toggle.sections,
+        toggle.nav,
+        toggle.pendingRemoval,
+        toggle.baseSections,
+        model.kind,
+        { pending: toggle.testsPending, answer: toggle.testsAnswer },
+      )
     : `<div class="pol-ed">` +
       `<div class="pol-bar"><span class="pol-name mono">${esc(model.id)} &middot; policy.hujson</span>${chip}</div>` +
       `<div class="pol-code">${gutterMarkup(model.lines)}` +
@@ -1973,6 +2170,11 @@ export function createPolicyState(options = {}) {
         // request. See ruleRows.
         view: "text", sections: null, sectionsError: "", sectionsPending: false,
         nav: "", pendingRemoval: null, baseSections: null,
+        // testsPending is true while the Tests section's Run action runs, and
+        // testsAnswer holds its last answer, or null before a run. These fields sit
+        // apart from stage and result, so a failing test never touches the field Push
+        // reads, per FR-vadv-14.
+        testsPending: false, testsAnswer: null,
       };
       entries.set(id, entry);
     }
@@ -1982,12 +2184,14 @@ export function createPolicyState(options = {}) {
   /**
    * rest returns the entry to the stage read, which disables the push. It clears the
    * parse error of the last attempt to open Visual, because that error covers text the
-   * entry no longer holds.
+   * entry no longer holds. It also clears the last Tests answer, because that answer
+   * covers the assertions of the text the entry no longer holds.
    */
   function rest(entry) {
     entry.stage = "read";
     entry.result = "";
     entry.sectionsError = "";
+    entry.testsAnswer = null;
   }
 
   return {
@@ -2399,6 +2603,41 @@ export function createPolicyState(options = {}) {
         }
         entry.stage = "validate-failed";
         entry.result = messageOf(err);
+      }
+    },
+
+    /**
+     * runTests sends the text of the operator to POST /api/policy/{id}/validate and
+     * holds the answer for the Tests section to read, per FR-vadv-13.
+     *
+     * runTests touches no field of entry.stage or entry.result, which the top Validate
+     * action and the Push action read, so a failing test row never disables Push, per
+     * FR-vadv-14. runTests sends one request, and it sends no second request while the
+     * previous one runs.
+     * The operator edits while the request runs, therefore runTests reads the text
+     * again when the answer arrives. A text that changed holds no answer of a document
+     * the entry no longer holds.
+     */
+    async runTests(id) {
+      const entry = entryOf(id);
+      if (entry.testsPending) {
+        return;
+      }
+      const sent = entry.text;
+      entry.testsPending = true;
+      try {
+        const answer = await request(policyValidateRoute(id), "POST", { document: sent });
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.testsAnswer = { passed: Boolean(answer && answer.passed), result: (answer && answer.result) || "" };
+      } catch (err) {
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.testsAnswer = { passed: false, result: messageOf(err) };
+      } finally {
+        entry.testsPending = false;
       }
     },
 
@@ -3047,6 +3286,7 @@ function draw(section, snapshot) {
       bindAutoApproversList(editor, selected, toggle.sections);
       bindNodeAttrsList(editor, selected, toggle.sections);
       bindPosturesList(editor, selected);
+      bindTestsList(editor, selected);
     }
   }
   grid.append(editor);
