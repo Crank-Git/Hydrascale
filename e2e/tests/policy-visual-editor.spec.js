@@ -120,8 +120,8 @@ test.fixme("stages a Node attributes entry from the New entry row", async ({ pag
   await expect(page.getByRole("button", { name: "Discard", exact: true })).toBeEnabled();
 });
 
-// The postures section is map-shaped, so the add action sends a name and an expression.
-// Issue #345 fixed the serialization that sent a malformed array here.
+// The postures section is map-shaped, therefore the add action sends a name and an
+// expression. Issue #345 fixed the serialization that sent a malformed array.
 test("stages a posture from the New posture row", async ({ page }) => {
   await page.locator('.setrow[data-nav="postures"]').click();
 

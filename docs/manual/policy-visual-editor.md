@@ -76,7 +76,7 @@ an **Add** button, sits below the list.
 
 Type a name into **name** and an expression into **expression**. Click **Add**. The
 console adds a row for the new posture, and the Postures count increases by one. Click
-**Discard** to remove the staged posture.
+**Discard** to remove the staged posture and return the document to its original text.
 
 ## 6. Add a test and run it
 

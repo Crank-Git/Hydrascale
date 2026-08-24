@@ -36,8 +36,8 @@ HYDRASCALE_E2E_BASE_URL=http://127.0.0.1:9443 npm run test:e2e
   and a further edit disables it again.
 - `tests/policy-visual-editor.spec.js` — the Visual tab's section nav (every section
   and its live entry count, and opening each without an error), staging an SSH access
-  rule and discarding it, staging a posture, and adding a test and running it against
-  the control server. See `docs/manual/policy-visual-editor.md`.
+  rule and discarding it, adding a test and running it against the control server, and
+  staging a posture. See `docs/manual/policy-visual-editor.md`.
 
 Neither `tests/policy-editor.spec.js` nor `tests/policy-visual-editor.spec.js` clicks
 Push: the sandbox's tailnets are real tailnets, and a push changes what every device in
