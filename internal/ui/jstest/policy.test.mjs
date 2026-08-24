@@ -2330,6 +2330,35 @@ test("the diagonal accepts no click", () => {
   assert.equal(matrixClickPlan(sections, "tag:laptop", "tag:laptop"), null);
 });
 
+test("the wildcard square is not inert, because * names every identity and not one identity", () => {
+  // Issue #349. A document whose one rule allows every path holds * on both axes, so the
+  // diagonal rule of FR-vacl-7 hides the one real square of the matrix.
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const square = squareAt(matrixModel(sections), "*", "*");
+
+  assert.equal(square.inert, false);
+  assert.equal(square.allowed, true);
+  assert.equal(square.label, "* to *, allowed");
+});
+
+test("the wildcard square carries the click data that the console binds", () => {
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.match(markup, /data-from="\*" data-to="\*"/);
+  assert.ok(!markup.includes("disabled"), markup);
+});
+
+test("a click on the wildcard square plans the removal of the rule that allows every path", () => {
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const plan = matrixClickPlan(sections, "*", "*");
+
+  assert.deepEqual(plan, { op: "remove", removals: [{ section: "grants", index: 0 }] });
+});
+
 test("a click on an empty square plans an acls entry that allows every port, per FR-vacl-8", () => {
   const sections = sectionsBody({ acls: [], grants: [] });
 

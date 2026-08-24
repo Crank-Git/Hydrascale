@@ -1423,14 +1423,27 @@ function reachabilityPairs(sections) {
 }
 
 /**
+ * selfReference tells whether one square of the matrix names one identity on both axes.
+ *
+ * The wildcard * matches every identity, so a * row and a * column name the path from
+ * everything to everything. That path is a rule that the operator holds and removes, and
+ * not the self-reference that FR-editor-10 of features/07-console-access-editor.md calls
+ * not applicable.
+ */
+function selfReference(from, to) {
+  return from === to && from !== "*";
+}
+
+/**
  * matrixSquare returns one square of the reachability matrix.
  *
- * allowed holds the key "source destination" of every allowed path. The diagonal is
- * inert, in the manner of FR-editor-10 of features/07-console-access-editor.md, because
- * a path from one node to itself names nothing to allow or to deny.
+ * allowed holds the key "source destination" of every allowed path. A square that names
+ * one identity on both axes is inert, in the manner of FR-editor-10 of
+ * features/07-console-access-editor.md, because a path from one node to itself names
+ * nothing to allow or to deny.
  */
 function matrixSquare(from, to, allowed) {
-  const inert = from === to;
+  const inert = selfReference(from, to);
   const on = !inert && allowed.has(`${from} ${to}`);
   let label = `${from} to ${to}, no rule`;
   if (inert) {
@@ -1469,7 +1482,7 @@ export function matrixModel(sections) {
 
 /**
  * matrixClickPlan returns the edit that one click on a matrix square stages, and null
- * for the diagonal, per FR-vacl-7.
+ * for a square that names one identity on both axes, per FR-vacl-7.
  *
  * An empty square plans one acls entry that allows every port from the row's source to
  * the column's destination, per FR-vacl-8. A filled square plans the removal of every
@@ -1478,7 +1491,7 @@ export function matrixModel(sections) {
  * orders each section's removals from the highest index to the lowest.
  */
 export function matrixClickPlan(sections, from, to) {
-  if (from === to) {
+  if (selfReference(from, to)) {
     return null;
   }
   const acls = (sections && sections.acls) || [];
@@ -1512,7 +1525,7 @@ export function matrixClickPlan(sections, from, to) {
  * matrixMarkup returns the reachability matrix region.
  *
  * model is the value that matrixModel returned. The square is a button, so it reaches
- * focus by keyboard, and the diagonal carries the disabled attribute per FR-vacl-7. The
+ * focus by keyboard, and an inert square carries the disabled attribute per FR-vacl-7. The
  * console binds the click, the hover, the focus, and the blur handlers after it sets
  * this markup, because a handler that a string carries never runs.
  */
