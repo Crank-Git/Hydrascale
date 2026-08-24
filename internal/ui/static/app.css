@@ -593,6 +593,12 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-ruleline .ns-error{display:block; margin-top:var(--sp-2)}
 .ac-ruleline .ns-error:empty{display:none}
 
+/* A grants entry's application capabilities, per FR-vacl-11. The visual editor edits a
+   capability's presence and its name alone; its own parameters stay text-only. */
+.ac-caps{display:flex; gap:var(--sp-2); flex-wrap:wrap; margin-top:var(--sp-2)}
+.ac-cap{display:flex; align-items:center; gap:var(--sp-2)}
+.ac-capfield{width:22ch}
+
 /* The policy view: the tailnet list, the document editor, the two actions, and the result.
    The accent of this view marks the push action and nothing else, because the push is the
    affirmative action of the view. Issue #158 gave the accent to the selected row while the
