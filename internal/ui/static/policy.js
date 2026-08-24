@@ -2330,9 +2330,10 @@ export function createPolicyState(options = {}) {
     },
 
     /** addSetEntry adds a new key to a named-set section, per FR-vacl-5. value is the
-     *  member list for every section but Hosts, and the address for Hosts. */
+     *  member list for every section but Hosts, and the address for Hosts. value passes
+     *  through as it is, because requestJSON serializes the whole body once. */
     addSetEntry(id, section, key, value) {
-      return this.editSection(id, section, "add", { key, entry: JSON.stringify(value) });
+      return this.editSection(id, section, "add", { key, entry: value });
     },
 
     /** renameSetEntry changes the key of one entry and keeps its value, per FR-vacl-5. */
@@ -2344,7 +2345,7 @@ export function createPolicyState(options = {}) {
      *  Adding or removing one member of a group, a tag owner mapping, or an IP set, and
      *  changing a host alias's address, each replace the whole value this way. */
     replaceSetValue(id, section, key, value) {
-      return this.editSection(id, section, "replace", { key, entry: JSON.stringify(value) });
+      return this.editSection(id, section, "replace", { key, entry: value });
     },
 
     /**
@@ -2522,13 +2523,13 @@ export function createPolicyState(options = {}) {
     /** addAutoApproverRoute adds one route to the auto-approvers section, keyed by
      *  cidr, per FR-vadv-6 and FR-vadv-7. */
     addAutoApproverRoute(id, cidr, approvers) {
-      return this.editSection(id, "autoApprovers.routes", "add", { key: cidr, entry: JSON.stringify(approvers) });
+      return this.editSection(id, "autoApprovers.routes", "add", { key: cidr, entry: approvers });
     },
 
     /** replaceAutoApproverRoute replaces the approver list of one route, keeping its
      *  cidr, per FR-vadv-7. */
     replaceAutoApproverRoute(id, cidr, approvers) {
-      return this.editSection(id, "autoApprovers.routes", "replace", { key: cidr, entry: JSON.stringify(approvers) });
+      return this.editSection(id, "autoApprovers.routes", "replace", { key: cidr, entry: approvers });
     },
 
     /** removeAutoApproverRoute removes one route from the auto-approvers section, per
@@ -2541,7 +2542,7 @@ export function createPolicyState(options = {}) {
      *  FR-vadv-7. The exit node carries no key, because it is a single field rather
      *  than a keyed collection. */
     setAutoApproverExitNode(id, approvers) {
-      return this.editSection(id, "autoApprovers.exitNode", "replace", { entry: JSON.stringify(approvers) });
+      return this.editSection(id, "autoApprovers.exitNode", "replace", { entry: approvers });
     },
 
     /** loadList reads GET /api/policy. */
