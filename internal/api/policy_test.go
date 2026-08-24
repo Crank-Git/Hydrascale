@@ -693,6 +693,119 @@ func TestPolicySectionsEditReplacesAMapEntryValueByKey(t *testing.T) {
 	}
 }
 
+// The postures section is map-shaped, per features/13-visual-policy-advanced.md
+// FR-vadv-10. Issue #345 records the defect: the route wrote an array, the key reached
+// the document never, and the sections route then refused the result.
+func TestPolicySectionsEditAddsAPostureAsAMapEntryAndReadsItBack(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	req, err := json.Marshal(map[string]interface{}{
+		"document": "{}",
+		"section":  "postures",
+		"op":       "add",
+		"key":      "posture:test",
+		"entry":    []string{"node:os == 'macos'"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var added wireSectionsEdit
+	decodePolicy(t, payload, &added)
+	if !strings.Contains(added.Document, "posture:test") {
+		t.Errorf("Document = %q, want it to hold the posture name", added.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{"document": added.Document})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("sections status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var sections wireSections
+	decodePolicy(t, payload, &sections)
+	got := sections.Postures["posture:test"]
+	if len(got) != 1 || got[0] != "node:os == 'macos'" {
+		t.Errorf("Postures = %#v, want the key %q with one expression", sections.Postures, "posture:test")
+	}
+}
+
+func TestPolicySectionsEditReplacesRenamesAndRemovesAPostureByKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "postures": {
+    "posture:latestMac": ["node:os == 'macos'"],
+  },
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "postures",
+		"op":       "replace",
+		"key":      "posture:latestMac",
+		"entry":    []string{"node:os == 'macos'", "node:os == 'linux'"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("replace status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var replaced wireSectionsEdit
+	decodePolicy(t, payload, &replaced)
+	if !strings.Contains(replaced.Document, "node:os == 'linux'") {
+		t.Errorf("Document = %q, want the new expression", replaced.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": replaced.Document,
+		"section":  "postures",
+		"op":       "rename",
+		"key":      "posture:latestMac",
+		"new_key":  "posture:currentMac",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("rename status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var renamed wireSectionsEdit
+	decodePolicy(t, payload, &renamed)
+	if strings.Contains(renamed.Document, "posture:latestMac") || !strings.Contains(renamed.Document, "posture:currentMac") {
+		t.Errorf("Document = %q, want posture:latestMac renamed to posture:currentMac", renamed.Document)
+	}
+
+	// The console sends a remove with the key alone. Issue #345 records the refusal
+	// "index is required for op \"remove\"" that the array-shaped branch returned.
+	req, err = json.Marshal(map[string]interface{}{
+		"document": renamed.Document,
+		"section":  "postures",
+		"op":       "remove",
+		"key":      "posture:currentMac",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("remove status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, "posture:currentMac") {
+		t.Errorf("Document = %q, want posture:currentMac removed", removed.Document)
+	}
+}
+
 func TestPolicySectionsEditAddsReplacesAndRemovesAnAutoApproverRouteByCIDR(t *testing.T) {
 	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
 
