@@ -1405,11 +1405,6 @@ test("the section nav lists the five Epic 13 sections with their entry counts", 
   assert.match(markup, /<span class="name">Tests<\/span><span class="mono">2<\/span>/);
 });
 
-test("selecting Tests states the section is not yet built, and never crashes", () => {
-  const markup = visualMarkup(sectionsBody(), "tests");
-  assert.match(markup, /not yet built/);
-});
-
 test("the SSH access section shows one row per ssh entry with its source, destination, users, and action", () => {
   const sections = sectionsBody({
     ssh: [{ action: "accept", src: ["group:eng"], dst: ["tag:server"], users: ["autogroup:nonroot"] }],
@@ -1816,6 +1811,160 @@ test("push stays enabled when a Tailscale document holds a postures key", async 
 
   const model = entryOf(state, "jbones");
   assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+});
+
+// ---------------------------------------------------------------------------
+// Tests (#325, FR-vadv-12 to FR-vadv-14)
+// ---------------------------------------------------------------------------
+
+test("the Tests section shows one row per tests and sshTests entry with its source and expected result", () => {
+  const sections = sectionsBody({
+    tests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+    sshTests: [{ src: "tag:laptop", dst: ["tag:server"], deny: ["root"] }],
+  });
+
+  const markup = visualMarkup(sections, "tests");
+
+  assert.match(markup, /group:eng/);
+  assert.match(markup, /accept tag:server:22/);
+  assert.match(markup, /tag:laptop/);
+  assert.match(markup, /deny root/);
+});
+
+test("an sshTests entry's expected result joins its accept, check, and deny user lists", () => {
+  const sections = sectionsBody({
+    sshTests: [{ src: "tag:laptop", dst: ["tag:server"], accept: ["dave"], check: ["admin"], deny: ["root"] }],
+  });
+
+  const markup = visualMarkup(sections, "tests");
+
+  assert.match(markup, /accept dave; check admin; deny root/);
+});
+
+test("a Tests section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ tests: [], sshTests: [] }), "tests");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the Tests section escapes a hostile source", () => {
+  const markup = visualMarkup(sectionsBody({ tests: [{ src: '"><script>', accept: ["a:1"] }] }), "tests");
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("the Tests section offers Run, Add, and Remove controls", () => {
+  const markup = visualMarkup(
+    sectionsBody({ tests: [{ src: "group:eng", accept: ["tag:server:22"] }] }),
+    "tests",
+  );
+  assert.match(markup, /data-act="run-tests"/);
+  assert.match(markup, /data-act="add-test"/);
+  assert.match(markup, /data-act="test-delete"/);
+});
+
+test("the Tests section marks a row pass or fail from the validate answer, per FR-vadv-13", () => {
+  const sections = sectionsBody({
+    tests: [
+      { src: "group:eng", accept: ["tag:server:22"] },
+      { src: "tag:server", accept: ["autogroup:internet:443"] },
+    ],
+  });
+  const answer = {
+    passed: false,
+    result: JSON.stringify({
+      message: "test(s) failed",
+      data: [{ user: "tag:server", errors: ['address "1.2.3.4:443": want: Drop, got: Accept'] }],
+    }),
+  };
+
+  const markup = visualMarkup(sections, "tests", null, null, "", { pending: false, answer });
+
+  assert.match(markup, /group:eng[\s\S]*dot ok[\s\S]*pass/);
+  assert.match(markup, /tag:server[\s\S]*want: Drop, got: Accept/);
+});
+
+test("the Tests section shows the validate error in place of the rows when the answer carries no assertion result", () => {
+  const sections = sectionsBody({ tests: [{ src: "group:eng", accept: ["tag:server:22"] }] });
+  const answer = { passed: false, result: "the Headscale control server rejected the document: invalid huJSON" };
+
+  const markup = visualMarkup(sections, "tests", null, null, "", { pending: false, answer });
+
+  assert.match(markup, /invalid huJSON/);
+  assert.ok(!markup.includes("group:eng"));
+});
+
+test("runTests sends the staged document to POST /api/policy/{id}/validate and holds the answer, per FR-vadv-13", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policyValidateRoute("jbones")) {
+      return { passed: false, result: '{"message":"test(s) failed","data":[]}' };
+    }
+    return sectionsBody();
+  });
+
+  await state.runTests("jbones");
+
+  assert.deepEqual(calls[0], {
+    route: policyValidateRoute("jbones"),
+    method: "POST",
+    body: { document: '{\n  "grants": [],\n}' },
+  });
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.testsPending, false);
+  assert.deepEqual(toggle.testsAnswer, { passed: false, result: '{"message":"test(s) failed","data":[]}' });
+});
+
+test("running tests changes no field that Push reads, so a failing test row does not disable Push, per FR-vadv-14", async () => {
+  let calls = 0;
+  const state = loaded(async (route) => {
+    if (route === policyValidateRoute("jbones")) {
+      calls += 1;
+      if (calls === 1) {
+        return { passed: true };
+      }
+      return {
+        passed: false,
+        result: '{"message":"test(s) failed","data":[{"user":"tag:server","errors":["boom"]}]}',
+      };
+    }
+    return sectionsBody({ tests: [{ src: "tag:server", accept: ["autogroup:internet:443"] }] });
+  });
+
+  await state.validate("jbones");
+  assert.equal(entryOf(state, "jbones").stage, "validated");
+
+  await state.runTests("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+  assert.equal(toggleModel(state, "jbones").testsAnswer.passed, false);
+});
+
+test("stageListAdd adds a tests entry through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const newEntry = { src: "group:eng", accept: ["tag:server:22"] };
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ tests: [newEntry] });
+  });
+
+  await state.stageListAdd("jbones", "tests", newEntry);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "tests",
+      op: "add",
+      entry: newEntry,
+    },
+  });
+  assert.deepEqual(toggleModel(state, "jbones").sections.tests, [newEntry]);
 });
 
 test("referencingRules finds a group or a tag named in an acls or a grants src or dst", () => {
