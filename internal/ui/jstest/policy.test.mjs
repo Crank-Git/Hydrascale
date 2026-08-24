@@ -29,6 +29,7 @@ import {
   matrixModel,
   namedSetEntries,
   parseRulePorts,
+  parseSSHCheckPeriod,
   policyDocumentRoute,
   policyListMarkup,
   policyRows,
@@ -1377,6 +1378,125 @@ test("a section with no entry states that it holds none", () => {
 test("the section nav escapes a hostile group name and member", () => {
   const markup = visualMarkup(sectionsBody({ groups: { '"><script>': ['"><script>'] } }), "groups");
   assert.ok(!markup.includes("<script>"));
+});
+
+// ---------------------------------------------------------------------------
+// The section nav: SSH access, Auto-approvers, Node attributes, Postures, Tests
+// (#321, FR-vadv-1, FR-vadv-2)
+// ---------------------------------------------------------------------------
+
+test("the section nav lists the five Epic 13 sections with their entry counts", () => {
+  const markup = visualMarkup(
+    sectionsBody({
+      ssh: [{ action: "accept", src: ["a"], dst: ["b"], users: ["root"] }],
+      autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] }, exitNode: ["tag:exit"] },
+      nodeAttrs: [{ target: ["tag:server"], attr: ["funnel"] }],
+      postures: { "posture:latest": ["node:os in ['linux']"] },
+      tests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+      sshTests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+    }),
+  );
+
+  assert.match(markup, /<span class="name">SSH access<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Auto-approvers<\/span><span class="mono">2<\/span>/);
+  assert.match(markup, /<span class="name">Node attributes<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Postures<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Tests<\/span><span class="mono">2<\/span>/);
+});
+
+test("selecting Auto-approvers, Node attributes, Postures, or Tests states the section is not yet built, and never crashes", () => {
+  const sections = sectionsBody();
+  for (const nav of ["autoApprovers", "nodeAttrs", "postures", "tests"]) {
+    const markup = visualMarkup(sections, nav);
+    assert.match(markup, /not yet built/);
+  }
+});
+
+test("the SSH access section shows one row per ssh entry with its source, destination, users, and action", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "accept", src: ["group:eng"], dst: ["tag:server"], users: ["autogroup:nonroot"] }],
+  });
+
+  const markup = visualMarkup(sections, "ssh");
+
+  assert.match(markup, /group:eng/);
+  assert.match(markup, /tag:server/);
+  assert.match(markup, /autogroup:nonroot/);
+  assert.match(markup, /value="accept"/);
+});
+
+test("a check action shows the check period, per FR-vadv-4", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "check", src: ["tag:laptop"], dst: ["tag:server"], users: ["root"], checkPeriod: "20h" }],
+  });
+
+  const markup = visualMarkup(sections, "ssh");
+
+  assert.match(markup, /ssh-checkperiod/);
+  assert.match(markup, /value="20h"/);
+});
+
+test("an accept action shows no check period field", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server"], users: ["root"] }],
+  });
+
+  const markup = visualMarkup(sections, "ssh");
+
+  assert.ok(!markup.includes("ssh-checkperiod"));
+});
+
+test("an SSH access section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ ssh: [] }), "ssh");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the SSH access section escapes a hostile source", () => {
+  const markup = visualMarkup(
+    sectionsBody({ ssh: [{ action: "accept", src: ['"><script>'], dst: ["b"], users: ["root"] }] }),
+    "ssh",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("parseSSHCheckPeriod accepts a duration in the control server's documented form", () => {
+  assert.deepEqual(parseSSHCheckPeriod("20h"), { value: "20h", error: "" });
+  assert.deepEqual(parseSSHCheckPeriod("1h30m"), { value: "1h30m", error: "" });
+  assert.deepEqual(parseSSHCheckPeriod(""), { value: "", error: "" });
+});
+
+test("parseSSHCheckPeriod rejects a bad form, naming the expected form", () => {
+  const result = parseSSHCheckPeriod("banana");
+  assert.equal(result.value, "");
+  assert.match(result.error, /duration/);
+  assert.match(result.error, /20h/);
+});
+
+test("stageListAdd adds an ssh entry through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const newEntry = { action: "accept", src: ["group:eng"], dst: ["tag:server"], users: ["root"] };
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ ssh: [newEntry] });
+  });
+
+  await state.stageListAdd("jbones", "ssh", newEntry);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "ssh",
+      op: "add",
+      entry: newEntry,
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.ssh, [newEntry]);
 });
 
 test("referencingRules finds a group or a tag named in an acls or a grants src or dst", () => {

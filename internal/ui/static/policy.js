@@ -638,6 +638,11 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
     ["tagOwners", "Tag owners", count(sections.tagOwners)],
     ["ipsets", "IP sets", count(sections.ipsets)],
     ["rules", "Rules", count(sections.acls) + count(sections.grants)],
+    ["ssh", "SSH access", count(sections.ssh)],
+    ["autoApprovers", "Auto-approvers", autoApproversCount(sections.autoApprovers)],
+    ["nodeAttrs", "Node attributes", count(sections.nodeAttrs)],
+    ["postures", "Postures", count(sections.postures)],
+    ["tests", "Tests", count(sections.tests) + count(sections.sshTests)],
   ];
   const items = rows.map(([key, label, n]) => namedSetNavRowMarkup(key, label, n, nav)).join("");
   const opaque = sections.opaque_keys && sections.opaque_keys.length
@@ -648,12 +653,62 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
   // rule list together, the same as a nav explicitly set to "rules", so that pair stays
   // the view the operator reaches before any nav row is clicked. #316 owns the matrix
   // and #317 owns the rule list beneath it; #315 owns the four named-set entry lists
-  // that a click on Groups, Hosts, Tag owners, or IP sets swaps in instead.
+  // that a click on Groups, Hosts, Tag owners, or IP sets swaps in instead. SECTION_MARKUP
+  // dispatches the nine remaining sections, per the batch cross-check of #320: #321 builds
+  // ssh, and #322 to #325 each replace one placeholder with a built section.
   const activeNav = nav || "rules";
   const body = activeNav === "rules"
     ? matrixMarkup(matrixModel(sections)) + ruleListMarkup(ruleRows(sections, baseSections))
-    : namedSetSectionMarkup(sections, activeNav, pendingRemoval, kind);
+    : sectionBodyMarkup(activeNav, sections, pendingRemoval, kind);
   return `<div class="pol-visual">${diffbar}${items}${opaque}${body}</div>`;
+}
+
+/** autoApproversCount returns the entry count of the autoApprovers section: one per
+ *  route CIDR plus one for the exit node approver list, per FR-vadv-2 and FR-vadv-6. */
+function autoApproversCount(autoApprovers) {
+  const routes = (autoApprovers && autoApprovers.routes) || {};
+  const exitNode = (autoApprovers && autoApprovers.exitNode) || [];
+  return Object.keys(routes).length + exitNode.length;
+}
+
+/**
+ * SECTION_MARKUP maps a section-nav key to the function that draws its body, covering
+ * every key but "rules", which visualMarkup draws directly. This is the shared choke
+ * point that the batch cross-check of #320 named: #321 builds ssh, and #322 to #325
+ * each replace one placeholder entry alone, without touching this map's shape.
+ */
+const SECTION_MARKUP = {
+  groups: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "groups", pendingRemoval, kind),
+  hosts: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "hosts", pendingRemoval, kind),
+  tagOwners: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "tagOwners", pendingRemoval, kind),
+  ipsets: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "ipsets", pendingRemoval, kind),
+  ssh: (sections) => sshSectionMarkup(sections),
+  autoApprovers: () => placeholderSectionMarkup(),
+  nodeAttrs: () => placeholderSectionMarkup(),
+  postures: () => placeholderSectionMarkup(),
+  tests: () => placeholderSectionMarkup(),
+};
+
+/** sectionBodyMarkup draws the body of one non-Rules section of the section nav,
+ *  through SECTION_MARKUP. It draws the placeholder for a nav value SECTION_MARKUP
+ *  holds no function for, so an unknown nav never crashes the view. */
+function sectionBodyMarkup(nav, sections, pendingRemoval, kind) {
+  const draw = SECTION_MARKUP[nav] || placeholderSectionMarkup;
+  return draw(sections, pendingRemoval, kind);
+}
+
+/**
+ * placeholderSectionMarkup states that a section this epic named in the section nav is
+ * not yet built, per the batch cross-check of #320. It changes nothing and it never
+ * crashes; Text stays the way to read or change the section until its issue lands.
+ */
+function placeholderSectionMarkup() {
+  return (
+    `<div class="unsup">` +
+    `<span class="dot warn"></span>` +
+    `<p class="note">This section is not yet built. Use Text to read or change it.</p>` +
+    `</div>`
+  );
 }
 
 /** namedSetNavRowMarkup returns one row of the section nav. Every row, Rules included,
@@ -736,6 +791,107 @@ function membersMarkup(key, members) {
     `<div class="setmembers">${list}` +
     `<input type="text" class="field mono" data-add-member placeholder="Add a member" aria-label="Add a member of ${esc(key)}">` +
     `<button type="button" class="btn" data-act="add-member">Add member</button>` +
+    `</div>`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SSH access (#321)
+// ---------------------------------------------------------------------------
+
+/** CHECK_PERIOD_PATTERN matches the duration grammar that Go's time.ParseDuration and
+ *  the control server both accept: one or more signed number-unit pairs, in the manner
+ *  of "20h" or "1h30m". Confirmed against the control server's ACL syntax reference,
+ *  per docs/specs/features/13-visual-policy-advanced.md's Interfaces section. */
+const CHECK_PERIOD_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+$/;
+
+/**
+ * parseSSHCheckPeriod validates the check period of an ssh entry, per FR-vadv-4. An
+ * empty value is valid, because an accept action carries no check period. A value that
+ * does not match the control server's duration grammar returns an error that names the
+ * expected form, and it stages nothing.
+ */
+export function parseSSHCheckPeriod(text) {
+  const value = (text || "").trim();
+  if (value === "") {
+    return { value: "", error: "" };
+  }
+  if (!CHECK_PERIOD_PATTERN.test(value)) {
+    return { value: "", error: "The check period must be a duration, in the form 20h." };
+  }
+  return { value, error: "" };
+}
+
+/** sshRowFields returns the comma-joined text of one ssh entry's list fields, so the
+ *  row markup and the add form build from one shape. */
+function sshRowFields(entry) {
+  return {
+    src: (entry.src || []).join(", "),
+    dst: (entry.dst || []).join(", "),
+    users: (entry.users || []).join(", "),
+    action: entry.action || "accept",
+    checkPeriod: entry.checkPeriod || "",
+  };
+}
+
+/** sshEntryWithField returns entry with field replaced by value. Setting action away
+ *  from "check" drops checkPeriod, because an accept action carries no check period. */
+export function sshEntryWithField(entry, field, value) {
+  const next = { ...entry, [field]: value };
+  if ((field === "action" && value !== "check") || (field === "checkPeriod" && value === "")) {
+    delete next.checkPeriod;
+  }
+  return next;
+}
+
+/**
+ * sshEntryMarkup returns one row of the SSH access section: its source, its
+ * destination, its user list, and its action, per FR-vadv-3. A check action also shows
+ * the check period, per FR-vadv-4.
+ */
+function sshEntryMarkup(entry, index) {
+  const fields = sshRowFields(entry);
+  const checkPeriod = fields.action === "check"
+    ? `<input type="text" class="field mono" data-act="ssh-checkperiod" value="${esc(fields.checkPeriod)}" placeholder="20h" aria-label="Check period">`
+    : "";
+  return (
+    `<div class="setentry" data-index="${index}">` +
+    `<div class="setentry-head">` +
+    `<input type="text" class="field mono" data-act="ssh-src" value="${esc(fields.src)}" aria-label="Source">` +
+    `<input type="text" class="field mono" data-act="ssh-dst" value="${esc(fields.dst)}" aria-label="Destination">` +
+    `<button type="button" class="btn" data-act="ssh-delete">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">` +
+    `<input type="text" class="field mono" data-act="ssh-users" value="${esc(fields.users)}" aria-label="Users">` +
+    `<select class="field mono" data-act="ssh-action" aria-label="Action">` +
+    `<option value="accept"${fields.action === "accept" ? " selected" : ""}>accept</option>` +
+    `<option value="check"${fields.action === "check" ? " selected" : ""}>check</option>` +
+    `</select>` +
+    checkPeriod +
+    `</div>` +
+    `<p class="note ns-error"></p>` +
+    `</div>`
+  );
+}
+
+/**
+ * sshSectionMarkup returns the SSH access section: one row per ssh entry, per
+ * FR-vadv-3 to FR-vadv-5.
+ */
+function sshSectionMarkup(sections) {
+  const entries = (sections && sections.ssh) || [];
+  const rows = entries.map((entry, index) => sshEntryMarkup(entry, index)).join("");
+  const empty = entries.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const addFields =
+    `<input type="text" class="field mono" data-add-src placeholder="source" aria-label="New rule source">` +
+    `<input type="text" class="field mono" data-add-dst placeholder="destination" aria-label="New rule destination">` +
+    `<input type="text" class="field mono" data-add-users placeholder="users" aria-label="New rule users">` +
+    `<select class="field mono" data-add-action aria-label="New rule action">` +
+    `<option value="accept">accept</option><option value="check">check</option>` +
+    `</select>`;
+  return (
+    `<div class="setlist" data-section="ssh">${rows}${empty}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-ssh">Add</button></div>` +
     `</div>`
   );
 }
@@ -1856,6 +2012,15 @@ export function createPolicyState(options = {}) {
       await this.loadSections(id);
     },
 
+    /**
+     * stageListAdd adds a new entry to a list-shaped section such as ssh, per
+     * FR-vadv-5. It sends one request, then reads the sections again so the list draws
+     * the new row.
+     */
+    stageListAdd(id, section, entry) {
+      return this.editSection(id, section, "add", { entry });
+    },
+
     /** loadList reads GET /api/policy. */
     async loadList() {
       this.setList(await request(POLICY_ROUTE));
@@ -2255,6 +2420,81 @@ function bindNamedSetList(holder, id) {
 }
 
 /**
+ * bindSSHList wires the add, edit, and remove controls of the SSH access section, per
+ * FR-vadv-5. Editing the source, the destination, or the user list replaces the whole
+ * field on change, in the manner of bindNamedSetList's member field. Editing the check
+ * period validates it first through parseSSHCheckPeriod, and it states the message
+ * inline on a bad value without staging anything, matching bindRuleList's port field.
+ */
+function bindSSHList(holder, id, sections) {
+  const list = holder.querySelector('.setlist[data-section="ssh"]');
+  if (!list) {
+    return;
+  }
+  const entries = (sections && sections.ssh) || [];
+
+  const srcField = list.querySelector("[data-add-src]");
+  const dstField = list.querySelector("[data-add-dst]");
+  const usersField = list.querySelector("[data-add-users]");
+  const actionField = list.querySelector("[data-add-action]");
+  const addButton = list.querySelector('.setadd [data-act="add-ssh"]');
+  if (addButton) {
+    addButton.addEventListener("click", () => {
+      const src = membersFromInput(srcField.value);
+      const dst = membersFromInput(dstField.value);
+      const users = membersFromInput(usersField.value);
+      if (src.length === 0 || dst.length === 0 || users.length === 0) {
+        return;
+      }
+      runAction(state.stageListAdd(id, "ssh", { action: actionField.value, src, dst, users }));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry")) {
+    const index = Number(row.getAttribute("data-index"));
+    const entry = entries[index];
+    const message = row.querySelector(".ns-error");
+    const replace = (field, value) => runAction(state.stageRuleReplace(id, "ssh", index, sshEntryWithField(entry, field, value)));
+
+    const del = row.querySelector('[data-act="ssh-delete"]');
+    if (del) {
+      del.addEventListener("click", () => runAction(state.stageRuleRemove(id, "ssh", index)));
+    }
+
+    const rowSrc = row.querySelector('[data-act="ssh-src"]');
+    if (rowSrc) {
+      rowSrc.addEventListener("change", () => replace("src", membersFromInput(rowSrc.value)));
+    }
+    const rowDst = row.querySelector('[data-act="ssh-dst"]');
+    if (rowDst) {
+      rowDst.addEventListener("change", () => replace("dst", membersFromInput(rowDst.value)));
+    }
+    const rowUsers = row.querySelector('[data-act="ssh-users"]');
+    if (rowUsers) {
+      rowUsers.addEventListener("change", () => replace("users", membersFromInput(rowUsers.value)));
+    }
+    const rowAction = row.querySelector('[data-act="ssh-action"]');
+    if (rowAction) {
+      rowAction.addEventListener("change", () => replace("action", rowAction.value));
+    }
+    const checkPeriodField = row.querySelector('[data-act="ssh-checkperiod"]');
+    if (checkPeriodField) {
+      checkPeriodField.addEventListener("change", () => {
+        const result = parseSSHCheckPeriod(checkPeriodField.value);
+        if (result.error) {
+          if (message) {
+            message.textContent = result.error;
+          }
+          checkPeriodField.setAttribute("aria-invalid", "true");
+          return;
+        }
+        replace("checkPeriod", result.value);
+      });
+    }
+  }
+}
+
+/**
  * bindMatrix wires the reachability matrix to the state, per FR-vacl-7 to FR-vacl-9.
  *
  * The square is a button, so the pointer and the keyboard both reach it. Hovering or
@@ -2421,6 +2661,7 @@ function draw(section, snapshot) {
       bindActions(editor, selected);
       bindSectionNav(editor, selected);
       bindNamedSetList(editor, selected);
+      bindSSHList(editor, selected, toggle.sections);
     }
   }
   grid.append(editor);
