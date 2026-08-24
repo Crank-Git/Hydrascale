@@ -2695,10 +2695,10 @@ test("push sends the whole staged document through the existing route, after a v
   assert.deepEqual(puts[0].body, { document: added, etag: "e0b2816b418" });
 });
 
-// pushed builds a state whose documents step read -> one -> two -> three, one rule per
-// step. Each answer of POST .../sections describes the document that the request holds,
-// so the state after a push matches the state after a read.
-function pushed() {
+// pushed returns a state that staged one rule and pushed it. Each answer of
+// POST .../sections describes the document that the request holds. Every matrix click
+// adds one rule, up to three.
+async function pushed() {
   const rule = (src) => ({ action: "accept", src: [src], dst: ["tag:server:*"] });
   const documentOf = (rules) => `{\n  "acls": ${JSON.stringify(rules)},\n}`;
   const read = documentOf([]);
@@ -2724,16 +2724,16 @@ function pushed() {
     }
     return documentBody({ document: body.document, etag: "e0b2816b419" });
   }, { document: read });
-  return state;
-}
-
-test("a rule staged after a push shows the staged chip, per FR-vacl-10", async () => {
-  const state = pushed();
-
   await state.loadSections("jbones");
   await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
   await state.validate("jbones");
   await state.push("jbones");
+  return state;
+}
+
+test("a rule staged after a push shows the staged chip, per FR-vacl-10", async () => {
+  const state = await pushed();
+
   await state.stageMatrixClick("jbones", "tag:phone", "tag:server");
 
   const toggle = toggleModel(state, "jbones");
@@ -2744,12 +2744,8 @@ test("a rule staged after a push shows the staged chip, per FR-vacl-10", async (
 });
 
 test("the staged summary names a rule staged after a push, per FR-vacl-14", async () => {
-  const state = pushed();
+  const state = await pushed();
 
-  await state.loadSections("jbones");
-  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
-  await state.validate("jbones");
-  await state.push("jbones");
   await state.stageMatrixClick("jbones", "tag:phone", "tag:server");
 
   const toggle = toggleModel(state, "jbones");
@@ -2758,12 +2754,8 @@ test("the staged summary names a rule staged after a push, per FR-vacl-14", asyn
 });
 
 test("the staged summary counts every rule staged after the same push", async () => {
-  const state = pushed();
+  const state = await pushed();
 
-  await state.loadSections("jbones");
-  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
-  await state.validate("jbones");
-  await state.push("jbones");
   await state.stageMatrixClick("jbones", "tag:phone", "tag:server");
   await state.stageMatrixClick("jbones", "tag:router", "tag:server");
 
@@ -2774,12 +2766,7 @@ test("the staged summary counts every rule staged after the same push", async ()
 });
 
 test("the staged summary is empty directly after a push", async () => {
-  const state = pushed();
-
-  await state.loadSections("jbones");
-  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
-  await state.validate("jbones");
-  await state.push("jbones");
+  const state = await pushed();
 
   const toggle = toggleModel(state, "jbones");
   assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), []);
@@ -2806,9 +2793,10 @@ test("a push that the control server rewrote stages no rule of its own", async (
   await state.validate("jbones");
   await state.push("jbones");
 
-  // The document that the answer holds is not the document that the sections describe,
-  // therefore the baseline is empty and the rule list marks no row staged.
+  // The document that the answer holds is not the document that the sections describe.
+  // The baseline is therefore empty, and the rule list marks no row staged.
   const toggle = toggleModel(state, "jbones");
   assert.equal(toggle.baseSections, null);
   assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), []);
+  assert.deepEqual(ruleRows(toggle.sections, toggle.baseSections).map((row) => row.staged), [false]);
 });

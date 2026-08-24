@@ -2167,9 +2167,9 @@ export function createPolicyState(options = {}) {
         // FR-vacl-6 paused for confirmation, or null. baseSections holds the sections
         // of the document the console read, captured the first time loadSections
         // parses that exact text, so the rule list marks a staged row with no second
-        // request. See ruleRows. sectionsText holds the text that sections describes, or
-        // null before the first parse, so push knows whether sections describes the
-        // document it wrote.
+        // request. See ruleRows. sectionsText holds the text that sections describes,
+        // or null before the first parse. push reads it to know whether sections
+        // describes the document that the control server accepted.
         view: "text", sections: null, sectionsError: "", sectionsPending: false,
         nav: "", pendingRemoval: null, baseSections: null, sectionsText: null,
         // testsPending is true while the Tests section's Run action runs, and
@@ -2673,13 +2673,11 @@ export function createPolicyState(options = {}) {
         entry.etag = (answer && answer.etag) || "";
         entry.stage = "pushed";
         entry.sectionsError = "";
-        // The document that the control server accepted is the new baseline. The
-        // sections the entry holds already describe that document when the answer
-        // returned the text the console parsed, therefore push takes them as the new
-        // baseline and sends no second request. An answer that rewrote the document
-        // describes a text the entry never parsed, so the baseline is empty until
-        // loadSections parses that text. FR-vacl-10 and FR-vacl-14 need this baseline
-        // for every edit of the rest of the session, not only for the first one.
+        // The document that the control server accepted is the new baseline. A null
+        // baseline marks no row staged and names no staged edit. push therefore takes
+        // the sections that the entry already holds, and it sends no second request.
+        // An answer that rewrote the document describes a text that the console never
+        // parsed. The baseline is then empty until loadSections parses that text.
         entry.baseSections = entry.sectionsText === entry.base ? entry.sections : null;
       } catch (err) {
         entry.stage = err && err.status === CONFLICT_STATUS ? "conflict" : "push-failed";
