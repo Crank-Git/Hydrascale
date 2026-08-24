@@ -78,6 +78,53 @@ func TestASectionAbsentFromTheDocumentReturnsAnEmptyList(t *testing.T) {
 	}
 }
 
+func TestRawSectionsReturnsTheJSONOfEveryTopLevelKey(t *testing.T) {
+	text := `{
+  "groups": {"group:admins": ["alice@example.com"]},
+  "hosts": {"server": "100.64.0.1"},
+  "randomizeClientPort": true,
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	sections, err := doc.RawSections()
+	if err != nil {
+		t.Fatalf("RawSections: %v", err)
+	}
+	if _, ok := sections["groups"]; !ok {
+		t.Fatalf("RawSections: got %v, want a key named groups", sections)
+	}
+	if _, ok := sections["hosts"]; !ok {
+		t.Fatalf("RawSections: got %v, want a key named hosts", sections)
+	}
+	if _, ok := sections["randomizeClientPort"]; !ok {
+		t.Fatalf("RawSections: got %v, want a key named randomizeClientPort", sections)
+	}
+	if _, ok := sections["acls"]; ok {
+		t.Fatalf("RawSections: got %v, want no key named acls, which the document does not hold", sections)
+	}
+}
+
+func TestRawSectionsDoesNotMutateTheDocument(t *testing.T) {
+	text := `{
+  // a comment RawSections must keep
+  "groups": {"group:admins": ["alice@example.com"]},
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := doc.RawSections(); err != nil {
+		t.Fatalf("RawSections: %v", err)
+	}
+	if got := string(doc.Bytes()); got != text {
+		t.Fatalf("Bytes after RawSections: got %q, want the original text %q", got, text)
+	}
+}
+
 func TestGroupsReturnsEveryMember(t *testing.T) {
 	text := `{
   "groups": {
@@ -466,6 +513,178 @@ func TestParseEditSerializeIsAPureFunction(t *testing.T) {
 
 	if string(first.Bytes()) != string(second.Bytes()) {
 		t.Fatalf("Bytes: two parses of the same text with the same edit produced different output: %q vs %q", first.Bytes(), second.Bytes())
+	}
+}
+
+func TestAddingAMapEntryKeepsExistingEntriesByteForByte(t *testing.T) {
+	text := `{
+  "groups": {
+    // admins reach everything
+    "group:admins": ["alice@example.com"],
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddMapEntry("groups", "group:eng", `["carol@example.com"]`); err != nil {
+		t.Fatalf("AddMapEntry: %v", err)
+	}
+	want := `{
+  "groups": {
+    // admins reach everything
+    "group:admins": ["alice@example.com"],
+    "group:eng": ["carol@example.com"],
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestAddingTheFirstMapEntryCreatesTheSectionKey(t *testing.T) {
+	text := "{\n}\n"
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddMapEntry("groups", "group:admins", `["alice@example.com"]`); err != nil {
+		t.Fatalf("AddMapEntry: %v", err)
+	}
+	want := `{
+  "groups": {
+    "group:admins": ["alice@example.com"],
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestAddingAMapEntryWithADuplicateKeyReturnsAnError(t *testing.T) {
+	doc, err := Parse(`{"groups": {"group:admins": ["alice@example.com"]}}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddMapEntry("groups", "group:admins", `["bob@example.com"]`); err == nil {
+		t.Fatal("AddMapEntry: got no error for a key the section already holds")
+	}
+}
+
+func TestReplacingAMapEntryChangesOnlyItsValue(t *testing.T) {
+	text := `{
+  "groups": {
+    "group:admins": ["alice@example.com"],
+    "group:eng": ["carol@example.com"],
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceMapEntry("groups", "group:eng", `["carol@example.com", "dave@example.com"]`); err != nil {
+		t.Fatalf("ReplaceMapEntry: %v", err)
+	}
+	want := `{
+  "groups": {
+    "group:admins": ["alice@example.com"],
+    "group:eng": ["carol@example.com", "dave@example.com"],
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestRemovingAMapEntryKeepsTheSectionKeyWithOthers(t *testing.T) {
+	text := `{
+  "groups": {
+    "group:admins": ["alice@example.com"],
+    "group:eng": ["carol@example.com"],
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.RemoveMapEntry("groups", "group:eng"); err != nil {
+		t.Fatalf("RemoveMapEntry: %v", err)
+	}
+	want := `{
+  "groups": {
+    "group:admins": ["alice@example.com"]
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestRenamingAMapEntryKeepsItsValue(t *testing.T) {
+	text := `{
+  "groups": {
+    "group:admins": ["alice@example.com"],
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.RenameMapEntry("groups", "group:admins", "group:owners"); err != nil {
+		t.Fatalf("RenameMapEntry: %v", err)
+	}
+	want := `{
+  "groups": {
+    "group:owners": ["alice@example.com"],
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestRenamingAMapEntryToAnExistingKeyReturnsAnError(t *testing.T) {
+	doc, err := Parse(`{"groups": {"group:admins": [], "group:eng": []}}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.RenameMapEntry("groups", "group:admins", "group:eng"); err == nil {
+		t.Fatal("RenameMapEntry: got no error for a new key the section already holds")
+	}
+}
+
+func TestMapEntryEditsOnAMissingSectionReturnAnError(t *testing.T) {
+	doc, err := Parse("{}")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceMapEntry("groups", "group:admins", `[]`); err == nil {
+		t.Fatal("ReplaceMapEntry: got no error for a document with no groups section")
+	}
+	if err := doc.RemoveMapEntry("groups", "group:admins"); err == nil {
+		t.Fatal("RemoveMapEntry: got no error for a document with no groups section")
+	}
+	if err := doc.RenameMapEntry("groups", "group:admins", "group:owners"); err == nil {
+		t.Fatal("RenameMapEntry: got no error for a document with no groups section")
+	}
+}
+
+func TestReplacingAMissingMapKeyReturnsAnError(t *testing.T) {
+	doc, err := Parse(`{"groups": {"group:admins": []}}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceMapEntry("groups", "group:eng", `[]`); err == nil {
+		t.Fatal("ReplaceMapEntry: got no error for a key the section does not hold")
 	}
 }
 

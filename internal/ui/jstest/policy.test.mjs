@@ -20,17 +20,35 @@ import {
   actionsMarkup,
   actionsModel,
   createPolicyState,
+  diffSummary,
   editorMarkup,
   editorModel,
   emptyStatement,
+  matrixClickPlan,
+  matrixMarkup,
+  matrixModel,
+  namedSetEntries,
+  parseRulePorts,
   policyDocumentRoute,
   policyListMarkup,
   policyRows,
+  policySectionsEditRoute,
+  policySectionsRoute,
   policyValidateRoute,
   readFailure,
+  referencingRules,
+  referencingSentence,
+  removeGrantCapability,
+  renameGrantCapability,
   resultMarkup,
   resultModel,
+  ruleEntryWithPorts,
+  ruleListMarkup,
+  ruleRows,
+  toggleMarkup,
+  toggleModel,
   validateErrors,
+  visualMarkup,
 } from "../static/policy.js";
 
 // refusal returns the error that requestJSON rejects with: the message of the daemon word
@@ -82,6 +100,27 @@ function documentBody(overrides = {}) {
 // entryOf returns the editor model of one identifier out of a state.
 function entryOf(state, id) {
   return editorModel(state, id);
+}
+
+// sectionsBody is one answer of POST /api/policy/{id}/sections, as internal/api/types.go
+// declares it.
+function sectionsBody(overrides = {}) {
+  return {
+    groups: { "group:admins": ["alice@example.com"] },
+    hosts: {},
+    tagOwners: {},
+    ipsets: {},
+    acls: [{ action: "accept", src: ["group:admins"], dst: ["*:*"] }],
+    grants: [],
+    ssh: [],
+    autoApprovers: {},
+    nodeAttrs: [],
+    postures: {},
+    tests: [],
+    sshTests: [],
+    opaque_keys: [],
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,4 +1059,1050 @@ test("a usable credential still reads as read and write", () => {
   const row = policyRows(body, null)[0];
   assert.equal(row.word, "read and write");
   assert.equal(row.tone, "ok");
+});
+
+// ---------------------------------------------------------------------------
+// The Visual/Text toggle (FR-vacl-1 to FR-vacl-3)
+// ---------------------------------------------------------------------------
+
+test("the route of the sections action encodes the identifier", () => {
+  assert.equal(policySectionsRoute("jbones"), "/api/policy/jbones/sections");
+  assert.equal(policySectionsRoute("lab hs/1"), "/api/policy/lab%20hs%2F1/sections");
+});
+
+test("a document that holds no toggle attempt shows the Text view and no disabled Visual control", () => {
+  const state = loaded(async () => documentBody());
+  const toggle = toggleModel(state, "jbones");
+
+  assert.equal(toggle.view, "text");
+  assert.equal(toggle.visualDisabled, false);
+
+  const markup = toggleMarkup(toggle);
+  assert.match(markup, /<button type="button" role="tab" aria-selected="false" data-view="visual">Visual<\/button>/);
+  assert.match(markup, /<button type="button" role="tab" aria-selected="true" data-view="text">Text<\/button>/);
+});
+
+test("a successful load of the sections switches the entry to the visual view", async () => {
+  const state = loaded(async () => sectionsBody());
+
+  await state.loadSections("jbones");
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "visual");
+  assert.equal(toggle.visualDisabled, false);
+  assert.deepEqual(toggle.sections, sectionsBody());
+});
+
+test("the sections request sends the staged text, per FR-vacl-2", async () => {
+  const sent = [];
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    return sectionsBody();
+  });
+  state.setText("jbones", "the text of the operator");
+
+  await state.loadSections("jbones");
+
+  assert.deepEqual(sent, [{
+    route: "/api/policy/jbones/sections",
+    method: "POST",
+    body: { document: "the text of the operator" },
+  }]);
+});
+
+test("a parse failure keeps the Visual control present but disabled, and states the error inline", async () => {
+  const state = loaded(async () => {
+    throw refusal(400, "policy: parsing document: hujson: line 3, column 1: parsing value: unexpected EOF");
+  });
+
+  await state.loadSections("jbones");
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "text");
+  assert.equal(toggle.visualDisabled, true);
+  assert.match(toggle.error, /line 3, column 1/);
+
+  const markup = toggleMarkup(toggle);
+  assert.match(markup, /<button type="button" role="tab" aria-selected="false" data-view="visual" disabled>Visual<\/button>/);
+  assert.match(markup, /line 3, column 1/);
+});
+
+test("an edit after a parse failure clears the error and re-enables the Visual control", async () => {
+  const state = loaded(async () => {
+    throw refusal(400, "line 3, column 1: unexpected EOF");
+  });
+  await state.loadSections("jbones");
+  assert.equal(toggleModel(state, "jbones").visualDisabled, true);
+
+  state.setText("jbones", '{\n  "acls": [],\n}');
+
+  assert.equal(toggleModel(state, "jbones").visualDisabled, false);
+  assert.equal(toggleModel(state, "jbones").error, "");
+});
+
+test("selecting Text switches the view and sends no request", () => {
+  const sent = [];
+  const state = loaded(async (route) => {
+    sent.push(route);
+    return sectionsBody();
+  });
+
+  state.setView("jbones", "visual");
+  assert.equal(toggleModel(state, "jbones").view, "visual");
+
+  state.setView("jbones", "text");
+  assert.equal(toggleModel(state, "jbones").view, "text");
+  assert.deepEqual(sent, []);
+});
+
+test("a text edit after a visual edit toggles to Visual again and matches the new text", async () => {
+  // FR-vacl-2. loadSections always sends the current staged text, so a toggle to
+  // Visual after an edit re-parses that text and never a stale answer.
+  const requests = [];
+  const state = loaded(async (route, method, body) => {
+    requests.push(body.document);
+    return sectionsBody({ acls: body.document.includes("tag:laptop") ? [{ action: "accept", src: ["tag:laptop"], dst: ["*:*"] }] : [] });
+  });
+
+  await state.loadSections("jbones");
+  assert.equal(toggleModel(state, "jbones").sections.acls.length, 0);
+
+  state.setView("jbones", "text");
+  state.setText("jbones", '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["*:*"]}],\n}');
+  await state.loadSections("jbones");
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "visual");
+  assert.equal(toggle.sections.acls.length, 1);
+  assert.equal(toggle.sections.acls[0].src[0], "tag:laptop");
+});
+
+test("a sections request that returns after an edit applies neither the sections nor the error", async () => {
+  let release = () => {};
+  const state = loaded(() => new Promise((resolve) => {
+    release = () => resolve(sectionsBody());
+  }));
+
+  const running = state.loadSections("jbones");
+  state.setText("jbones", "the text of the operator");
+  release();
+  await running;
+
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.view, "text");
+  assert.equal(toggle.sections, null);
+});
+
+test("loadSections sends one request, and no second request while the first runs", async () => {
+  let calls = 0;
+  let release = () => {};
+  const state = loaded(() => new Promise((resolve) => {
+    calls += 1;
+    release = () => resolve(sectionsBody());
+  }));
+
+  const first = state.loadSections("jbones");
+  const second = state.loadSections("jbones");
+  release();
+  await Promise.all([first, second]);
+
+  assert.equal(calls, 1);
+});
+
+test("the visual region draws the count of each section", () => {
+  const markup = visualMarkup(sectionsBody({
+    groups: { "group:admins": [], "group:eng": [] },
+    hosts: { server: "100.64.0.1" },
+    acls: [{ action: "accept", src: ["a"], dst: ["b"] }],
+    grants: [{ src: ["c"], dst: ["d"] }],
+  }));
+
+  assert.match(markup, /<span class="name">Groups<\/span><span class="mono">2<\/span>/);
+  assert.match(markup, /<span class="name">Hosts<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Rules<\/span><span class="mono">2<\/span>/);
+});
+
+test("the visual region names an opaque key once, per FR-vacl-18", () => {
+  const markup = visualMarkup(sectionsBody({ opaque_keys: ["randomizeClientPort"] }));
+
+  assert.match(markup, /randomizeClientPort/);
+});
+
+test("the visual region never draws ssh, autoApprovers, nodeAttrs, postures, tests, or sshTests, per FR-vacl-17", () => {
+  const markup = visualMarkup(
+    sectionsBody({
+      ssh: [{ action: "accept", src: ["autogroup:member"], dst: ["autogroup:self"], users: ["autogroup:nonroot"] }],
+      autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] } },
+      nodeAttrs: [{ target: ["tag:server"], attr: ["funnel"] }],
+      postures: { "posture:latest": ["node:os in ['linux']"] },
+      tests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+      sshTests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+    }),
+  );
+
+  assert.doesNotMatch(markup, /autogroup:nonroot/);
+  assert.doesNotMatch(markup, /10\.0\.0\.0\/8/);
+  assert.doesNotMatch(markup, /funnel/);
+  assert.doesNotMatch(markup, /posture:latest/);
+  assert.doesNotMatch(markup, /group:eng/);
+});
+
+test("an unsupported section shows the reason in place of its editor, per FR-vacl-19", () => {
+  const markup = visualMarkup(sectionsBody({ ipsets: { "ipset:eng": ["10.0.0.0/24"] } }), "ipsets", null, null, "headscale");
+
+  assert.match(markup, /does not support/);
+  assert.doesNotMatch(markup, /data-add-key/);
+  assert.doesNotMatch(markup, /ipset:eng/);
+});
+
+test("a Tailscale tailnet still edits IP sets normally, per FR-vacl-19", () => {
+  const markup = visualMarkup(sectionsBody({ ipsets: { "ipset:eng": ["10.0.0.0/24"] } }), "ipsets", null, null, "tailscale");
+
+  assert.match(markup, /ipset:eng/);
+  assert.match(markup, /data-add-key/);
+});
+
+test("the visual region draws nothing before the first load", () => {
+  assert.equal(visualMarkup(null), `<div class="pol-visual"></div>`);
+});
+
+test("the editor draws the visual region when the toggle selects Visual", async () => {
+  const state = loaded(async () => sectionsBody());
+  await state.loadSections("jbones");
+
+  const markup = editorMarkup(entryOf(state, "jbones"), toggleModel(state, "jbones"));
+  assert.ok(markup.includes(`<div class="pol-visual">`), markup);
+  assert.ok(!markup.includes("<textarea"), markup);
+});
+
+test("the editor draws the text region when the toggle selects Text", () => {
+  const state = loaded(async () => documentBody());
+
+  const markup = editorMarkup(entryOf(state, "jbones"), toggleModel(state, "jbones"));
+  assert.ok(markup.includes("<textarea"), markup);
+  assert.ok(!markup.includes(`<div class="pol-visual">`), markup);
+});
+
+test("the editor draws no toggle before a tailnet is selected", () => {
+  const state = createPolicyState({ request: async () => documentBody() });
+  state.setList(listBody());
+
+  const markup = editorMarkup(entryOf(state, null));
+  assert.ok(!markup.includes('role="tablist"'), markup);
+});
+
+// ---------------------------------------------------------------------------
+// The section nav: Groups, Hosts, Tag owners, IP sets (#315, FR-vacl-4, FR-vacl-5)
+// ---------------------------------------------------------------------------
+
+test("namedSetEntries returns one pair per key, in sorted order", () => {
+  const sections = sectionsBody({ groups: { "group:eng": ["b"], "group:admins": ["a"] } });
+  assert.deepEqual(namedSetEntries(sections, "groups"), [
+    ["group:admins", ["a"]],
+    ["group:eng", ["b"]],
+  ]);
+});
+
+test("namedSetEntries returns an empty list for a section the answer holds none of", () => {
+  assert.deepEqual(namedSetEntries(sectionsBody({ groups: {} }), "groups"), []);
+});
+
+test("the section nav marks the selected section, and Rules is selected by default", () => {
+  const defaultMarkup = visualMarkup(sectionsBody());
+  assert.match(defaultMarkup, /data-nav="rules" aria-selected="true"/);
+  assert.match(defaultMarkup, /data-nav="groups" aria-selected="false"/);
+
+  const groupsMarkup = visualMarkup(sectionsBody(), "groups");
+  assert.match(groupsMarkup, /data-nav="groups" aria-selected="true"/);
+  assert.match(groupsMarkup, /data-nav="hosts" aria-selected="false"/);
+  assert.match(groupsMarkup, /data-nav="rules" aria-selected="false"/);
+});
+
+test("the section nav draws the matrix, not a named-set entry list, before the operator selects a named-set section", () => {
+  const markup = visualMarkup(sectionsBody());
+  assert.ok(markup.includes("ac-matrix"));
+  assert.ok(!markup.includes("setlist"));
+});
+
+test("the Rules row reopens the matrix after a named-set section was open", () => {
+  const markup = visualMarkup(sectionsBody(), "rules");
+  assert.ok(markup.includes("ac-matrix"));
+  assert.ok(!markup.includes("setlist"));
+});
+
+test("Rules draws the matrix and the rule list together, per the mockup", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+
+  const markup = visualMarkup(sections);
+  assert.ok(markup.includes("ac-matrix"));
+  assert.ok(markup.includes("ac-rulelist"));
+  assert.ok(markup.indexOf("ac-matrix") < markup.indexOf("ac-rulelist"), "the matrix comes before the rule list");
+  assert.match(markup, /tag:laptop/);
+});
+
+test("switching to a named-set section replaces the matrix and the rule list, not just the matrix", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+
+  const markup = visualMarkup(sections, "groups");
+  assert.ok(!markup.includes("ac-matrix"));
+  assert.ok(!markup.includes("ac-rulelist"));
+  assert.ok(markup.includes("setlist"));
+});
+
+test("the Groups section lists every group and its members", () => {
+  const markup = visualMarkup(
+    sectionsBody({ groups: { "group:admins": ["alice@example.com", "bob@example.com"] } }),
+    "groups",
+  );
+  assert.match(markup, /value="group:admins"/);
+  assert.match(markup, /alice@example\.com/);
+  assert.match(markup, /bob@example\.com/);
+});
+
+test("the Hosts section shows the address of each alias as a field, not a member list", () => {
+  const markup = visualMarkup(sectionsBody({ hosts: { server: "100.64.0.1" } }), "hosts");
+  assert.match(markup, /value="100\.64\.0\.1"/);
+  assert.ok(!markup.includes("setmembers"));
+});
+
+test("a section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ groups: {} }), "groups");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the section nav escapes a hostile group name and member", () => {
+  const markup = visualMarkup(sectionsBody({ groups: { '"><script>': ['"><script>'] } }), "groups");
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("referencingRules finds a group or a tag named in an acls or a grants src or dst", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["group:admins"], dst: ["tag:server"] }],
+    grants: [{ src: ["group:eng"], dst: ["tag:db"] }],
+  });
+  assert.deepEqual(referencingRules(sections, "group:admins"), [
+    { section: "acls", src: "group:admins", dst: "tag:server" },
+  ]);
+  assert.deepEqual(referencingRules(sections, "tag:db"), [
+    { section: "grants", src: "group:eng", dst: "tag:db" },
+  ]);
+  assert.deepEqual(referencingRules(sections, "group:none"), []);
+});
+
+test("referencingSentence names each referencing rule and states that removal keeps it", () => {
+  const sentence = referencingSentence([{ section: "acls", src: "group:admins", dst: "tag:server" }]);
+  assert.match(sentence, /One rule references this entry/);
+  assert.match(sentence, /acls: group:admins to tag:server/);
+  assert.match(sentence, /does not remove the rule/);
+});
+
+test("referencingSentence is empty for no referencing rule", () => {
+  assert.equal(referencingSentence([]), "");
+});
+
+test("addSetEntry adds a key to Groups through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ groups: { "group:eng": ["carol@example.com"] } });
+  });
+
+  await state.addSetEntry("jbones", "groups", "group:eng", ["carol@example.com"]);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "groups",
+      op: "add",
+      key: "group:eng",
+      entry: '["carol@example.com"]',
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.equal(entryOf(state, "jbones").text, "the edited text");
+  assert.deepEqual(toggleModel(state, "jbones").sections.groups, { "group:eng": ["carol@example.com"] });
+});
+
+test("renameSetEntry changes the key of a Hosts alias and keeps its address", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+
+  await state.renameSetEntry("jbones", "hosts", "server", "primary-server");
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "hosts",
+    op: "rename",
+    key: "server",
+    new_key: "primary-server",
+  });
+});
+
+test("removeSetEntry removes an IP set entry at once, because FR-vacl-6 checks a group and a tag alone", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+
+  await state.removeSetEntry("jbones", "ipsets", "internal");
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "ipsets",
+    op: "remove",
+    key: "internal",
+  });
+});
+
+test("replaceSetValue replaces the member list of a Tag owners entry", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+
+  await state.replaceSetValue("jbones", "tagOwners", "tag:prod", ["group:sre"]);
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "tagOwners",
+    op: "replace",
+    key: "tag:prod",
+    entry: '["group:sre"]',
+  });
+});
+
+test("a refused section edit states the message and sends no second request", async () => {
+  const calls = [];
+  const state = loaded(async (route) => {
+    calls.push(route);
+    throw refusal(400, 'section "groups" already holds key "group:admins"');
+  });
+
+  await state.addSetEntry("jbones", "groups", "group:admins", ["a"]);
+
+  assert.equal(calls.length, 1);
+  assert.equal(toggleModel(state, "jbones").error, 'section "groups" already holds key "group:admins"');
+});
+
+test("selectNav opens and closes a named-set section, and it sends no request", async () => {
+  const state = loaded(async () => sectionsBody());
+
+  state.selectNav("jbones", "groups");
+  assert.equal(toggleModel(state, "jbones").nav, "groups");
+
+  state.selectNav("jbones", "groups");
+  assert.equal(toggleModel(state, "jbones").nav, "");
+});
+
+test("removing a tag that a rule references states which rule references it, and removes neither on its own", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+  state.entry("jbones").sections = sectionsBody({
+    tagOwners: { "tag:prod": ["group:sre"] },
+    acls: [{ action: "accept", src: ["group:sre"], dst: ["tag:prod"] }],
+  });
+
+  await state.removeSetEntry("jbones", "tagOwners", "tag:prod");
+
+  assert.equal(calls.length, 0, "removeSetEntry sent a request before the operator confirmed it");
+  const toggle = toggleModel(state, "jbones");
+  assert.ok(toggle.pendingRemoval);
+  assert.equal(toggle.pendingRemoval.key, "tag:prod");
+  assert.equal(toggle.pendingRemoval.rules.length, 1);
+  assert.equal(toggle.pendingRemoval.rules[0].section, "acls");
+
+  const markup = visualMarkup(toggle.sections, "tagOwners", toggle.pendingRemoval);
+  assert.match(markup, /One rule references this entry/);
+  assert.match(markup, /Remove anyway/);
+
+  await state.confirmRemoval("jbones");
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "tagOwners",
+    op: "remove",
+    key: "tag:prod",
+  });
+  assert.equal(toggleModel(state, "jbones").pendingRemoval, null);
+});
+
+test("cancelRemoval discards a paused removal and sends no request", () => {
+  const state = loaded(async () => sectionsBody());
+  state.entry("jbones").sections = sectionsBody({
+    tagOwners: { "tag:prod": ["group:sre"] },
+    acls: [{ action: "accept", src: ["group:sre"], dst: ["tag:prod"] }],
+  });
+
+  state.removeSetEntry("jbones", "tagOwners", "tag:prod");
+  assert.ok(toggleModel(state, "jbones").pendingRemoval);
+
+  state.cancelRemoval("jbones");
+  assert.equal(toggleModel(state, "jbones").pendingRemoval, null);
+});
+
+// ---------------------------------------------------------------------------
+// The reachability matrix (FR-vacl-7 to FR-vacl-9)
+// ---------------------------------------------------------------------------
+
+// squareAt returns the square of a matrix model at one row and one column.
+function squareAt(model, from, to) {
+  const row = model.rows.find((entry) => entry.source === from);
+  return row.squares.find((square) => square.to === to);
+}
+
+test("the matrix places every tag, group, and autogroup that a rule references on both axes", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [{ src: ["group:eng"], dst: ["tag:server"], ip: ["tcp:22"] }],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.deepEqual(model.nodes, ["group:eng", "tag:laptop", "tag:server"]);
+  assert.equal(model.rows.length, 3);
+  for (const row of model.rows) {
+    assert.equal(row.squares.length, 3);
+  }
+});
+
+test("a filled square means at least one acls or grants entry allows the path", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [{ src: ["group:eng"], dst: ["tag:server"], ip: ["tcp:22"] }],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.equal(squareAt(model, "tag:laptop", "tag:server").allowed, true);
+  assert.equal(squareAt(model, "group:eng", "tag:server").allowed, true);
+});
+
+test("an empty square means no acls or grants entry allows the path", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.equal(squareAt(model, "tag:server", "tag:laptop").allowed, false);
+});
+
+test("the matrix drops the port that an acls destination carries, and draws no separate node for it", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] }],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.deepEqual(model.nodes, ["tag:laptop", "tag:server"]);
+  assert.equal(squareAt(model, "tag:laptop", "tag:server").allowed, true);
+});
+
+test("the diagonal square is inert, per FR-vacl-7", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  const diagonal = squareAt(model, "tag:laptop", "tag:laptop");
+  assert.equal(diagonal.inert, true);
+  assert.equal(diagonal.allowed, false);
+});
+
+test("hovering a square marks the row label and the column label alone", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.match(markup, /data-from="tag:laptop" data-to="tag:server"/);
+  assert.ok(!markup.includes("denied"), markup);
+});
+
+test("the matrix markup escapes a hostile node name", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ['<img src=x onerror="alert(1)">'], dst: ["tag:server:*"] }],
+    grants: [],
+  });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.ok(!markup.includes("<img"), markup);
+  assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+});
+
+test("the route of the sections edit action encodes the identifier", () => {
+  assert.equal(policySectionsEditRoute("jbones"), "/api/policy/jbones/sections/edit");
+  assert.equal(policySectionsEditRoute("lab hs/1"), "/api/policy/lab%20hs%2F1/sections/edit");
+});
+
+test("the diagonal accepts no click", () => {
+  // FR-vacl-7, in the manner of FR-editor-10 of features/07-console-access-editor.md.
+  const sections = sectionsBody({ acls: [], grants: [] });
+
+  assert.equal(matrixClickPlan(sections, "tag:laptop", "tag:laptop"), null);
+});
+
+test("a click on an empty square plans an acls entry that allows every port, per FR-vacl-8", () => {
+  const sections = sectionsBody({ acls: [], grants: [] });
+
+  const plan = matrixClickPlan(sections, "tag:laptop", "tag:server");
+
+  assert.deepEqual(plan, {
+    op: "add",
+    section: "acls",
+    entry: { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+  });
+});
+
+test("a click on a filled square plans the removal of every acls and grants entry for that path, per FR-vacl-9", () => {
+  // The correction on issue #316 (posted after the batch cross-check): removing index i
+  // shifts every later index down by one, so the plan removes each section's matching
+  // entries highest index first.
+  const sections = sectionsBody({
+    acls: [
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:other:*"] },
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] },
+    ],
+    grants: [
+      { src: ["tag:other"], dst: ["tag:server"] },
+      { src: ["tag:laptop"], dst: ["tag:server"] },
+    ],
+  });
+
+  const plan = matrixClickPlan(sections, "tag:laptop", "tag:server");
+
+  assert.deepEqual(plan, {
+    op: "remove",
+    removals: [
+      { section: "acls", index: 2 },
+      { section: "acls", index: 0 },
+      { section: "grants", index: 1 },
+    ],
+  });
+});
+
+test("clicking an empty matrix square stages an acls entry", async () => {
+  const sent = [];
+  const editedDocument = '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: editedDocument };
+    }
+    return body.document === editedDocument
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }] })
+      : sectionsBody({ acls: [] });
+  });
+  state.setText("jbones", '{\n  "acls": [],\n}');
+  await state.loadSections("jbones");
+  assert.equal(toggleModel(state, "jbones").sections.acls.length, 0);
+
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  assert.deepEqual(sent[1], {
+    route: "/api/policy/jbones/sections/edit",
+    method: "POST",
+    body: {
+      document: '{\n  "acls": [],\n}',
+      section: "acls",
+      op: "add",
+      entry: { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+    },
+  });
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.sections.acls.length, 1);
+  assert.equal(state.edited("jbones"), true);
+});
+
+test("clicking a filled matrix square removes every matching entry, highest index first", async () => {
+  const sent = [];
+  const documents = [
+    '{\n  "acls": [{"a":1},{"a":2},{"a":3}],\n}',
+    '{\n  "acls": [{"a":1},{"a":2}],\n}',
+    '{\n  "acls": [{"a":2}],\n}',
+  ];
+  let editCall = 0;
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      editCall += 1;
+      return { document: documents[editCall] };
+    }
+    return sectionsBody({
+      acls: [
+        { action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] },
+        { action: "accept", src: ["tag:laptop"], dst: ["tag:other:*"] },
+        { action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] },
+      ],
+    });
+  });
+  state.setText("jbones", documents[0]);
+  await state.loadSections("jbones");
+
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  const edits = sent.filter((one) => one.route.endsWith("/sections/edit"));
+  assert.equal(edits.length, 2);
+  assert.equal(edits[0].body.index, 2);
+  assert.equal(edits[0].body.document, documents[0]);
+  assert.equal(edits[1].body.index, 0);
+  assert.equal(edits[1].body.document, documents[1]);
+});
+
+// ---------------------------------------------------------------------------
+// The rule list. FR-vacl-10 to FR-vacl-12.
+// ---------------------------------------------------------------------------
+
+test("a rule staged by the matrix appears in the rule list, marked staged", async () => {
+  const added = '{\n  "grants": [],\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    return body.document === added
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }], grants: [] })
+      : sectionsBody({ acls: [], grants: [] });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  const toggle = toggleModel(state, "jbones");
+  const rows = ruleRows(toggle.sections, toggle.baseSections);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].from, "tag:laptop");
+  assert.equal(rows[0].to, "tag:server");
+  assert.equal(rows[0].staged, true);
+  assert.match(ruleListMarkup(rows), /<span class="chip mono">staged<\/span>/);
+});
+
+test("a rule that matches the document the console read shows no staged chip", () => {
+  const base = sectionsBody({ acls: [{ action: "accept", src: ["a"], dst: ["b:*"] }], grants: [] });
+  const rows = ruleRows(base, base);
+
+  assert.equal(rows[0].staged, false);
+  assert.ok(!ruleListMarkup(rows).includes("staged"));
+});
+
+test("a grants entry's capability name shows in its row, per FR-vacl-11", () => {
+  const entry = { src: ["tag:laptop"], dst: ["tag:server"], app: { "tailscale.com/cap/ssh": [{}] } };
+  const rows = ruleRows(sectionsBody({ acls: [], grants: [entry] }));
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].section, "grants");
+  assert.equal(rows[0].chip, "grants · app: tailscale.com/cap/ssh");
+  assert.match(ruleListMarkup(rows), /tailscale\.com\/cap\/ssh/);
+});
+
+test("editing a grants entry removes a capability and keeps every other field", () => {
+  const entry = { src: ["a"], dst: ["b"], ip: ["tcp:22"], app: { "cap-a": [{ x: 1 }], "cap-b": [] } };
+
+  const removed = removeGrantCapability(entry, "cap-a");
+
+  assert.deepEqual(removed, { src: ["a"], dst: ["b"], ip: ["tcp:22"], app: { "cap-b": [] } });
+});
+
+test("removing the last capability of a grants entry drops the app field entirely", () => {
+  const entry = { src: ["a"], dst: ["b"], app: { "cap-a": [{}] } };
+
+  const removed = removeGrantCapability(entry, "cap-a");
+
+  assert.equal("app" in removed, false);
+});
+
+test("editing a grants entry renames a capability and keeps its parameters", () => {
+  const entry = { src: ["a"], dst: ["b"], app: { "cap-a": [{ x: 1 }] } };
+
+  const renamed = renameGrantCapability(entry, "cap-a", "cap-a-renamed");
+
+  assert.deepEqual(renamed.app, { "cap-a-renamed": [{ x: 1 }] });
+});
+
+test("a grants entry with no capability, only ports, shows identically to an acls entry", () => {
+  const rows = ruleRows(sectionsBody({ acls: [], grants: [{ src: ["a"], dst: ["b"], ip: ["tcp:22"] }] }));
+
+  assert.equal(rows[0].chip, "grants");
+  assert.deepEqual(rows[0].ports, ["tcp/22"]);
+});
+
+test("a bad port format is rejected with the concrete example message, per FR-vacl-12", () => {
+  const result = parseRulePorts("tcp/22, garbage");
+
+  assert.equal(result.ports, null);
+  assert.equal(
+    result.error,
+    'invalid port "garbage": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22',
+  );
+});
+
+test("a good port list parses into its entries, matching internal/access/rules.go's format", () => {
+  const result = parseRulePorts(" tcp/22, udp/1-1024 ");
+
+  assert.deepEqual(result, { ports: ["tcp/22", "udp/1-1024"], error: null });
+});
+
+test("two rules with the same source and destination and different ports both show as separate rows", () => {
+  const sections = sectionsBody({
+    acls: [
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:22"] },
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] },
+    ],
+    grants: [],
+  });
+
+  const rows = ruleRows(sections);
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].to, "tag:server");
+  assert.equal(rows[1].to, "tag:server");
+  assert.deepEqual(rows[0].ports, ["22"]);
+  assert.deepEqual(rows[1].ports, ["443"]);
+});
+
+test("an acls entry with no port reads all ports", () => {
+  const rows = ruleRows(sectionsBody({ acls: [{ action: "accept", src: ["a"], dst: ["b:*"] }], grants: [] }));
+
+  assert.equal(rows[0].allPorts, true);
+  assert.match(ruleListMarkup(rows), /<span class="ac-noports mono">all ports<\/span>/);
+});
+
+test("ruleEntryWithPorts replaces a grants entry's ip field, converting the slash to a colon", () => {
+  const row = { section: "grants", entry: { src: ["a"], dst: ["b"] } };
+
+  const next = ruleEntryWithPorts(row, ["tcp/22", "udp/1-1024"]);
+
+  assert.deepEqual(next, { src: ["a"], dst: ["b"], ip: ["tcp:22", "udp:1-1024"] });
+});
+
+test("ruleEntryWithPorts replaces an acls entry's dst ports and its proto", () => {
+  const row = { section: "acls", entry: { action: "accept", src: ["a"], dst: ["b:*"] } };
+
+  const next = ruleEntryWithPorts(row, ["tcp/22", "tcp/443"]);
+
+  assert.deepEqual(next, { action: "accept", src: ["a"], dst: ["b:22", "b:443"], proto: "tcp" });
+});
+
+test("ruleEntryWithPorts clears the ports and the proto of an acls entry back to all ports", () => {
+  const row = { section: "acls", entry: { action: "accept", src: ["a"], dst: ["b:22"], proto: "tcp" } };
+
+  const next = ruleEntryWithPorts(row, []);
+
+  assert.deepEqual(next, { action: "accept", src: ["a"], dst: ["b:*"] });
+});
+
+test("deleting a row of the rule list sends the remove op with the row's section and index", async () => {
+  const sent = [];
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: '{\n  "acls": [],\n}' };
+    }
+    return sectionsBody({ acls: [] });
+  });
+  state.setText("jbones", '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}');
+
+  await state.stageRuleRemove("jbones", "acls", 0);
+
+  assert.deepEqual(sent[0], {
+    route: "/api/policy/jbones/sections/edit",
+    method: "POST",
+    body: { document: '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}', section: "acls", op: "remove", index: 0 },
+  });
+});
+
+test("replacing a row of the rule list sends the replace op with the row's section, index, and entry", async () => {
+  const sent = [];
+  const nextEntry = { action: "accept", src: ["a"], dst: ["b:22"], proto: "tcp" };
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:22"],"proto":"tcp"}],\n}' };
+    }
+    return sectionsBody({ acls: [nextEntry] });
+  });
+  state.setText("jbones", '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}');
+
+  await state.stageRuleReplace("jbones", "acls", 0, nextEntry);
+
+  assert.deepEqual(sent[0].body, {
+    document: '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}',
+    section: "acls",
+    op: "replace",
+    index: 0,
+    entry: nextEntry,
+  });
+});
+
+test("the rule list states no acls entry and no grants entry when the document holds none", () => {
+  assert.match(ruleListMarkup([]), /No acls entry and no grants entry exist/);
+});
+
+test("the rule list escapes a hostile source", () => {
+  const rows = ruleRows(sectionsBody({ acls: [{ action: "accept", src: ['<script>alert(1)</script>'], dst: ["b"] }], grants: [] }));
+
+  const markup = ruleListMarkup(rows);
+  assert.ok(!markup.includes("<script>"), markup);
+});
+
+// ---------------------------------------------------------------------------
+// The staged summary and Push. FR-vacl-13 to FR-vacl-16, issue #318.
+// ---------------------------------------------------------------------------
+
+test("the staged summary names each section-level change", () => {
+  const base = sectionsBody({
+    groups: { "group:eng": ["a@example.com"] },
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+  const staged = sectionsBody({
+    groups: { "group:eng": ["a@example.com"], "group:ops": ["b@example.com"] },
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] }],
+  });
+
+  const summary = diffSummary(staged, base);
+
+  assert.deepEqual(summary, ["1 group added", "1 rule narrowed to one port"]);
+});
+
+test("the staged summary is empty before the console holds the sections of the read document", () => {
+  assert.deepEqual(diffSummary(sectionsBody(), null), []);
+});
+
+test("the staged summary is empty while the staged text matches the read document", () => {
+  const base = sectionsBody();
+
+  assert.deepEqual(diffSummary(base, base), []);
+});
+
+test("the staged summary names an added member and a removed member of a named set", () => {
+  const base = sectionsBody({ tagOwners: { "tag:server": ["group:eng"] } });
+  const staged = sectionsBody({ tagOwners: { "tag:server": ["group:ops"] } });
+
+  const summary = diffSummary(staged, base);
+
+  assert.deepEqual(summary, [
+    "1 member added to tag owner tag:server",
+    "1 member removed from tag owner tag:server",
+  ]);
+});
+
+test("the staged summary names an added rule and a removed rule", () => {
+  const base = sectionsBody({ acls: [{ action: "accept", src: ["a"], dst: ["b:*"] }] });
+  const staged = sectionsBody({ acls: [{ action: "accept", src: ["c"], dst: ["d:*"] }] });
+
+  const summary = diffSummary(staged, base);
+
+  assert.deepEqual(summary, ["1 rule added", "1 rule removed"]);
+});
+
+test("the staged count and the staged summary render above the section nav", async () => {
+  const added = '{\n  "grants": [],\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    return body.document === added
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }], grants: [] })
+      : sectionsBody({ acls: [], grants: [] });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  const toggle = toggleModel(state, "jbones");
+  const markup = visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections);
+  const diffbarAt = markup.indexOf("diffbar");
+  const setrowAt = markup.indexOf("setrow");
+  assert.ok(diffbarAt !== -1, markup);
+  assert.ok(diffbarAt < setrowAt, markup);
+  assert.match(markup, /<span class="n mono">1<\/span>/);
+  assert.match(markup, /1 rule added/);
+});
+
+test("discard returns the visual editor to the document that the console read, and the staged count reads 0", async () => {
+  const added = '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    return body.document === added
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }] })
+      : sectionsBody({ acls: [] });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+  assert.equal(state.edited("jbones"), true);
+
+  state.discard("jbones");
+
+  assert.equal(state.edited("jbones"), false);
+  const toggle = toggleModel(state, "jbones");
+  assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), []);
+  assert.ok(!visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections).includes("diffbar"));
+});
+
+test("push sends the whole staged document through the existing route, after a visual edit", async () => {
+  const sent = [];
+  const added = '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    if (route.endsWith("/sections")) {
+      return sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }] });
+    }
+    return documentBody({ document: added, etag: "e0b2816b419" });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  const puts = sent.filter((one) => one.method === "PUT");
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].route, "/api/policy/jbones");
+  assert.deepEqual(puts[0].body, { document: added, etag: "e0b2816b418" });
 });

@@ -123,18 +123,29 @@ func (d *Document) AutoApprovers() (AutoApprovers, error) {
 	return approvers, nil
 }
 
-// sectionRaw returns the raw JSON of the top-level key name, and whether the
-// document holds that key.
-// sectionRaw reads a clone of d.root, so it never mutates d.root: Minimize
-// strips every comment and trailing comma from the value it runs on, and
-// running it on d.root would corrupt the byte-preservation guarantee that a
-// later serialize depends on.
-func sectionRaw(d *Document, name string) (json.RawMessage, bool, error) {
+// RawSections returns the JSON of every top-level key that the document holds, keyed by
+// name. A caller that reads a section FR-model-2 does not name a typed accessor for
+// (`internal/api` reads `hosts`, `tagOwners`, `ipsets`, `grants`, `nodeAttrs`,
+// `postures`, `tests`, and `sshTests` this way) unmarshals the raw value itself.
+// RawSections reads a clone of d.root, so it never mutates d.root: Minimize strips
+// every comment and trailing comma from the value it runs on, and running it on d.root
+// would corrupt the byte-preservation guarantee that a later serialize depends on.
+func (d *Document) RawSections() (map[string]json.RawMessage, error) {
 	clone := d.root.Clone()
 	clone.Minimize()
 	var sections map[string]json.RawMessage
 	if err := json.Unmarshal(clone.Pack(), &sections); err != nil {
-		return nil, false, fmt.Errorf("policy: reading the document: %w", err)
+		return nil, fmt.Errorf("policy: reading the document: %w", err)
+	}
+	return sections, nil
+}
+
+// sectionRaw returns the raw JSON of the top-level key name, and whether the
+// document holds that key.
+func sectionRaw(d *Document, name string) (json.RawMessage, bool, error) {
+	sections, err := d.RawSections()
+	if err != nil {
+		return nil, false, err
 	}
 	raw, ok := sections[name]
 	return raw, ok, nil
@@ -267,6 +278,130 @@ func (d *Document) RemoveEntry(section string, index int) error {
 	return nil
 }
 
+// AddMapEntry adds one key to the map-shaped section name.
+// AddMapEntry parses entry as one JSON or huJSON value. The new entry
+// matches the indentation of the section's other entries. AddMapEntry
+// creates the section when the document does not hold it yet, and it
+// returns an error when the section already holds key.
+func (d *Document) AddMapEntry(section, key, entry string) error {
+	value, err := hujson.Parse([]byte(entry))
+	if err != nil {
+		return fmt.Errorf("policy: adding an entry: parsing the entry: %w", err)
+	}
+	obj, ok := d.root.Value.(*hujson.Object)
+	if !ok {
+		return fmt.Errorf("policy: adding an entry: the document root is not an object")
+	}
+	for i := range obj.Members {
+		if memberName(obj.Members[i]) != section {
+			continue
+		}
+		inner, ok := obj.Members[i].Value.Value.(*hujson.Object)
+		if !ok {
+			return fmt.Errorf("policy: adding an entry: section %q is not an object", section)
+		}
+		if mapMemberIndex(inner, key) >= 0 {
+			return fmt.Errorf("policy: adding an entry: section %q already holds key %q", section, key)
+		}
+		indent := mapEntryIndent(obj.Members[i])
+		inner.Members = append(inner.Members, newMapMember(key, value.Value, indent, newMapTrailingComma(inner)))
+		return nil
+	}
+	obj.Members = append(obj.Members, newMapSectionMember(section, key, value.Value, topLevelIndent(obj)))
+	return nil
+}
+
+// ReplaceMapEntry replaces the value at key in the map-shaped section name.
+// ReplaceMapEntry parses entry as one JSON or huJSON value and keeps the
+// key, the indentation, and the comment that surround the entry. It returns
+// an error when the document holds no section named section, when the
+// section is not an object, or when the section holds no such key.
+func (d *Document) ReplaceMapEntry(section, key, entry string) error {
+	inner, err := d.mapSection(section)
+	if err != nil {
+		return fmt.Errorf("policy: replacing an entry: %w", err)
+	}
+	index := mapMemberIndex(inner, key)
+	if index < 0 {
+		return fmt.Errorf("policy: replacing an entry: section %q holds no key %q", section, key)
+	}
+	value, err := hujson.Parse([]byte(entry))
+	if err != nil {
+		return fmt.Errorf("policy: replacing an entry: parsing the entry: %w", err)
+	}
+	inner.Members[index].Value.Value = value.Value
+	return nil
+}
+
+// RemoveMapEntry removes the entry at key from the map-shaped section name.
+// RemoveMapEntry keeps the section's key when the removal empties the
+// section. It returns an error when the document holds no section named
+// section, when the section is not an object, or when the section holds no
+// such key.
+func (d *Document) RemoveMapEntry(section, key string) error {
+	inner, err := d.mapSection(section)
+	if err != nil {
+		return fmt.Errorf("policy: removing an entry: %w", err)
+	}
+	index := mapMemberIndex(inner, key)
+	if index < 0 {
+		return fmt.Errorf("policy: removing an entry: section %q holds no key %q", section, key)
+	}
+	inner.Members = append(inner.Members[:index], inner.Members[index+1:]...)
+	return nil
+}
+
+// RenameMapEntry changes the key of one entry of the map-shaped section
+// name, and keeps its value unchanged. It returns an error when the
+// document holds no section named section, when the section is not an
+// object, when the section holds no oldKey, or when the section already
+// holds newKey.
+func (d *Document) RenameMapEntry(section, oldKey, newKey string) error {
+	inner, err := d.mapSection(section)
+	if err != nil {
+		return fmt.Errorf("policy: renaming an entry: %w", err)
+	}
+	index := mapMemberIndex(inner, oldKey)
+	if index < 0 {
+		return fmt.Errorf("policy: renaming an entry: section %q holds no key %q", section, oldKey)
+	}
+	if mapMemberIndex(inner, newKey) >= 0 {
+		return fmt.Errorf("policy: renaming an entry: section %q already holds key %q", section, newKey)
+	}
+	inner.Members[index].Name.Value = hujson.String(newKey)
+	return nil
+}
+
+// mapSection returns the object behind the named top-level section.
+func (d *Document) mapSection(section string) (*hujson.Object, error) {
+	obj, ok := d.root.Value.(*hujson.Object)
+	if !ok {
+		return nil, fmt.Errorf("the document root is not an object")
+	}
+	for i := range obj.Members {
+		if memberName(obj.Members[i]) != section {
+			continue
+		}
+		inner, ok := obj.Members[i].Value.Value.(*hujson.Object)
+		if !ok {
+			return nil, fmt.Errorf("section %q is not an object", section)
+		}
+		return inner, nil
+	}
+	return nil, fmt.Errorf("the document holds no section %q", section)
+}
+
+// mapMemberIndex returns the index of the member of obj named key, and -1
+// when obj holds no such member.
+func mapMemberIndex(obj *hujson.Object, key string) int {
+	for i := range obj.Members {
+		if memberName(obj.Members[i]) == key {
+			return i
+		}
+	}
+	return -1
+}
+
 // arraySection returns the array behind the named top-level section.
 func (d *Document) arraySection(section string) (*hujson.Array, error) {
 	obj, ok := d.root.Value.(*hujson.Object)
@@ -360,6 +495,72 @@ func newTrailingComma(arr *hujson.Array) bool {
 		return true
 	}
 	return arr.Elements[len(arr.Elements)-1].AfterExtra != nil
+}
+
+// newMapMember returns the object member that AddMapEntry inserts. The
+// member's name carries indent as its leading whitespace, and it carries a
+// trailing comma when comma is true.
+func newMapMember(key string, value hujson.ValueTrimmed, indent []byte, comma bool) hujson.ObjectMember {
+	member := hujson.ObjectMember{
+		Name: hujson.Value{
+			BeforeExtra: append([]byte("\n"), indent...),
+			Value:       hujson.String(key),
+		},
+		Value: hujson.Value{
+			BeforeExtra: []byte(" "),
+			Value:       value,
+		},
+	}
+	if comma {
+		member.Value.AfterExtra = hujson.Extra{}
+	}
+	return member
+}
+
+// newMapSectionMember returns the top-level member that AddMapEntry inserts
+// when the document does not hold section yet. The member holds one entry.
+func newMapSectionMember(section, key string, value hujson.ValueTrimmed, indent []byte) hujson.ObjectMember {
+	entryIndent := append(append([]byte{}, indent...), []byte("  ")...)
+	obj := &hujson.Object{
+		Members:    []hujson.ObjectMember{newMapMember(key, value, entryIndent, true)},
+		AfterExtra: append([]byte("\n"), indent...),
+	}
+	return hujson.ObjectMember{
+		Name: hujson.Value{
+			BeforeExtra: append([]byte("\n"), indent...),
+			Value:       hujson.String(section),
+		},
+		Value: hujson.Value{
+			BeforeExtra: []byte(" "),
+			Value:       obj,
+			AfterExtra:  hujson.Extra{},
+		},
+	}
+}
+
+// mapEntryIndent returns the indentation that a new entry of member's
+// object section matches. It copies the indentation of the section's last
+// entry, or, when the section holds no entry yet, the section key's own
+// indentation plus one level.
+func mapEntryIndent(member hujson.ObjectMember) []byte {
+	inner := member.Value.Value.(*hujson.Object)
+	if len(inner.Members) > 0 {
+		if indent := trailingIndent(inner.Members[len(inner.Members)-1].Name.BeforeExtra); indent != nil {
+			return indent
+		}
+	}
+	return append(trailingIndent(member.Name.BeforeExtra), []byte("  ")...)
+}
+
+// newMapTrailingComma reports whether a new last entry of obj keeps a
+// trailing comma, matching the object's own convention. An empty object
+// defaults to a trailing comma, which matches this project's own document
+// style.
+func newMapTrailingComma(obj *hujson.Object) bool {
+	if len(obj.Members) == 0 {
+		return true
+	}
+	return obj.Members[len(obj.Members)-1].Value.AfterExtra != nil
 }
 
 // trailingIndent returns the whitespace after the last newline in extra, or

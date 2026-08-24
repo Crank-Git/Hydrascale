@@ -2,10 +2,12 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"hydrascale/internal/access"
 	"hydrascale/internal/config"
+	"hydrascale/internal/policy"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/session"
 )
@@ -133,6 +135,55 @@ type PolicyCredentialsRequest struct {
 	TailscaleOAuthClientSecret string `json:"tailscale_oauth_client_secret,omitempty"`
 	HeadscaleAPIKey            string `json:"headscale_api_key,omitempty"`
 	HeadscaleAddress           string `json:"headscale_address,omitempty"`
+}
+
+// PolicySectionsRequest is the request body of POST /api/policy/{id}/sections.
+type PolicySectionsRequest struct {
+	Document string `json:"document"`
+}
+
+// PolicySectionsResponse is the JSON response for POST /api/policy/{id}/sections. Each
+// field holds one section that features/11-policy-document-model.md FR-model-2 names.
+// A section absent from the document is an empty map or an empty list, never null, per
+// FR-model-6. OpaqueKeys names every top-level key of the document that FR-model-2 does
+// not resolve, per FR-vacl-18.
+type PolicySectionsResponse struct {
+	Groups        map[string][]string  `json:"groups"`
+	Hosts         map[string]string    `json:"hosts"`
+	TagOwners     map[string][]string  `json:"tagOwners"`
+	IPSets        map[string][]string  `json:"ipsets"`
+	ACLs          []policy.ACLRule     `json:"acls"`
+	Grants        []json.RawMessage    `json:"grants"`
+	SSH           []policy.SSHRule     `json:"ssh"`
+	AutoApprovers policy.AutoApprovers `json:"autoApprovers"`
+	NodeAttrs     []json.RawMessage    `json:"nodeAttrs"`
+	Postures      map[string][]string  `json:"postures"`
+	Tests         []json.RawMessage    `json:"tests"`
+	SSHTests      []json.RawMessage    `json:"sshTests"`
+	OpaqueKeys    []string             `json:"opaque_keys"`
+}
+
+// PolicySectionsEditRequest is the request body of POST /api/policy/{id}/sections/edit.
+//
+// Op holds "add", "replace", "remove", or "rename". A list-shaped section (`acls`,
+// `grants`, `ssh`, `nodeAttrs`, `postures`, `tests`, `sshTests`) addresses its entry by
+// Index, which "add" omits and "replace"/"remove" require. A map-shaped section
+// (`groups`, `hosts`, `tagOwners`, `ipsets`) addresses its entry by Key, which every op
+// requires; "rename" also requires NewKey and carries no Entry. Entry is required for
+// "add" and "replace", and it is omitted for "remove" and "rename".
+type PolicySectionsEditRequest struct {
+	Document string          `json:"document"`
+	Section  string          `json:"section"`
+	Op       string          `json:"op"`
+	Index    *int            `json:"index,omitempty"`
+	Key      string          `json:"key,omitempty"`
+	NewKey   string          `json:"new_key,omitempty"`
+	Entry    json.RawMessage `json:"entry,omitempty"`
+}
+
+// PolicySectionsEditResponse is the JSON response for POST /api/policy/{id}/sections/edit.
+type PolicySectionsEditResponse struct {
+	Document string `json:"document"`
 }
 
 // EventsResponse is the JSON response for GET /api/events.

@@ -593,6 +593,12 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-ruleline .ns-error{display:block; margin-top:var(--sp-2)}
 .ac-ruleline .ns-error:empty{display:none}
 
+/* A grants entry's application capabilities, per FR-vacl-11. The visual editor edits a
+   capability's presence and its name alone; its own parameters stay text-only. */
+.ac-caps{display:flex; gap:var(--sp-2); flex-wrap:wrap; margin-top:var(--sp-2)}
+.ac-cap{display:flex; align-items:center; gap:var(--sp-2)}
+.ac-capfield{width:22ch}
+
 /* The policy view: the tailnet list, the document editor, the two actions, and the result.
    The accent of this view marks the push action and nothing else, because the push is the
    affirmative action of the view. Issue #158 gave the accent to the selected row while the
@@ -699,6 +705,106 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-doc:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-doc[readonly]{color:var(--text-secondary)}
 .pol-meta{display:flex; gap:var(--sp-2); margin-top:var(--sp-3); flex-wrap:wrap}
+
+/* The Visual/Text toggle, FR-vacl-1. The selected control takes a neutral surface, not
+   the accent: the push action already holds the one accent use of this view. */
+.seg{
+  display:inline-flex;
+  border:1px solid var(--border-default);
+  border-radius:var(--r-pill);
+  padding:2px;
+  background:var(--surface-raised);
+  margin-bottom:var(--sp-3);
+}
+.seg button{
+  font:inherit;
+  font-size:var(--fs-sm);
+  font-weight:500;
+  padding:var(--sp-2) var(--sp-4);
+  border-radius:var(--r-pill);
+  border:none;
+  background:transparent;
+  color:var(--text-secondary);
+  cursor:pointer;
+}
+.seg button[aria-selected="true"]{background:var(--surface-inset); color:var(--text-body)}
+.seg button:disabled{color:var(--text-tertiary); cursor:not-allowed}
+.seg button:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.pol-parse-error{color:var(--crit)}
+
+/* The visual editor's section nav and its Groups, Hosts, Tag owners, and IP sets
+   editors. #316 adds the matrix and the rule list that the Rules row opens. */
+.pol-visual{margin-top:var(--sp-3)}
+.pol-visual .setrow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--sp-3);
+  padding:var(--pad-row);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+}
+.pol-visual .setrow + .setrow{margin-top:var(--sp-2)}
+.pol-visual .name{color:var(--text-secondary)}
+.pol-visual .setrow[role="button"]{cursor:pointer}
+.pol-visual .setrow[role="button"]:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.pol-visual .setrow.selected{border:1px solid var(--accent)}
+
+.setlist{margin-top:var(--sp-3); display:flex; flex-direction:column; gap:var(--sp-3)}
+.setentry{
+  border:1px solid var(--border-default);
+  border-radius:var(--r);
+  padding:var(--sp-3);
+  display:flex;
+  flex-direction:column;
+  gap:var(--sp-2);
+}
+.setentry-head{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+.setentry-key{flex:1; min-width:8ch}
+.setentry-value{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+.setentry-address{flex:1; min-width:8ch}
+.setmembers{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+.setmember-remove{
+  background:none;
+  border:none;
+  color:var(--text-tertiary);
+  cursor:pointer;
+  padding:0 0 0 var(--sp-2);
+  font:inherit;
+}
+.setmember-remove:hover{color:var(--text-body)}
+.setmember-remove:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.setremove-confirm{display:flex; flex-direction:column; gap:var(--sp-2); align-items:flex-start}
+.setadd{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+
+/* The staged summary, above the section nav, per FR-vacl-14. The accent already marks
+   the Push action and an allowed path in the matrix, so the bar takes a neutral surface
+   and no second use of the accent. */
+.diffbar{
+  display:flex;
+  align-items:center;
+  gap:var(--sp-3);
+  padding:var(--pad-row);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  border:1px solid var(--border-default);
+  margin-bottom:var(--sp-3);
+}
+.diffbar .n{color:var(--text-body); font-weight:600}
+
+/* The reason a control server does not support one section, per FR-vacl-19. The dot
+   carries the warn state; the box stays a neutral surface, per docs/DESIGN.md. */
+.unsup{
+  display:flex;
+  gap:var(--sp-3);
+  align-items:flex-start;
+  padding:var(--pad-row);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  border:1px solid var(--border-default);
+}
+.unsup .dot{margin-top:5px; flex:none}
+.unsup .note{margin:0}
 
 /* The two sentences of the push come before the controls, because a warning comes before
    the step that it applies to. */
