@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { consoleRequestInit } from "../static/app.js";
 import {
   CONFLICT_STATUS,
   EVERY_DEVICE_STATEMENT,
@@ -19,6 +20,8 @@ import {
   PUSH_STATEMENT,
   actionsMarkup,
   actionsModel,
+  applyInputMemory,
+  createInputMemory,
   createPolicyState,
   diffSummary,
   editorMarkup,
@@ -50,6 +53,7 @@ import {
   toggleMarkup,
   toggleModel,
   validateErrors,
+  viewKey,
   visualMarkup,
 } from "../static/policy.js";
 
@@ -1496,6 +1500,27 @@ test("an Auto-approvers section with no route still draws the exit node row", ()
   assert.match(markup, /exit node/);
 });
 
+test("an Auto-approvers section with no route and no exit node approver states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ autoApprovers: {} }), "autoApprovers");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("an Auto-approvers section that holds one exit node approver states no empty state", () => {
+  const markup = visualMarkup(
+    sectionsBody({ autoApprovers: { exitNode: ["group:eng"] } }),
+    "autoApprovers",
+  );
+  assert.ok(!markup.includes("This section holds no entry"));
+});
+
+test("an Auto-approvers section that holds one route states no empty state", () => {
+  const markup = visualMarkup(
+    sectionsBody({ autoApprovers: { routes: { "10.0.0.0/8": [] } } }),
+    "autoApprovers",
+  );
+  assert.ok(!markup.includes("This section holds no entry"));
+});
+
 test("the Auto-approvers section escapes a hostile CIDR and a hostile approver", () => {
   const markup = visualMarkup(
     sectionsBody({ autoApprovers: { routes: { '"><script>': ['"><script>'] } } }),
@@ -1524,7 +1549,7 @@ test("addAutoApproverRoute adds a route through sections/edit, then re-reads sec
       section: "autoApprovers.routes",
       op: "add",
       key: "10.0.0.0/8",
-      entry: "[]",
+      entry: [],
     },
   });
   assert.equal(calls[1].route, policySectionsRoute("jbones"));
@@ -1548,7 +1573,7 @@ test("replaceAutoApproverRoute stages an approver added to a route's list", asyn
     section: "autoApprovers.routes",
     op: "replace",
     key: "10.0.0.0/8",
-    entry: '["tag:router"]',
+    entry: ["tag:router"],
   });
 });
 
@@ -1588,7 +1613,7 @@ test("setAutoApproverExitNode replaces the whole exit node approver list, and ca
     document: '{\n  "grants": [],\n}',
     section: "autoApprovers.exitNode",
     op: "replace",
-    entry: '["group:eng"]',
+    entry: ["group:eng"],
   });
 });
 
@@ -1758,7 +1783,7 @@ test("addSetEntry adds a posture through sections/edit, then re-reads sections",
       section: "postures",
       op: "add",
       key: "posture:latest",
-      entry: '["node:os == \'linux\'"]',
+      entry: ["node:os == 'linux'"],
     },
   });
   assert.equal(calls[1].route, policySectionsRoute("jbones"));
@@ -2079,7 +2104,7 @@ test("addSetEntry adds a key to Groups through sections/edit, then re-reads sect
       section: "groups",
       op: "add",
       key: "group:eng",
-      entry: '["carol@example.com"]',
+      entry: ["carol@example.com"],
     },
   });
   assert.equal(calls[1].route, policySectionsRoute("jbones"));
@@ -2145,8 +2170,70 @@ test("replaceSetValue replaces the member list of a Tag owners entry", async () 
     section: "tagOwners",
     op: "replace",
     key: "tag:prod",
-    entry: '["group:sre"]',
+    entry: ["group:sre"],
   });
+});
+
+// The tests below read the entry field from the wire format rather than from the body
+// object. A test that asserts the body object alone passes while the field holds array
+// text as a JSON string. Issue #348 is that defect. internal/api/policy.go reads Entry as
+// json.RawMessage, so the bytes decide whether the edit succeeds.
+
+// wireEntry returns the entry field as the daemon reads it. consoleRequestInit is the one
+// serializer of every console request, therefore a body that passes through it here
+// carries the exact bytes the browser sends. See internal/ui/static/app.js.
+function wireEntry(body) {
+  return JSON.parse(consoleRequestInit("POST", body).body).entry;
+}
+
+// editBody returns the request body of the sections/edit request that run sends.
+async function editBody(run) {
+  let sent = null;
+  const state = loaded(async (route, method, body) => {
+    if (route === policySectionsEditRoute("jbones")) {
+      sent = body;
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+  await run(state);
+  return sent;
+}
+
+test("addSetEntry sends a member list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.addSetEntry("jbones", "groups", "group:eng", ["carol@example.com"]));
+
+  assert.deepEqual(wireEntry(body), ["carol@example.com"]);
+});
+
+test("replaceSetValue sends a member list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.replaceSetValue("jbones", "tagOwners", "tag:prod", ["group:sre"]));
+
+  assert.deepEqual(wireEntry(body), ["group:sre"]);
+});
+
+test("replaceSetValue sends a host address that the daemon reads as a JSON string", async () => {
+  const body = await editBody((state) => state.replaceSetValue("jbones", "hosts", "server", "100.64.0.1"));
+
+  assert.equal(wireEntry(body), "100.64.0.1");
+});
+
+test("addAutoApproverRoute sends an approver list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.addAutoApproverRoute("jbones", "10.0.0.0/8", []));
+
+  assert.deepEqual(wireEntry(body), []);
+});
+
+test("replaceAutoApproverRoute sends an approver list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.replaceAutoApproverRoute("jbones", "10.0.0.0/8", ["tag:router"]));
+
+  assert.deepEqual(wireEntry(body), ["tag:router"]);
+});
+
+test("setAutoApproverExitNode sends an approver list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.setAutoApproverExitNode("jbones", ["group:eng"]));
+
+  assert.deepEqual(wireEntry(body), ["group:eng"]);
 });
 
 test("a refused section edit states the message and sends no second request", async () => {
@@ -2334,6 +2421,35 @@ test("the diagonal accepts no click", () => {
   assert.equal(matrixClickPlan(sections, "tag:laptop", "tag:laptop"), null);
 });
 
+test("the wildcard square is not inert, because * names every identity and not one identity", () => {
+  // Issue #349. A document whose one rule allows every path holds * on both axes, so the
+  // diagonal rule of FR-vacl-7 hides the one real square of the matrix.
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const square = squareAt(matrixModel(sections), "*", "*");
+
+  assert.equal(square.inert, false);
+  assert.equal(square.allowed, true);
+  assert.equal(square.label, "* to *, allowed");
+});
+
+test("the wildcard square carries the click data that the console binds", () => {
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.match(markup, /data-from="\*" data-to="\*"/);
+  assert.ok(!markup.includes("disabled"), markup);
+});
+
+test("a click on the wildcard square plans the removal of the rule that allows every path", () => {
+  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+
+  const plan = matrixClickPlan(sections, "*", "*");
+
+  assert.deepEqual(plan, { op: "remove", removals: [{ section: "grants", index: 0 }] });
+});
+
 test("a click on an empty square plans an acls entry that allows every port, per FR-vacl-8", () => {
   const sections = sectionsBody({ acls: [], grants: [] });
 
@@ -2440,6 +2556,31 @@ test("clicking a filled matrix square removes every matching entry, highest inde
   assert.equal(edits[0].body.document, documents[0]);
   assert.equal(edits[1].body.index, 0);
   assert.equal(edits[1].body.document, documents[1]);
+});
+
+test("clicking the wildcard square stages the removal of the rule that allows every path", async () => {
+  // Issue #349. The document of a tailnet that allows everything holds this one rule, so
+  // the wildcard square is the operator's only way to remove it.
+  const sent = [];
+  const readDocument = '{\n  "grants": [{"src":["*"],"dst":["*"],"ip":["*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: '{\n  "grants": [],\n}' };
+    }
+    return sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+  });
+  state.setText("jbones", readDocument);
+  await state.loadSections("jbones");
+
+  await state.stageMatrixClick("jbones", "*", "*");
+
+  const edits = sent.filter((one) => one.route.endsWith("/sections/edit"));
+  assert.equal(edits.length, 1);
+  assert.equal(edits[0].body.op, "remove");
+  assert.equal(edits[0].body.section, "grants");
+  assert.equal(edits[0].body.index, 0);
+  assert.equal(edits[0].body.document, readDocument);
 });
 
 // ---------------------------------------------------------------------------
@@ -2760,6 +2901,217 @@ test("push sends the whole staged document through the existing route, after a v
   assert.equal(puts.length, 1);
   assert.equal(puts[0].route, "/api/policy/jbones");
   assert.deepEqual(puts[0].body, { document: added, etag: "e0b2816b418" });
+});
+
+// ---------------------------------------------------------------------------
+// The input memory of the Visual editor
+// ---------------------------------------------------------------------------
+
+// fakeField is one field of the Visual editor, with the members that applyInputMemory
+// reads. The console has no build step and these tests hold no browser, therefore a test
+// builds the field rather than a document. type writes what an operator types.
+function fakeField(attributes) {
+  const handlers = new Map();
+  const start = (attributes.value || "").length;
+  const node = {
+    value: attributes.value || "",
+    selectionStart: start,
+    selectionEnd: start,
+    focused: false,
+    getAttribute: (name) => (name in attributes ? attributes[name] : null),
+    getAttributeNames: () => Object.keys(attributes),
+    addEventListener: (name, handler) => {
+      handlers.set(name, [...(handlers.get(name) || []), handler]);
+    },
+    fire: (name) => {
+      for (const handler of handlers.get(name) || []) {
+        handler();
+      }
+    },
+    focus: () => {
+      node.focused = true;
+      node.fire("focus");
+    },
+    setSelectionRange: (from, to) => {
+      node.selectionStart = from;
+      node.selectionEnd = to;
+    },
+    type: (text) => {
+      node.value = text;
+      node.selectionStart = text.length;
+      node.selectionEnd = text.length;
+      node.fire("input");
+    },
+  };
+  return node;
+}
+
+// fieldsOf reads every input and every select out of one markup string, in the order the
+// markup states them.
+function fieldsOf(markup) {
+  const fields = [];
+  for (const tag of markup.match(/<(?:input|select)\b[^>]*>/g) || []) {
+    const attributes = {};
+    for (const [, name, , quoted] of tag.matchAll(/([a-zA-Z0-9-]+)(="([^"]*)")?/g)) {
+      if (name === "input" || name === "select") {
+        continue;
+      }
+      attributes[name] = quoted === undefined ? "" : quoted;
+    }
+    fields.push(fakeField(attributes));
+  }
+  return fields;
+}
+
+// fakeEditor is one draw of the Visual editor. applyInputMemory asks it for the fields
+// alone, therefore querySelectorAll answers every field and reads no selector.
+function fakeEditor(markup) {
+  const fields = fieldsOf(markup);
+  return { fields, querySelectorAll: () => fields };
+}
+
+// addField returns the field that carries one add marker, for example data-add-key.
+function addField(editor, marker) {
+  return editor.fields.find((field) => field.getAttribute(marker) !== null);
+}
+
+// flush returns after every pending answer reached its caller.
+function flush() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+test("a draw returns the text that the operator typed into a Visual editor field", () => {
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(first, memory);
+  addField(first, "data-add-key").type("group:eng");
+  addField(first, "data-add-value").type("alice@example.com");
+
+  const second = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(second, memory);
+
+  assert.equal(addField(second, "data-add-key").value, "group:eng");
+  assert.equal(addField(second, "data-add-value").value, "alice@example.com");
+});
+
+test("a draw returns the focus and the caret of the operator", () => {
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(first, memory);
+  const typed = addField(first, "data-add-key");
+  typed.type("group:eng");
+  typed.setSelectionRange(6, 6);
+  typed.fire("keyup");
+
+  const second = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(second, memory);
+
+  const returned = addField(second, "data-add-key");
+  assert.equal(returned.focused, true);
+  assert.equal(returned.selectionStart, 6);
+  assert.equal(returned.selectionEnd, 6);
+  assert.equal(addField(second, "data-add-value").focused, false);
+});
+
+test("a draw returns the text of every section that the Visual editor draws", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "accept", src: ["group:admins"], dst: ["tag:server"], users: ["root"] }],
+    nodeAttrs: [{ target: ["tag:server"], attr: ["funnel"] }],
+    postures: { "posture:latest": ["node:os IN ['linux']"] },
+    autoApprovers: { routes: { "10.0.0.0/24": ["tag:router"] } },
+  });
+  const markers = {
+    groups: "data-add-key",
+    ssh: "data-add-src",
+    nodeAttrs: "data-add-target",
+    postures: "data-add-key",
+    autoApprovers: "data-add-cidr",
+  };
+
+  for (const [nav, marker] of Object.entries(markers)) {
+    const memory = createInputMemory();
+    const first = fakeEditor(visualMarkup(sections, nav));
+    applyInputMemory(first, memory);
+    assert.ok(addField(first, marker), `${nav} draws ${marker}`);
+    addField(first, marker).type("typed");
+
+    const second = fakeEditor(visualMarkup(sections, nav));
+    applyInputMemory(second, memory);
+
+    assert.equal(addField(second, marker).value, "typed", `${nav} keeps the text`);
+  }
+});
+
+test("a draw tells two fields that carry one marker apart, row by row", () => {
+  const sections = sectionsBody({
+    ssh: [
+      { action: "accept", src: ["group:admins"], dst: ["tag:server"], users: ["root"] },
+      { action: "accept", src: ["group:eng"], dst: ["tag:lab"], users: ["ubuntu"] },
+    ],
+  });
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sections, "ssh"));
+  applyInputMemory(first, memory);
+  const rows = first.fields.filter((field) => field.getAttribute("data-act") === "ssh-src");
+  assert.equal(rows.length, 2);
+  rows[1].type("group:ops");
+
+  const second = fakeEditor(visualMarkup(sections, "ssh"));
+  applyInputMemory(second, memory);
+
+  const drawn = second.fields.filter((field) => field.getAttribute("data-act") === "ssh-src");
+  assert.equal(drawn[0].value, "group:admins");
+  assert.equal(drawn[1].value, "group:ops");
+});
+
+test("an action that changes the state drops the text that the memory holds", () => {
+  const memory = createInputMemory();
+  const first = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(first, memory);
+  addField(first, "data-add-key").type("group:eng");
+
+  memory.forget();
+
+  const second = fakeEditor(visualMarkup(sectionsBody(), "groups"));
+  applyInputMemory(second, memory);
+
+  assert.equal(addField(second, "data-add-key").value, "");
+  assert.equal(addField(second, "data-add-key").focused, false);
+});
+
+test("the view key is equal for two draws of one state, and it differs after an edit", () => {
+  const state = loaded(async () => sectionsBody());
+  const key = () => viewKey(policyListMarkup(state.rows()), editorMarkup(editorModel(state, "jbones"), null));
+
+  const first = key();
+  assert.equal(key(), first);
+
+  state.setText("jbones", "{}");
+  assert.notEqual(key(), first);
+});
+
+test("a sections read that starts while another runs reads the text of the entry again", async () => {
+  const sent = [];
+  const waiting = [];
+  const state = loaded((route, method, body) => {
+    sent.push(body.document);
+    return new Promise((resolve) => waiting.push(() => resolve(sectionsBody({ hosts: { server: "100.64.0.1" } }))));
+  });
+  const base = state.entry("jbones").text;
+
+  const running = state.loadSections("jbones");
+  await flush();
+  state.setText("jbones", "{\n}");
+  await state.loadSections("jbones");
+  waiting.shift()();
+  await flush();
+
+  assert.deepEqual(sent, [base, "{\n}"]);
+
+  waiting.shift()();
+  await running;
+
+  assert.deepEqual(state.entry("jbones").sections.hosts, { server: "100.64.0.1" });
 });
 
 // pushed returns a state that staged one rule and pushed it. Each answer of

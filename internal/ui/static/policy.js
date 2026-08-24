@@ -943,6 +943,11 @@ function autoApproverExitNodeMarkup(approvers) {
  * CIDR and one row for the exit node, per FR-vadv-6. The operator adds a route CIDR
  * with an empty approver list, then adds an approver to it through the row, per
  * FR-vadv-7.
+ *
+ * The empty state reads the count of autoApproversCount, so the sentence and the count
+ * of the section nav agree. The exit node row is a control, not an entry: it stays on
+ * view when the section holds no entry, the same as the add control of a sibling
+ * section.
  */
 function autoApproversSectionMarkup(sections) {
   const autoApprovers = (sections && sections.autoApprovers) || {};
@@ -951,9 +956,11 @@ function autoApproversSectionMarkup(sections) {
   const routeRows = Object.entries(routes)
     .map(([cidr, approvers]) => autoApproverRouteMarkup(cidr, approvers))
     .join("");
+  const empty =
+    autoApproversCount(autoApprovers) === 0 ? `<p class="note">This section holds no entry.</p>` : "";
   const addFields = `<input type="text" class="field mono" data-add-cidr placeholder="CIDR" aria-label="New route CIDR">`;
   return (
-    `<div class="setlist" data-section="autoApprovers">${routeRows}${autoApproverExitNodeMarkup(exitNode)}` +
+    `<div class="setlist" data-section="autoApprovers">${routeRows}${autoApproverExitNodeMarkup(exitNode)}${empty}` +
     `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-route">Add a route</button></div>` +
     `</div>`
   );
@@ -1423,14 +1430,27 @@ function reachabilityPairs(sections) {
 }
 
 /**
+ * selfReference tells whether one square of the matrix names one identity on both axes.
+ *
+ * The wildcard * matches every identity, so a * row and a * column name the path from
+ * everything to everything. That path is a rule that the operator holds and removes, and
+ * not the self-reference that FR-editor-10 of features/07-console-access-editor.md calls
+ * not applicable.
+ */
+function selfReference(from, to) {
+  return from === to && from !== "*";
+}
+
+/**
  * matrixSquare returns one square of the reachability matrix.
  *
- * allowed holds the key "source destination" of every allowed path. The diagonal is
- * inert, in the manner of FR-editor-10 of features/07-console-access-editor.md, because
- * a path from one node to itself names nothing to allow or to deny.
+ * allowed holds the key "source destination" of every allowed path. A square that names
+ * one identity on both axes is inert, in the manner of FR-editor-10 of
+ * features/07-console-access-editor.md, because a path from one node to itself names
+ * nothing to allow or to deny.
  */
 function matrixSquare(from, to, allowed) {
-  const inert = from === to;
+  const inert = selfReference(from, to);
   const on = !inert && allowed.has(`${from} ${to}`);
   let label = `${from} to ${to}, no rule`;
   if (inert) {
@@ -1469,7 +1489,7 @@ export function matrixModel(sections) {
 
 /**
  * matrixClickPlan returns the edit that one click on a matrix square stages, and null
- * for the diagonal, per FR-vacl-7.
+ * for a square that names one identity on both axes, per FR-vacl-7.
  *
  * An empty square plans one acls entry that allows every port from the row's source to
  * the column's destination, per FR-vacl-8. A filled square plans the removal of every
@@ -1478,7 +1498,7 @@ export function matrixModel(sections) {
  * orders each section's removals from the highest index to the lowest.
  */
 export function matrixClickPlan(sections, from, to) {
-  if (from === to) {
+  if (selfReference(from, to)) {
     return null;
   }
   const acls = (sections && sections.acls) || [];
@@ -1512,7 +1532,7 @@ export function matrixClickPlan(sections, from, to) {
  * matrixMarkup returns the reachability matrix region.
  *
  * model is the value that matrixModel returned. The square is a button, so it reaches
- * focus by keyboard, and the diagonal carries the disabled attribute per FR-vacl-7. The
+ * focus by keyboard, and an inert square carries the disabled attribute per FR-vacl-7. The
  * console binds the click, the hover, the focus, and the blur handlers after it sets
  * this markup, because a handler that a string carries never runs.
  */
@@ -2164,7 +2184,10 @@ export function createPolicyState(options = {}) {
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last
         // attempt to open Visual, per FR-vacl-2, or the message of a failed edit to a
-        // named-set section. sectionsPending is true while a sections request runs.
+        // named-set section. sectionsPending is true while a sections request runs,
+        // sectionsSent holds the text of that request, and sectionsAgain is true when the
+        // text changed while the request ran, which asks loadSections for one more
+        // request.
         // nav names the named-set section (Groups, Hosts, Tag owners, IP sets) the
         // section nav shows, per FR-vacl-5, and pendingRemoval holds the removal that
         // FR-vacl-6 paused for confirmation, or null. baseSections holds the sections
@@ -2174,6 +2197,7 @@ export function createPolicyState(options = {}) {
         // or null before the first parse. push reads it to know whether sections
         // describes the document that the control server accepted.
         view: "text", sections: null, sectionsError: "", sectionsPending: false,
+        sectionsSent: "", sectionsAgain: false,
         nav: "", pendingRemoval: null, baseSections: null, sectionsText: null,
         // testsPending is true while the Tests section's Run action runs, and
         // testsAnswer holds its last answer, or null before a run. These fields sit
@@ -2197,6 +2221,38 @@ export function createPolicyState(options = {}) {
     entry.result = "";
     entry.sectionsError = "";
     entry.testsAnswer = null;
+  }
+
+  /**
+   * readSections sends the text of one entry to POST .../sections once, and it applies
+   * the answer that covers that text. An answer that covers text the entry no longer
+   * holds changes nothing, because loadSections sends one more request for the text that
+   * the entry holds now.
+   */
+  async function readSections(entry, id) {
+    const sent = entry.text;
+    entry.sectionsSent = sent;
+    try {
+      const answer = await request(policySectionsRoute(id), "POST", { document: sent });
+      if (entry.text !== sent) {
+        return;
+      }
+      entry.sections = answer;
+      entry.sectionsText = sent;
+      entry.sectionsError = "";
+      entry.view = "visual";
+      // sent equal to base means this answer describes the document the console read, so
+      // it doubles as the baseline the rule list compares against. This sends no second
+      // request; see the entry.baseSections field comment.
+      if (sent === entry.base) {
+        entry.baseSections = answer;
+      }
+    } catch (err) {
+      if (entry.text !== sent) {
+        return;
+      }
+      entry.sectionsError = messageOf(err);
+    }
   }
 
   return {
@@ -2336,9 +2392,10 @@ export function createPolicyState(options = {}) {
     },
 
     /** addSetEntry adds a new key to a named-set section, per FR-vacl-5. value is the
-     *  member list for every section but Hosts, and the address for Hosts. */
+     *  member list for every section but Hosts, and the address for Hosts. value passes
+     *  through as it is, because requestJSON serializes the whole body once. */
     addSetEntry(id, section, key, value) {
-      return this.editSection(id, section, "add", { key, entry: JSON.stringify(value) });
+      return this.editSection(id, section, "add", { key, entry: value });
     },
 
     /** renameSetEntry changes the key of one entry and keeps its value, per FR-vacl-5. */
@@ -2350,7 +2407,7 @@ export function createPolicyState(options = {}) {
      *  Adding or removing one member of a group, a tag owner mapping, or an IP set, and
      *  changing a host alias's address, each replace the whole value this way. */
     replaceSetValue(id, section, key, value) {
-      return this.editSection(id, section, "replace", { key, entry: JSON.stringify(value) });
+      return this.editSection(id, section, "replace", { key, entry: value });
     },
 
     /**
@@ -2397,39 +2454,37 @@ export function createPolicyState(options = {}) {
      * FR-vacl-3. On success, it switches the entry to the visual view and it holds the
      * parsed sections. On a parse failure, it keeps the entry on the text view and it
      * states the parse error inline, because the visual editor cannot draw a document
-     * it cannot parse. loadSections sends one request, and it sends no second request
-     * while the previous one runs.
+     * it cannot parse. loadSections holds one request at a time, and it starts no second
+     * request while the first one runs.
      * The operator edits the text while the request runs, therefore loadSections reads
      * the text again when the answer arrives. A text that changed applies neither the
      * sections nor the error of the stale answer.
+     * A second call of loadSections that carries a text the running request does not
+     * cover makes the running request send one more request, for the text that the entry
+     * holds now. editSection makes that second call after it stages an edit, therefore an
+     * edit that the operator stages while a read runs reaches the sections, rather than
+     * leaving the section nav on the state of the document before that edit.
+     * A keystroke of the Text editor makes no such call, because the console starts no
+     * request of its own; the operator reaches the sections again through the Visual
+     * control.
      */
     async loadSections(id) {
       const entry = entryOf(id);
       if (entry.sectionsPending) {
+        // The running request covers the text of this call when the two texts are equal,
+        // therefore a second request states nothing more. A text that differs asks the
+        // running request for one more request instead.
+        if (entry.text !== entry.sectionsSent) {
+          entry.sectionsAgain = true;
+        }
         return;
       }
-      const sent = entry.text;
       entry.sectionsPending = true;
       try {
-        const answer = await request(policySectionsRoute(id), "POST", { document: sent });
-        if (entry.text !== sent) {
-          return;
-        }
-        entry.sections = answer;
-        entry.sectionsText = sent;
-        entry.sectionsError = "";
-        entry.view = "visual";
-        // sent equal to base means this answer describes the document the console
-        // read, so it doubles as the baseline the rule list compares against. This
-        // sends no second request; see the entry.baseSections field comment.
-        if (sent === entry.base) {
-          entry.baseSections = answer;
-        }
-      } catch (err) {
-        if (entry.text !== sent) {
-          return;
-        }
-        entry.sectionsError = messageOf(err);
+        do {
+          entry.sectionsAgain = false;
+          await readSections(entry, id);
+        } while (entry.sectionsAgain);
       } finally {
         entry.sectionsPending = false;
       }
@@ -2444,7 +2499,7 @@ export function createPolicyState(options = {}) {
      * request per removal for a remove, each one against the document text that the
      * previous request returned, because /sections/edit is stateless and every request
      * after the first must see the earlier request's result. It sends no request for
-     * the diagonal. After the last edit, it reads the sections again, per the Interfaces
+     * an inert square. After the last edit, it reads the sections again, per the Interfaces
      * section of features/12-visual-acl-editor.md.
      */
     async stageMatrixClick(id, from, to) {
@@ -2529,13 +2584,13 @@ export function createPolicyState(options = {}) {
     /** addAutoApproverRoute adds one route to the auto-approvers section, keyed by
      *  cidr, per FR-vadv-6 and FR-vadv-7. */
     addAutoApproverRoute(id, cidr, approvers) {
-      return this.editSection(id, "autoApprovers.routes", "add", { key: cidr, entry: JSON.stringify(approvers) });
+      return this.editSection(id, "autoApprovers.routes", "add", { key: cidr, entry: approvers });
     },
 
     /** replaceAutoApproverRoute replaces the approver list of one route, keeping its
      *  cidr, per FR-vadv-7. */
     replaceAutoApproverRoute(id, cidr, approvers) {
-      return this.editSection(id, "autoApprovers.routes", "replace", { key: cidr, entry: JSON.stringify(approvers) });
+      return this.editSection(id, "autoApprovers.routes", "replace", { key: cidr, entry: approvers });
     },
 
     /** removeAutoApproverRoute removes one route from the auto-approvers section, per
@@ -2548,7 +2603,7 @@ export function createPolicyState(options = {}) {
      *  FR-vadv-7. The exit node carries no key, because it is a single field rather
      *  than a keyed collection. */
     setAutoApproverExitNode(id, approvers) {
-      return this.editSection(id, "autoApprovers.exitNode", "replace", { entry: JSON.stringify(approvers) });
+      return this.editSection(id, "autoApprovers.exitNode", "replace", { entry: approvers });
     },
 
     /** loadList reads GET /api/policy. */
@@ -2712,6 +2767,135 @@ export function createPolicyState(options = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The input memory. It keeps the input of the operator across one draw.
+// ---------------------------------------------------------------------------
+
+/** FIELD_SELECTOR names every control of the Visual editor that holds operator input. It
+ *  names no textarea, because the Text editor keeps its text in the state. */
+const FIELD_SELECTOR = "input, select";
+
+/**
+ * viewKey states one draw of the policy view in one string.
+ *
+ * The two markup strings read the state alone, therefore two draws of one state produce
+ * one key. draw compares the key of the tick to the key of the draw that the section
+ * holds, and it builds no element when the two are equal.
+ */
+export function viewKey(listMarkup, editorMarkup) {
+  return `${listMarkup}\n${editorMarkup}`;
+}
+
+/**
+ * createInputMemory holds the text that the operator typed into the Visual editor, and the
+ * field and the caret that the operator holds.
+ *
+ * The memory keys a field by its marker and by its position among the fields that carry
+ * that marker, because a section draws one marker per row. A draw of one state draws the
+ * same fields in the same order, therefore the key of a field is the same across that
+ * draw. forget drops every value, and every action that changes the state calls it.
+ */
+export function createInputMemory() {
+  let values = new Map();
+  let held = null;
+  return {
+    /** hold takes the text of one field. */
+    hold(key, value) {
+      values.set(key, value);
+    },
+
+    /** holdFocus takes the field and the caret of the operator. */
+    holdFocus(key, start, end) {
+      held = { key, start, end };
+    },
+
+    /** value returns the text of one field, or null when the memory holds none. */
+    value(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+
+    /** focus returns the field and the caret of the operator, or null. */
+    focus() {
+      return held;
+    },
+
+    /** forget drops every value and the caret. */
+    forget() {
+      values = new Map();
+      held = null;
+    },
+  };
+}
+
+/**
+ * fieldMarker states what one field of the Visual editor is, out of the attributes that
+ * the markup already carries. Two rows of one section carry one marker.
+ *
+ * The marker names no entry, therefore applyInputMemory tells two rows apart by the
+ * position of the field alone. namedSetEntries sorts the entries, so an add, a rename, or
+ * a removal moves a row to another position. Every one of those actions runs through
+ * runAction, which calls forget before the answer arrives, therefore the memory holds no
+ * key of the old order. An action that changes the entry list and calls no forget breaks
+ * that, and the memory then returns the text of one entry into the row of another.
+ */
+function fieldMarker(node) {
+  const act = node.getAttribute("data-act");
+  if (act) {
+    return `act:${act}`;
+  }
+  const add = node.getAttributeNames().find((name) => name.startsWith("data-add-"));
+  return add || `class:${node.getAttribute("class") || ""}`;
+}
+
+/**
+ * applyInputMemory binds every field of one draw to the memory, and it returns the text
+ * and the caret that the memory holds.
+ *
+ * container holds the fields of the draw that the view built. The memory takes the text of
+ * a field on three events of the operator:
+ * - an input,
+ * - a key,
+ * - a focus.
+ * The memory therefore holds text that no request carries yet. The restore itself moves
+ * the focus, therefore it takes nothing while it runs.
+ */
+export function applyInputMemory(container, memory) {
+  const ordinals = new Map();
+  const held = memory.focus();
+  let restoring = false;
+
+  for (const node of container.querySelectorAll(FIELD_SELECTOR)) {
+    const marker = fieldMarker(node);
+    const ordinal = ordinals.get(marker) || 0;
+    ordinals.set(marker, ordinal + 1);
+    const key = `${marker}#${ordinal}`;
+
+    const note = () => {
+      if (restoring) {
+        return;
+      }
+      memory.hold(key, node.value);
+      memory.holdFocus(key, node.selectionStart, node.selectionEnd);
+    };
+    node.addEventListener("input", note);
+    node.addEventListener("keyup", note);
+    node.addEventListener("focus", note);
+
+    const text = memory.value(key);
+    if (text !== null && text !== node.value) {
+      node.value = text;
+    }
+    if (held && held.key === key) {
+      restoring = true;
+      node.focus();
+      if (node.setSelectionRange && typeof held.start === "number") {
+        node.setSelectionRange(held.start, held.end);
+      }
+      restoring = false;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The drawing. Everything below this line needs a document.
 // ---------------------------------------------------------------------------
 
@@ -2728,6 +2912,25 @@ let listError = "";
 // caret holds the position of the operator inside the editor. A poll draws the region
 // again, therefore the view returns the focus and the position that the poll took.
 let caret = null;
+
+// inputs holds the text of every Visual editor field that the operator did not stage yet.
+// The Text editor keeps its text in the state, therefore the caret alone returns it. A
+// Visual editor field keeps its text nowhere but the field, therefore a draw that builds
+// the field again drops that text unless the memory returns it.
+const inputs = createInputMemory();
+
+// painted is the key of the draw that the section holds now. A poll draws on a timer, and
+// the draw reads the state alone, therefore a tick that changes no state produces the same
+// key. The view builds no element on such a tick, so it moves no field under the pointer
+// of the operator and it drops no click.
+let painted = null;
+
+/** forget drops the position and the text that the operator held. An action that changes
+ *  the state calls it, because the next draw states the result of that action. */
+function forget() {
+  caret = null;
+  inputs.forget();
+}
 
 /** element builds one element with a class and a text. */
 function element(tag, className, text) {
@@ -2783,7 +2986,7 @@ function bindRows(holder) {
   for (const row of holder.querySelectorAll("[data-id]")) {
     const id = row.getAttribute("data-id");
     const open = () => {
-      caret = null;
+      forget();
       state.open(id).then(redraw);
       redraw();
     };
@@ -2805,7 +3008,7 @@ function bindRows(holder) {
  * repeats no request that failed.
  */
 function runAction(work) {
-  caret = null;
+  forget();
   redraw();
   work.then(redraw);
 }
@@ -2818,7 +3021,7 @@ function bindActions(holder, id) {
     reread: () => runAction(state.reread(id)),
     discard: () => {
       state.discard(id);
-      caret = null;
+      forget();
       redraw();
     },
   };
@@ -2841,7 +3044,7 @@ function bindToggle(holder, id) {
     button.addEventListener("click", () => {
       if (view === "text") {
         state.setView(id, "text");
-        caret = null;
+        forget();
         redraw();
         return;
       }
@@ -2884,7 +3087,7 @@ function bindSectionNav(holder, id) {
     const nav = row.getAttribute("data-nav");
     const select = () => {
       state.selectNav(id, nav);
-      caret = null;
+      forget();
       redraw();
     };
     row.addEventListener("click", select);
@@ -2949,7 +3152,7 @@ function bindNamedSetList(holder, id) {
     if (cancelButton) {
       cancelButton.addEventListener("click", () => {
         state.cancelRemoval(id);
-        caret = null;
+        forget();
         redraw();
       });
     }
@@ -3132,7 +3335,7 @@ function bindApproverList(holder, current, replace) {
  *
  * The square is a button, so the pointer and the keyboard both reach it. Hovering or
  * focusing a square marks its row label and its column label alone, per FR-vacl-7, and
- * a click stages the add or the remove that matrixClickPlan names. The diagonal carries
+ * a click stages the add or the remove that matrixClickPlan names. An inert square carries
  * no data-from attribute, so bindMatrix wires it to no handler.
  */
 function bindMatrix(holder, id) {
@@ -3229,12 +3432,20 @@ function bindEditor(holder, id) {
  * The snapshot states which tailnets the daemon declares. The document of one tailnet
  * comes from GET /api/policy/{id}, which reaches the control server, therefore the view
  * reads it on a selection alone.
+ *
+ * The markup of the view reads the state alone, therefore a poll that changes no state
+ * draws the same markup. draw compares that markup to the markup that the section holds,
+ * and it builds no element when the two are equal. It therefore keeps the field that the
+ * operator types into, and it keeps the control that the operator presses, per FR-vacl-1.
+ * A draw that does build the region again returns the input of the operator out of the
+ * memory, because a field of the Visual editor keeps its text nowhere but the field.
  */
 function draw(section, snapshot) {
   redraw = () => draw(section, snapshot);
-  section.replaceChildren();
 
   if (snapshot.loading) {
+    painted = null;
+    section.replaceChildren();
     const card = element("div", "card");
     card.append(element("span", "label", "Loading"));
     card.append(element("p", "note", "The first poll has not returned."));
@@ -3245,6 +3456,8 @@ function draw(section, snapshot) {
   readList(snapshot);
 
   if (listError) {
+    painted = null;
+    section.replaceChildren();
     const card = element("div", "card");
     card.append(element("span", "label", "Policy"));
     card.append(element("p", "note", "The daemon did not answer the policy list."));
@@ -3254,6 +3467,8 @@ function draw(section, snapshot) {
   }
 
   if (state.body() === null) {
+    painted = null;
+    section.replaceChildren();
     const card = element("div", "card");
     card.append(element("span", "label", "Loading"));
     card.append(element("p", "note", "The console reads the policy list."));
@@ -3263,6 +3478,8 @@ function draw(section, snapshot) {
 
   const empty = emptyStatement(state.body());
   if (empty) {
+    painted = null;
+    section.replaceChildren();
     const card = element("div", "card empty");
     card.append(element("span", "label", "Empty"));
     card.append(element("p", undefined, empty));
@@ -3270,22 +3487,31 @@ function draw(section, snapshot) {
     return;
   }
 
+  const selected = state.selected();
+  const model = editorModel(state, selected);
+  const toggle = selected ? toggleModel(state, selected) : null;
+  const listMarkup = policyListMarkup(state.rows());
+  const mainMarkup = editorMarkup(model, toggle);
+  const key = viewKey(listMarkup, mainMarkup);
+  if (key === painted && section.firstChild) {
+    return;
+  }
+  painted = key;
+  section.replaceChildren();
+
   const grid = element("div", "pol-grid");
 
   // The serializer escapes every value that the daemon reported, and a test asserts that.
   const list = element("div", "pol-side");
-  list.innerHTML = policyListMarkup(state.rows());
+  list.innerHTML = listMarkup;
   bindRows(list);
   grid.append(list);
 
   const editor = element("div", "pol-main");
-  const selected = state.selected();
-  const model = editorModel(state, selected);
-  editor.innerHTML = editorMarkup(model, selected ? toggleModel(state, selected) : null);
+  editor.innerHTML = mainMarkup;
   if (selected) {
     bindToggle(editor, selected);
     bindMatrix(editor, selected);
-    const toggle = toggleModel(state, selected);
     if (toggle.sections) {
       bindRuleList(editor, selected, ruleRows(toggle.sections, toggle.baseSections));
     }
@@ -3304,6 +3530,11 @@ function draw(section, snapshot) {
   grid.append(editor);
 
   section.append(grid);
+
+  // The memory moves the focus, therefore it runs after the section holds the region.
+  if (selected && model.state === "document") {
+    applyInputMemory(editor, inputs);
+  }
 }
 
 registerView("policy", draw);
