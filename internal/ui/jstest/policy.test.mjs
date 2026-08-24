@@ -26,6 +26,7 @@ import {
   matrixClickPlan,
   matrixMarkup,
   matrixModel,
+  namedSetEntries,
   parseRulePorts,
   policyDocumentRoute,
   policyListMarkup,
@@ -34,6 +35,8 @@ import {
   policySectionsRoute,
   policyValidateRoute,
   readFailure,
+  referencingRules,
+  referencingSentence,
   removeGrantCapability,
   renameGrantCapability,
   resultMarkup,
@@ -1251,6 +1254,285 @@ test("the editor draws no toggle before a tailnet is selected", () => {
 
   const markup = editorMarkup(entryOf(state, null));
   assert.ok(!markup.includes('role="tablist"'), markup);
+});
+
+// ---------------------------------------------------------------------------
+// The section nav: Groups, Hosts, Tag owners, IP sets (#315, FR-vacl-4, FR-vacl-5)
+// ---------------------------------------------------------------------------
+
+test("namedSetEntries returns one pair per key, in sorted order", () => {
+  const sections = sectionsBody({ groups: { "group:eng": ["b"], "group:admins": ["a"] } });
+  assert.deepEqual(namedSetEntries(sections, "groups"), [
+    ["group:admins", ["a"]],
+    ["group:eng", ["b"]],
+  ]);
+});
+
+test("namedSetEntries returns an empty list for a section the answer holds none of", () => {
+  assert.deepEqual(namedSetEntries(sectionsBody({ groups: {} }), "groups"), []);
+});
+
+test("the section nav marks the selected section, and Rules is selected by default", () => {
+  const defaultMarkup = visualMarkup(sectionsBody());
+  assert.match(defaultMarkup, /data-nav="rules" aria-selected="true"/);
+  assert.match(defaultMarkup, /data-nav="groups" aria-selected="false"/);
+
+  const groupsMarkup = visualMarkup(sectionsBody(), "groups");
+  assert.match(groupsMarkup, /data-nav="groups" aria-selected="true"/);
+  assert.match(groupsMarkup, /data-nav="hosts" aria-selected="false"/);
+  assert.match(groupsMarkup, /data-nav="rules" aria-selected="false"/);
+});
+
+test("the section nav draws the matrix, not a named-set entry list, before the operator selects a named-set section", () => {
+  const markup = visualMarkup(sectionsBody());
+  assert.ok(markup.includes("ac-matrix"));
+  assert.ok(!markup.includes("setlist"));
+});
+
+test("the Rules row reopens the matrix after a named-set section was open", () => {
+  const markup = visualMarkup(sectionsBody(), "rules");
+  assert.ok(markup.includes("ac-matrix"));
+  assert.ok(!markup.includes("setlist"));
+});
+
+test("Rules draws the matrix and the rule list together, per the mockup", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+
+  const markup = visualMarkup(sections);
+  assert.ok(markup.includes("ac-matrix"));
+  assert.ok(markup.includes("ac-rulelist"));
+  assert.ok(markup.indexOf("ac-matrix") < markup.indexOf("ac-rulelist"), "the matrix comes before the rule list");
+  assert.match(markup, /tag:laptop/);
+});
+
+test("switching to a named-set section replaces the matrix and the rule list, not just the matrix", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+
+  const markup = visualMarkup(sections, "groups");
+  assert.ok(!markup.includes("ac-matrix"));
+  assert.ok(!markup.includes("ac-rulelist"));
+  assert.ok(markup.includes("setlist"));
+});
+
+test("the Groups section lists every group and its members", () => {
+  const markup = visualMarkup(
+    sectionsBody({ groups: { "group:admins": ["alice@example.com", "bob@example.com"] } }),
+    "groups",
+  );
+  assert.match(markup, /value="group:admins"/);
+  assert.match(markup, /alice@example\.com/);
+  assert.match(markup, /bob@example\.com/);
+});
+
+test("the Hosts section shows the address of each alias as a field, not a member list", () => {
+  const markup = visualMarkup(sectionsBody({ hosts: { server: "100.64.0.1" } }), "hosts");
+  assert.match(markup, /value="100\.64\.0\.1"/);
+  assert.ok(!markup.includes("setmembers"));
+});
+
+test("a section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ groups: {} }), "groups");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the section nav escapes a hostile group name and member", () => {
+  const markup = visualMarkup(sectionsBody({ groups: { '"><script>': ['"><script>'] } }), "groups");
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("referencingRules finds a group or a tag named in an acls or a grants src or dst", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["group:admins"], dst: ["tag:server"] }],
+    grants: [{ src: ["group:eng"], dst: ["tag:db"] }],
+  });
+  assert.deepEqual(referencingRules(sections, "group:admins"), [
+    { section: "acls", src: "group:admins", dst: "tag:server" },
+  ]);
+  assert.deepEqual(referencingRules(sections, "tag:db"), [
+    { section: "grants", src: "group:eng", dst: "tag:db" },
+  ]);
+  assert.deepEqual(referencingRules(sections, "group:none"), []);
+});
+
+test("referencingSentence names each referencing rule and states that removal keeps it", () => {
+  const sentence = referencingSentence([{ section: "acls", src: "group:admins", dst: "tag:server" }]);
+  assert.match(sentence, /One rule references this entry/);
+  assert.match(sentence, /acls: group:admins to tag:server/);
+  assert.match(sentence, /does not remove the rule/);
+});
+
+test("referencingSentence is empty for no referencing rule", () => {
+  assert.equal(referencingSentence([]), "");
+});
+
+test("addSetEntry adds a key to Groups through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ groups: { "group:eng": ["carol@example.com"] } });
+  });
+
+  await state.addSetEntry("jbones", "groups", "group:eng", ["carol@example.com"]);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "groups",
+      op: "add",
+      key: "group:eng",
+      entry: '["carol@example.com"]',
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.equal(entryOf(state, "jbones").text, "the edited text");
+  assert.deepEqual(toggleModel(state, "jbones").sections.groups, { "group:eng": ["carol@example.com"] });
+});
+
+test("renameSetEntry changes the key of a Hosts alias and keeps its address", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+
+  await state.renameSetEntry("jbones", "hosts", "server", "primary-server");
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "hosts",
+    op: "rename",
+    key: "server",
+    new_key: "primary-server",
+  });
+});
+
+test("removeSetEntry removes an IP set entry at once, because FR-vacl-6 checks a group and a tag alone", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+
+  await state.removeSetEntry("jbones", "ipsets", "internal");
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "ipsets",
+    op: "remove",
+    key: "internal",
+  });
+});
+
+test("replaceSetValue replaces the member list of a Tag owners entry", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+
+  await state.replaceSetValue("jbones", "tagOwners", "tag:prod", ["group:sre"]);
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "tagOwners",
+    op: "replace",
+    key: "tag:prod",
+    entry: '["group:sre"]',
+  });
+});
+
+test("a refused section edit states the message and sends no second request", async () => {
+  const calls = [];
+  const state = loaded(async (route) => {
+    calls.push(route);
+    throw refusal(400, 'section "groups" already holds key "group:admins"');
+  });
+
+  await state.addSetEntry("jbones", "groups", "group:admins", ["a"]);
+
+  assert.equal(calls.length, 1);
+  assert.equal(toggleModel(state, "jbones").error, 'section "groups" already holds key "group:admins"');
+});
+
+test("selectNav opens and closes a named-set section, and it sends no request", async () => {
+  const state = loaded(async () => sectionsBody());
+
+  state.selectNav("jbones", "groups");
+  assert.equal(toggleModel(state, "jbones").nav, "groups");
+
+  state.selectNav("jbones", "groups");
+  assert.equal(toggleModel(state, "jbones").nav, "");
+});
+
+test("removing a tag that a rule references states which rule references it, and removes neither on its own", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+  state.entry("jbones").sections = sectionsBody({
+    tagOwners: { "tag:prod": ["group:sre"] },
+    acls: [{ action: "accept", src: ["group:sre"], dst: ["tag:prod"] }],
+  });
+
+  await state.removeSetEntry("jbones", "tagOwners", "tag:prod");
+
+  assert.equal(calls.length, 0, "removeSetEntry sent a request before the operator confirmed it");
+  const toggle = toggleModel(state, "jbones");
+  assert.ok(toggle.pendingRemoval);
+  assert.equal(toggle.pendingRemoval.key, "tag:prod");
+  assert.equal(toggle.pendingRemoval.rules.length, 1);
+  assert.equal(toggle.pendingRemoval.rules[0].section, "acls");
+
+  const markup = visualMarkup(toggle.sections, "tagOwners", toggle.pendingRemoval);
+  assert.match(markup, /One rule references this entry/);
+  assert.match(markup, /Remove anyway/);
+
+  await state.confirmRemoval("jbones");
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "tagOwners",
+    op: "remove",
+    key: "tag:prod",
+  });
+  assert.equal(toggleModel(state, "jbones").pendingRemoval, null);
+});
+
+test("cancelRemoval discards a paused removal and sends no request", () => {
+  const state = loaded(async () => sectionsBody());
+  state.entry("jbones").sections = sectionsBody({
+    tagOwners: { "tag:prod": ["group:sre"] },
+    acls: [{ action: "accept", src: ["group:sre"], dst: ["tag:prod"] }],
+  });
+
+  state.removeSetEntry("jbones", "tagOwners", "tag:prod");
+  assert.ok(toggleModel(state, "jbones").pendingRemoval);
+
+  state.cancelRemoval("jbones");
+  assert.equal(toggleModel(state, "jbones").pendingRemoval, null);
 });
 
 // ---------------------------------------------------------------------------

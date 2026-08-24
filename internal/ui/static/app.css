@@ -732,9 +732,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .seg button:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-parse-error{color:var(--crit)}
 
-/* The visual editor's section counts. #315 to #317 replace this with the matrix, the
-   rule list, and the named-set editors; this issue proves the toggle re-parses and
-   re-renders on every switch. */
+/* The visual editor's section nav and its Groups, Hosts, Tag owners, and IP sets
+   editors. #316 adds the matrix and the rule list that the Rules row opens. */
 .pol-visual{margin-top:var(--sp-3)}
 .pol-visual .setrow{
   display:flex;
@@ -747,6 +746,36 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 }
 .pol-visual .setrow + .setrow{margin-top:var(--sp-2)}
 .pol-visual .name{color:var(--text-secondary)}
+.pol-visual .setrow[role="button"]{cursor:pointer}
+.pol-visual .setrow[role="button"]:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.pol-visual .setrow.selected{border:1px solid var(--accent)}
+
+.setlist{margin-top:var(--sp-3); display:flex; flex-direction:column; gap:var(--sp-3)}
+.setentry{
+  border:1px solid var(--border-default);
+  border-radius:var(--r);
+  padding:var(--sp-3);
+  display:flex;
+  flex-direction:column;
+  gap:var(--sp-2);
+}
+.setentry-head{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+.setentry-key{flex:1; min-width:8ch}
+.setentry-value{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+.setentry-address{flex:1; min-width:8ch}
+.setmembers{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
+.setmember-remove{
+  background:none;
+  border:none;
+  color:var(--text-tertiary);
+  cursor:pointer;
+  padding:0 0 0 var(--sp-2);
+  font:inherit;
+}
+.setmember-remove:hover{color:var(--text-body)}
+.setmember-remove:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.setremove-confirm{display:flex; flex-direction:column; gap:var(--sp-2); align-items:flex-start}
+.setadd{display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap}
 
 /* The two sentences of the push come before the controls, because a warning comes before
    the step that it applies to. */
