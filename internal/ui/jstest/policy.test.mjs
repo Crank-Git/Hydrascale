@@ -723,6 +723,37 @@ test("a failed test states that the control server takes no such document", asyn
   assert.match(result.sentence, /accepts no document whose test fails/);
 });
 
+test("a warning leaves Push enabled and names the answer as a warning", async () => {
+  const body = '{"message":"warning(s) found","data":[{"user":"group:unknown@example.com","warnings":["group is not syncing from SCIM and will be ignored by rules in the policy file"]}]}';
+  const state = loaded(async () => ({ passed: true, warning: true, result: body }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+
+  const result = resultModel(model);
+  assert.equal(result.word, "warning");
+  assert.equal(result.tone, "warn");
+  assert.match(result.sentence, /accepted the document/);
+  assert.equal(result.message, body);
+  assert.match(resultMarkup(result), /<span class="dot warn"><\/span>/);
+});
+
+test("a validate that passes after a warning clears the warning", async () => {
+  let answer = { passed: true, warning: true, result: '{"message":"warning(s) found"}' };
+  const state = loaded(async () => answer);
+
+  await state.validate("jbones");
+  answer = { passed: true, result: "" };
+  await state.validate("jbones");
+
+  const result = resultModel(entryOf(state, "jbones"));
+  assert.equal(result.word, "validated");
+  assert.equal(result.tone, "ok");
+});
+
 test("a document error states the rejection rather than a failed test", async () => {
   const body = '{"message":"line 3: unknown field \\"acl\\""}';
   const state = loaded(async () => ({ passed: false, result: body }));

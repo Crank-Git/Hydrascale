@@ -70,10 +70,14 @@ type TextDocument struct {
 // TestsFailed is true when an assertion of the tests section failed, and false when the
 // control server refused the document itself. The console states a different reason for
 // each, per FR-vadv-16.
+// Warning is true when the control server accepted the document and it stated a warning.
+// Passed is also true then, because the control server accepts a write of that document,
+// per FR-vadv-18.
 type ValidateResult struct {
 	Passed      bool
 	Body        string
 	TestsFailed bool
+	Warning     bool
 }
 
 // testsFailedMessage is the message that the validate endpoint states when an assertion
@@ -82,6 +86,12 @@ type ValidateResult struct {
 // "warning(s) found", retrieved 2026-08-24. A message outside this set reaches the
 // console as a document error, which states the answer of the control server verbatim.
 const testsFailedMessage = "test(s) failed"
+
+// warningMessage is the message that the validate endpoint states when the document is
+// valid and it holds a warning. The OpenAPI schema of operationId
+// validateAndTestPolicyFile names this value, retrieved 2026-08-24. The write route
+// accepts such a document, therefore this message marks no rejection.
+const warningMessage = "warning(s) found"
 
 // TailscaleClient reads, validates, and writes the policy of one Tailscale tailnet.
 //
@@ -192,10 +202,13 @@ func (c *TailscaleClient) ValidatePolicy(ctx context.Context, document string) (
 	// A non-2xx status reaches send, which returns an error, therefore this point holds
 	// status 200 alone. The control server states a failed assertion at status 200, and it
 	// refuses a malformed document with status 400.
+	message := strings.TrimSpace(answer.Message)
+	warning := message == warningMessage
 	return ValidateResult{
-		Passed:      answer.Message == "",
+		Passed:      answer.Message == "" || warning,
 		Body:        body,
-		TestsFailed: strings.TrimSpace(answer.Message) == testsFailedMessage,
+		TestsFailed: message == testsFailedMessage,
+		Warning:     warning,
 	}, nil
 }
 
