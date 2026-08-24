@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { consoleRequestInit } from "../static/app.js";
 import {
   CONFLICT_STATUS,
   EVERY_DEVICE_STATEMENT,
@@ -1502,7 +1503,7 @@ test("addAutoApproverRoute adds a route through sections/edit, then re-reads sec
       section: "autoApprovers.routes",
       op: "add",
       key: "10.0.0.0/8",
-      entry: "[]",
+      entry: [],
     },
   });
   assert.equal(calls[1].route, policySectionsRoute("jbones"));
@@ -1526,7 +1527,7 @@ test("replaceAutoApproverRoute stages an approver added to a route's list", asyn
     section: "autoApprovers.routes",
     op: "replace",
     key: "10.0.0.0/8",
-    entry: '["tag:router"]',
+    entry: ["tag:router"],
   });
 });
 
@@ -1566,7 +1567,7 @@ test("setAutoApproverExitNode replaces the whole exit node approver list, and ca
     document: '{\n  "grants": [],\n}',
     section: "autoApprovers.exitNode",
     op: "replace",
-    entry: '["group:eng"]',
+    entry: ["group:eng"],
   });
 });
 
@@ -1736,7 +1737,7 @@ test("addSetEntry adds a posture through sections/edit, then re-reads sections",
       section: "postures",
       op: "add",
       key: "posture:latest",
-      entry: '["node:os == \'linux\'"]',
+      entry: ["node:os == 'linux'"],
     },
   });
   assert.equal(calls[1].route, policySectionsRoute("jbones"));
@@ -2012,7 +2013,7 @@ test("addSetEntry adds a key to Groups through sections/edit, then re-reads sect
       section: "groups",
       op: "add",
       key: "group:eng",
-      entry: '["carol@example.com"]',
+      entry: ["carol@example.com"],
     },
   });
   assert.equal(calls[1].route, policySectionsRoute("jbones"));
@@ -2078,8 +2079,70 @@ test("replaceSetValue replaces the member list of a Tag owners entry", async () 
     section: "tagOwners",
     op: "replace",
     key: "tag:prod",
-    entry: '["group:sre"]',
+    entry: ["group:sre"],
   });
+});
+
+// The tests below read the entry field off the wire rather than out of the body object.
+// A test that asserts the body object alone passes while the field carries a string that
+// holds array text, which is the defect of issue #348. internal/api/policy.go reads Entry
+// as json.RawMessage, so the bytes are what decides whether the edit succeeds.
+
+// wireEntry returns the entry field as the daemon reads it. consoleRequestInit is the one
+// serializer of every console request, therefore a body that passes through it here
+// carries the exact bytes the browser sends. See internal/ui/static/app.js.
+function wireEntry(body) {
+  return JSON.parse(consoleRequestInit("POST", body).body).entry;
+}
+
+// editBody returns the request body of the sections/edit request that run sends.
+async function editBody(run) {
+  let sent = null;
+  const state = loaded(async (route, method, body) => {
+    if (route === policySectionsEditRoute("jbones")) {
+      sent = body;
+      return { document: "the edited text" };
+    }
+    return sectionsBody();
+  });
+  await run(state);
+  return sent;
+}
+
+test("addSetEntry sends a member list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.addSetEntry("jbones", "groups", "group:eng", ["carol@example.com"]));
+
+  assert.deepEqual(wireEntry(body), ["carol@example.com"]);
+});
+
+test("replaceSetValue sends a member list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.replaceSetValue("jbones", "tagOwners", "tag:prod", ["group:sre"]));
+
+  assert.deepEqual(wireEntry(body), ["group:sre"]);
+});
+
+test("replaceSetValue sends a host address that the daemon reads as a JSON string", async () => {
+  const body = await editBody((state) => state.replaceSetValue("jbones", "hosts", "server", "100.64.0.1"));
+
+  assert.equal(wireEntry(body), "100.64.0.1");
+});
+
+test("addAutoApproverRoute sends an approver list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.addAutoApproverRoute("jbones", "10.0.0.0/8", []));
+
+  assert.deepEqual(wireEntry(body), []);
+});
+
+test("replaceAutoApproverRoute sends an approver list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.replaceAutoApproverRoute("jbones", "10.0.0.0/8", ["tag:router"]));
+
+  assert.deepEqual(wireEntry(body), ["tag:router"]);
+});
+
+test("setAutoApproverExitNode sends an approver list that the daemon reads as a JSON array", async () => {
+  const body = await editBody((state) => state.setAutoApproverExitNode("jbones", ["group:eng"]));
+
+  assert.deepEqual(wireEntry(body), ["group:eng"]);
 });
 
 test("a refused section edit states the message and sends no second request", async () => {
