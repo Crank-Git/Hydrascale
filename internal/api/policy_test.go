@@ -590,6 +590,109 @@ func TestPolicySectionsEditReplacesAndRemovesAnEntryByIndex(t *testing.T) {
 	}
 }
 
+func TestPolicySectionsEditAddsRenamesAndRemovesAMapEntryByKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "groups": {
+    "group:admins": ["alice@example.com"],
+  },
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "groups",
+		"op":       "add",
+		"key":      "group:eng",
+		"entry":    []string{"carol@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var added wireSectionsEdit
+	decodePolicy(t, payload, &added)
+	if !strings.Contains(added.Document, "group:eng") || !strings.Contains(added.Document, "carol@example.com") {
+		t.Errorf("Document = %q, want it to hold the new key", added.Document)
+	}
+	if !strings.Contains(added.Document, "group:admins") {
+		t.Errorf("Document = %q, want the existing key unchanged", added.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": added.Document,
+		"section":  "groups",
+		"op":       "rename",
+		"key":      "group:eng",
+		"new_key":  "group:owners",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var renamed wireSectionsEdit
+	decodePolicy(t, payload, &renamed)
+	if strings.Contains(renamed.Document, "group:eng") || !strings.Contains(renamed.Document, "group:owners") {
+		t.Errorf("Document = %q, want group:eng renamed to group:owners", renamed.Document)
+	}
+	if !strings.Contains(renamed.Document, "carol@example.com") {
+		t.Errorf("Document = %q, want the renamed key's members unchanged", renamed.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": renamed.Document,
+		"section":  "groups",
+		"op":       "remove",
+		"key":      "group:owners",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, "group:owners") {
+		t.Errorf("Document = %q, want group:owners removed", removed.Document)
+	}
+	if !strings.Contains(removed.Document, "group:admins") {
+		t.Errorf("Document = %q, want group:admins unchanged", removed.Document)
+	}
+}
+
+func TestPolicySectionsEditReplacesAMapEntryValueByKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{"groups": {"group:admins": ["alice@example.com"]}}`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "groups",
+		"op":       "replace",
+		"key":      "group:admins",
+		"entry":    []string{"alice@example.com", "bob@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireSectionsEdit
+	decodePolicy(t, payload, &got)
+	if !strings.Contains(got.Document, "bob@example.com") {
+		t.Errorf("Document = %q, want the new member added", got.Document)
+	}
+}
+
 func TestPolicySectionsEditRejectsABadOpBeforeAnyChange(t *testing.T) {
 	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
 
@@ -912,6 +1015,10 @@ func TestEveryPolicyRouteRefusesABadRequestBodyBeforeItActs(t *testing.T) {
 		{"the sections edit route rejects an empty document", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"","section":"acls","op":"add","entry":{}}`},
 		{"the sections edit route rejects an empty section", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"","op":"add","entry":{}}`},
 		{"the sections edit route rejects an unknown op", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"acls","op":"bogus"}`},
+		{"the sections edit route rejects a map add with no key", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"add","entry":[]}`},
+		{"the sections edit route rejects a map remove with no key", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"remove"}`},
+		{"the sections edit route rejects a map rename with no new_key", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"rename","key":"group:admins"}`},
+		{"the sections edit route rejects a map section with an unknown op", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"bogus"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

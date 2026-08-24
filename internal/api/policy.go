@@ -236,12 +236,25 @@ func (s *Server) handlePolicyCredentials(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, policyRow(target.id, target.kind, cred, ""))
 }
 
-// The three edit operations that POST /api/policy/{id}/sections/edit accepts.
+// The four edit operations that POST /api/policy/{id}/sections/edit accepts. "rename"
+// applies to a map-shaped section alone; see mapSectionNames.
 const (
 	sectionOpAdd     = "add"
 	sectionOpReplace = "replace"
 	sectionOpRemove  = "remove"
+	sectionOpRename  = "rename"
 )
+
+// mapSectionNames lists every section that a policy document holds as a JSON object
+// keyed by name, rather than as a JSON array. POST /api/policy/{id}/sections/edit
+// addresses an entry of one of these sections by Key, and every other named section by
+// Index.
+var mapSectionNames = map[string]bool{
+	"groups":    true,
+	"hosts":     true,
+	"tagOwners": true,
+	"ipsets":    true,
+}
 
 // sectionNames lists every top-level key that features/11-policy-document-model.md
 // FR-model-2 resolves into a named section. A key outside this list is opaque, per
@@ -424,22 +437,30 @@ func (s *Server) handlePolicySectionsEdit(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	switch req.Op {
-	case sectionOpAdd:
-		if err := doc.AddEntry(req.Section, string(req.Entry)); err != nil {
-			writeRefusal(w, err.Error())
-			return
+	if mapSectionNames[req.Section] {
+		switch req.Op {
+		case sectionOpAdd:
+			err = doc.AddMapEntry(req.Section, req.Key, string(req.Entry))
+		case sectionOpReplace:
+			err = doc.ReplaceMapEntry(req.Section, req.Key, string(req.Entry))
+		case sectionOpRemove:
+			err = doc.RemoveMapEntry(req.Section, req.Key)
+		case sectionOpRename:
+			err = doc.RenameMapEntry(req.Section, req.Key, req.NewKey)
 		}
-	case sectionOpReplace:
-		if err := doc.ReplaceEntry(req.Section, *req.Index, string(req.Entry)); err != nil {
-			writeRefusal(w, err.Error())
-			return
+	} else {
+		switch req.Op {
+		case sectionOpAdd:
+			err = doc.AddEntry(req.Section, string(req.Entry))
+		case sectionOpReplace:
+			err = doc.ReplaceEntry(req.Section, *req.Index, string(req.Entry))
+		case sectionOpRemove:
+			err = doc.RemoveEntry(req.Section, *req.Index)
 		}
-	case sectionOpRemove:
-		if err := doc.RemoveEntry(req.Section, *req.Index); err != nil {
-			writeRefusal(w, err.Error())
-			return
-		}
+	}
+	if err != nil {
+		writeRefusal(w, err.Error())
+		return
 	}
 
 	writeJSON(w, PolicySectionsEditResponse{Document: string(doc.Bytes())})
@@ -454,6 +475,9 @@ func (req PolicySectionsEditRequest) validate() error {
 	}
 	if req.Section == "" {
 		return errors.New("section is required")
+	}
+	if mapSectionNames[req.Section] {
+		return req.validateMapOp()
 	}
 	switch req.Op {
 	case sectionOpAdd:
@@ -473,6 +497,41 @@ func (req PolicySectionsEditRequest) validate() error {
 		}
 	default:
 		return fmt.Errorf("op %q is not one of \"add\", \"replace\", \"remove\"", req.Op)
+	}
+	return nil
+}
+
+// validateMapOp checks the request body of POST /api/policy/{id}/sections/edit for a
+// map-shaped section, which addresses its entry by Key rather than by Index.
+func (req PolicySectionsEditRequest) validateMapOp() error {
+	switch req.Op {
+	case sectionOpAdd:
+		if req.Key == "" {
+			return errors.New("key is required for op \"add\"")
+		}
+		if len(req.Entry) == 0 {
+			return errors.New("entry is required for op \"add\"")
+		}
+	case sectionOpReplace:
+		if req.Key == "" {
+			return errors.New("key is required for op \"replace\"")
+		}
+		if len(req.Entry) == 0 {
+			return errors.New("entry is required for op \"replace\"")
+		}
+	case sectionOpRemove:
+		if req.Key == "" {
+			return errors.New("key is required for op \"remove\"")
+		}
+	case sectionOpRename:
+		if req.Key == "" {
+			return errors.New("key is required for op \"rename\"")
+		}
+		if req.NewKey == "" {
+			return errors.New("new_key is required for op \"rename\"")
+		}
+	default:
+		return fmt.Errorf("op %q is not one of \"add\", \"replace\", \"remove\", \"rename\"", req.Op)
 	}
 	return nil
 }

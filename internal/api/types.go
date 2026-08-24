@@ -164,14 +164,20 @@ type PolicySectionsResponse struct {
 }
 
 // PolicySectionsEditRequest is the request body of POST /api/policy/{id}/sections/edit.
-// Op holds "add", "replace", or "remove". Index is required for "replace" and "remove",
-// and it is omitted for "add". Entry is required for "add" and "replace", and it is
-// omitted for "remove".
+//
+// Op holds "add", "replace", "remove", or "rename". A list-shaped section (`acls`,
+// `grants`, `ssh`, `nodeAttrs`, `postures`, `tests`, `sshTests`) addresses its entry by
+// Index, which "add" omits and "replace"/"remove" require. A map-shaped section
+// (`groups`, `hosts`, `tagOwners`, `ipsets`) addresses its entry by Key, which every op
+// requires; "rename" also requires NewKey and carries no Entry. Entry is required for
+// "add" and "replace", and it is omitted for "remove" and "rename".
 type PolicySectionsEditRequest struct {
 	Document string          `json:"document"`
 	Section  string          `json:"section"`
 	Op       string          `json:"op"`
 	Index    *int            `json:"index,omitempty"`
+	Key      string          `json:"key,omitempty"`
+	NewKey   string          `json:"new_key,omitempty"`
 	Entry    json.RawMessage `json:"entry,omitempty"`
 }
 
