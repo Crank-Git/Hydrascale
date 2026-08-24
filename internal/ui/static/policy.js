@@ -684,7 +684,7 @@ const SECTION_MARKUP = {
   ipsets: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "ipsets", pendingRemoval, kind),
   ssh: (sections) => sshSectionMarkup(sections),
   autoApprovers: () => placeholderSectionMarkup(),
-  nodeAttrs: () => placeholderSectionMarkup(),
+  nodeAttrs: (sections) => nodeAttrsSectionMarkup(sections),
   postures: () => placeholderSectionMarkup(),
   tests: () => placeholderSectionMarkup(),
 };
@@ -894,6 +894,110 @@ function sshSectionMarkup(sections) {
     `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-ssh">Add</button></div>` +
     `</div>`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Node attributes (#323)
+// ---------------------------------------------------------------------------
+
+/** nodeAttrsRowFields returns the comma-joined text of one nodeAttrs entry's target and
+ *  attribute lists, so the row markup and the add form build from one shape. A target of
+ *  "*" joins as the literal character, per FR-vadv-8's edge case. */
+function nodeAttrsRowFields(entry) {
+  return {
+    target: (entry.target || []).join(", "),
+    attr: (entry.attr || []).join(", "),
+  };
+}
+
+/** nodeAttrsEntryWithField returns entry with field replaced by value. */
+export function nodeAttrsEntryWithField(entry, field, value) {
+  return { ...entry, [field]: value };
+}
+
+/**
+ * nodeAttrsEntryMarkup returns one row of the node attributes section: its target list
+ * and its attribute list, per FR-vadv-8.
+ */
+function nodeAttrsEntryMarkup(entry, index) {
+  const fields = nodeAttrsRowFields(entry);
+  return (
+    `<div class="setentry" data-index="${index}">` +
+    `<div class="setentry-head">` +
+    `<input type="text" class="field mono" data-act="nodeattrs-target" value="${esc(fields.target)}" aria-label="Target">` +
+    `<button type="button" class="btn" data-act="nodeattrs-delete">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">` +
+    `<input type="text" class="field mono" data-act="nodeattrs-attr" value="${esc(fields.attr)}" aria-label="Attribute">` +
+    `</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * nodeAttrsSectionMarkup returns the node attributes section: one row per nodeAttrs
+ * entry, per FR-vadv-8 and FR-vadv-9.
+ */
+function nodeAttrsSectionMarkup(sections) {
+  const entries = (sections && sections.nodeAttrs) || [];
+  const rows = entries.map((entry, index) => nodeAttrsEntryMarkup(entry, index)).join("");
+  const empty = entries.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const addFields =
+    `<input type="text" class="field mono" data-add-target placeholder="target" aria-label="New entry target">` +
+    `<input type="text" class="field mono" data-add-attr placeholder="attribute" aria-label="New entry attribute">`;
+  return (
+    `<div class="setlist" data-section="nodeAttrs">${rows}${empty}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-nodeattrs">Add</button></div>` +
+    `</div>`
+  );
+}
+
+/**
+ * bindNodeAttrsList wires the add, edit, and remove controls of the node attributes
+ * section, per FR-vadv-9. Editing the target or the attribute list replaces the whole
+ * field on change, in the manner of bindSSHList's source field.
+ */
+function bindNodeAttrsList(holder, id, sections) {
+  const list = holder.querySelector('.setlist[data-section="nodeAttrs"]');
+  if (!list) {
+    return;
+  }
+  const entries = (sections && sections.nodeAttrs) || [];
+
+  const targetField = list.querySelector("[data-add-target]");
+  const attrField = list.querySelector("[data-add-attr]");
+  const addButton = list.querySelector('.setadd [data-act="add-nodeattrs"]');
+  if (addButton) {
+    addButton.addEventListener("click", () => {
+      const target = membersFromInput(targetField.value);
+      const attr = membersFromInput(attrField.value);
+      if (target.length === 0 || attr.length === 0) {
+        return;
+      }
+      runAction(state.stageListAdd(id, "nodeAttrs", { target, attr }));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry")) {
+    const index = Number(row.getAttribute("data-index"));
+    const entry = entries[index];
+    const replace = (field, value) =>
+      runAction(state.stageRuleReplace(id, "nodeAttrs", index, nodeAttrsEntryWithField(entry, field, value)));
+
+    const del = row.querySelector('[data-act="nodeattrs-delete"]');
+    if (del) {
+      del.addEventListener("click", () => runAction(state.stageRuleRemove(id, "nodeAttrs", index)));
+    }
+
+    const rowTarget = row.querySelector('[data-act="nodeattrs-target"]');
+    if (rowTarget) {
+      rowTarget.addEventListener("change", () => replace("target", membersFromInput(rowTarget.value)));
+    }
+    const rowAttr = row.querySelector('[data-act="nodeattrs-attr"]');
+    if (rowAttr) {
+      rowAttr.addEventListener("change", () => replace("attr", membersFromInput(rowAttr.value)));
+    }
+  }
 }
 
 /**
@@ -2662,6 +2766,7 @@ function draw(section, snapshot) {
       bindSectionNav(editor, selected);
       bindNamedSetList(editor, selected);
       bindSSHList(editor, selected, toggle.sections);
+      bindNodeAttrsList(editor, selected, toggle.sections);
     }
   }
   grid.append(editor);
