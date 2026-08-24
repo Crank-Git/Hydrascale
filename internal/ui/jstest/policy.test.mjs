@@ -1475,6 +1475,27 @@ test("an Auto-approvers section with no route still draws the exit node row", ()
   assert.match(markup, /exit node/);
 });
 
+test("an Auto-approvers section with no route and no exit node approver states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ autoApprovers: {} }), "autoApprovers");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("an Auto-approvers section that holds one exit node approver states no empty state", () => {
+  const markup = visualMarkup(
+    sectionsBody({ autoApprovers: { exitNode: ["group:eng"] } }),
+    "autoApprovers",
+  );
+  assert.ok(!markup.includes("This section holds no entry"));
+});
+
+test("an Auto-approvers section that holds one route states no empty state", () => {
+  const markup = visualMarkup(
+    sectionsBody({ autoApprovers: { routes: { "10.0.0.0/8": [] } } }),
+    "autoApprovers",
+  );
+  assert.ok(!markup.includes("This section holds no entry"));
+});
+
 test("the Auto-approvers section escapes a hostile CIDR and a hostile approver", () => {
   const markup = visualMarkup(
     sectionsBody({ autoApprovers: { routes: { '"><script>': ['"><script>'] } } }),
