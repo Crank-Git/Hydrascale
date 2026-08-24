@@ -56,11 +56,13 @@ is what lets an edit in one view survive as a normal, readable change to the oth
 
 ### The reachability matrix
 
-- **FR-vacl-7** — The matrix places every tag, group, and autogroup that a rule
-  references on both axes, in the manner of **FR-editor-1** to **FR-editor-15** of
-  `features/07-console-access-editor.md`: a filled square means at least one `acls` or
-  `grants` entry allows the path, an empty square means none does, the diagonal accepts
-  no click, hovering marks the row and the column label alone.
+- **FR-vacl-7** — The matrix places every tag, group, autogroup, and the wildcard `*`
+  that a rule references on both axes, in the manner of **FR-editor-1** to
+  **FR-editor-15** of `features/07-console-access-editor.md`: a filled square means at
+  least one `acls` or `grants` entry allows the path, an empty square means none does, a
+  square that names one identity on both axes accepts no click, hovering marks the row
+  and the column label alone. The wildcard names every identity and not one identity,
+  therefore the square that names the wildcard on both axes accepts a click.
 - **FR-vacl-8** — A click on an empty square stages a new `acls` entry that allows every
   port from the row's source to the column's destination.
 - **FR-vacl-9** — A click on a filled square stages the removal of every `acls` and

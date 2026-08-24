@@ -1,7 +1,8 @@
 # Use the Visual editor of Policy
 
-This page covers the Visual editor of the Policy view: the section nav, the SSH
-access section, and the Tests section. [Read and change the upstream policy in
+This page covers the Visual editor of the Policy view: the section nav, the SSH access
+section, the Auto-approvers section, the Node attributes section, the Postures section,
+and the Tests section. [Read and change the upstream policy in
 Policy](policy-editor.md) covers the Text editor and the Validate, Discard, and Push
 buttons that both editors share.
 
@@ -65,7 +66,7 @@ list and an attribute list. A "New entry" row, with a **Target** field, an
 > attributes entry, and the console shows no error. Add a node attributes entry
 > through the Text editor instead.
 
-## 5. Read the Postures section
+## 5. Add a posture
 
 Click **Postures**. The section lists one row per posture, each with a name and an
 expression. A "New posture" row, with a **name** field, an **expression** field, and
@@ -73,9 +74,9 @@ an **Add** button, sits below the list.
 
 ![The Postures section, with no posture](screenshots/postures-tests/03-postures-empty.png)
 
-> **Known limitation:** This review found that **Add** does not stage a valid posture.
-> The console shows an error and disables the Visual tab until the page reloads. Add a
-> posture through the Text editor instead.
+Type a name into **name** and an expression into **expression**. Click **Add**. The
+console adds a row for the new posture, and the Postures count increases by one. Click
+**Discard** to remove the staged posture and return the document to its original text.
 
 ## 6. Add a test and run it
 
