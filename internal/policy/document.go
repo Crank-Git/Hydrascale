@@ -2,6 +2,7 @@ package policy
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 
 	"github.com/tailscale/hujson"
@@ -49,6 +50,137 @@ func rejectDuplicateTopLevelKeys(text []byte, root hujson.Value) error {
 		seen[name] = true
 	}
 	return nil
+}
+
+// ACLRule is one entry of the acls section.
+type ACLRule struct {
+	Action     string   `json:"action"`
+	Src        []string `json:"src"`
+	Proto      string   `json:"proto,omitempty"`
+	Dst        []string `json:"dst"`
+	SrcPosture []string `json:"srcPosture,omitempty"`
+}
+
+// SSHRule is one entry of the ssh section.
+type SSHRule struct {
+	Action      string   `json:"action"`
+	Src         []string `json:"src"`
+	Dst         []string `json:"dst"`
+	Users       []string `json:"users"`
+	CheckPeriod string   `json:"checkPeriod,omitempty"`
+	AcceptEnv   []string `json:"acceptEnv,omitempty"`
+	SrcPosture  []string `json:"srcPosture,omitempty"`
+}
+
+// AutoApprovers is the autoApprovers section.
+type AutoApprovers struct {
+	Routes   map[string][]string `json:"routes,omitempty"`
+	ExitNode []string            `json:"exitNode,omitempty"`
+}
+
+// Groups returns every group and its member list.
+// Groups returns an empty map when the document holds no groups section.
+func (d *Document) Groups() (map[string][]string, error) {
+	return readMap[[]string](d, "groups")
+}
+
+// ACLs returns every allow rule of the acls section.
+// ACLs returns an empty list when the document holds no acls section.
+func (d *Document) ACLs() ([]ACLRule, error) {
+	return readList[ACLRule](d, "acls")
+}
+
+// SSH returns every SSH rule of the ssh section.
+// SSH returns an empty list when the document holds no ssh section.
+func (d *Document) SSH() ([]SSHRule, error) {
+	return readList[SSHRule](d, "ssh")
+}
+
+// AutoApprovers returns the routes map and the exit node list.
+// AutoApprovers returns a zero-value AutoApprovers when the document holds no
+// autoApprovers section.
+func (d *Document) AutoApprovers() (AutoApprovers, error) {
+	raw, ok, err := sectionRaw(d, "autoApprovers")
+	if err != nil {
+		return AutoApprovers{}, err
+	}
+	if !ok {
+		return AutoApprovers{}, nil
+	}
+	var approvers AutoApprovers
+	if err := json.Unmarshal(raw, &approvers); err != nil {
+		return AutoApprovers{}, fmt.Errorf("policy: section %q: %w", "autoApprovers", err)
+	}
+	return approvers, nil
+}
+
+// sectionRaw returns the raw JSON of the top-level key name, and whether the
+// document holds that key.
+// sectionRaw reads a clone of d.root, so it never mutates d.root: Minimize
+// strips every comment and trailing comma from the value it runs on, and
+// running it on d.root would corrupt the byte-preservation guarantee that a
+// later serialize depends on.
+func sectionRaw(d *Document, name string) (json.RawMessage, bool, error) {
+	clone := d.root.Clone()
+	clone.Minimize()
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(clone.Pack(), &sections); err != nil {
+		return nil, false, fmt.Errorf("policy: reading the document: %w", err)
+	}
+	raw, ok := sections[name]
+	return raw, ok, nil
+}
+
+// readList returns every entry of the list-shaped section name.
+// readList returns a nil list when the document holds no section by that
+// name, which the caller reads as an empty list. An entry that does not
+// match T returns an error naming the section and the entry index.
+func readList[T any](d *Document, name string) ([]T, error) {
+	raw, ok, err := sectionRaw(d, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	var rawEntries []json.RawMessage
+	if err := json.Unmarshal(raw, &rawEntries); err != nil {
+		return nil, fmt.Errorf("policy: section %q: %w", name, err)
+	}
+	entries := make([]T, len(rawEntries))
+	for i, rawEntry := range rawEntries {
+		if err := json.Unmarshal(rawEntry, &entries[i]); err != nil {
+			return nil, fmt.Errorf("policy: section %q: entry %d: %w", name, i, err)
+		}
+	}
+	return entries, nil
+}
+
+// readMap returns every entry of the map-shaped section name.
+// readMap returns a nil map when the document holds no section by that
+// name, which the caller reads as an empty map. An entry that does not
+// match V returns an error naming the section and the entry key.
+func readMap[V any](d *Document, name string) (map[string]V, error) {
+	raw, ok, err := sectionRaw(d, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	var rawEntries map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rawEntries); err != nil {
+		return nil, fmt.Errorf("policy: section %q: %w", name, err)
+	}
+	entries := make(map[string]V, len(rawEntries))
+	for key, rawEntry := range rawEntries {
+		var entry V
+		if err := json.Unmarshal(rawEntry, &entry); err != nil {
+			return nil, fmt.Errorf("policy: section %q: entry %q: %w", name, key, err)
+		}
+		entries[key] = entry
+	}
+	return entries, nil
 }
 
 // lineColumn returns the 1-based line and column of byte offset n in text.
