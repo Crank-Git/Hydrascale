@@ -376,8 +376,12 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-grid{display:grid; grid-template-columns:1fr var(--w-side); gap:var(--sp-3); align-items:start}
 .ns-list{min-width:0}
 
+/* The panel takes 320 pixels of the grid, so the row keeps what remains. The row wraps,
+   because a line that is too short for every item draws the last item outside the row,
+   under the panel. See issue #354. */
 .ns-row{
   display:flex;
+  flex-wrap:wrap;
   align-items:center;
   gap:var(--sp-4);
   padding:var(--pad-row);
@@ -397,7 +401,18 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-state{display:flex; align-items:center; gap:var(--sp-2); min-width:130px}
 .ns-word{color:var(--text-secondary); font-size:var(--fs-sm)}
 .ns-peers{color:var(--text-secondary); font-size:var(--fs-micro); min-width:76px}
-.ns-addr{color:var(--text-tertiary); font-size:var(--fs-micro); margin-left:auto}
+/* The address holds one space, which breaks it no further than its own width. The
+   minimum width lets it shrink, and the ellipsis states the cut when its own line is
+   too short as well. */
+.ns-addr{
+  color:var(--text-tertiary);
+  font-size:var(--fs-micro);
+  margin-left:auto;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
 
 .ns-panel{position:sticky; top:var(--sp-5)}
 .ns-panel-head{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3)}
@@ -490,7 +505,6 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   .ns-grid{grid-template-columns:1fr}
   .ns-panel{position:static}
   .ns-addr{margin-left:0}
-  .ns-row{flex-wrap:wrap}
 }
 
 /* The access view: the header, the observe statement, and the mode dialog. The apply
