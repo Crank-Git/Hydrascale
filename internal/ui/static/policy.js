@@ -2451,7 +2451,7 @@ export function createPolicyState(options = {}) {
      * request per removal for a remove, each one against the document text that the
      * previous request returned, because /sections/edit is stateless and every request
      * after the first must see the earlier request's result. It sends no request for
-     * the diagonal. After the last edit, it reads the sections again, per the Interfaces
+     * an inert square. After the last edit, it reads the sections again, per the Interfaces
      * section of features/12-visual-acl-editor.md.
      */
     async stageMatrixClick(id, from, to) {
@@ -3134,7 +3134,7 @@ function bindApproverList(holder, current, replace) {
  *
  * The square is a button, so the pointer and the keyboard both reach it. Hovering or
  * focusing a square marks its row label and its column label alone, per FR-vacl-7, and
- * a click stages the add or the remove that matrixClickPlan names. The diagonal carries
+ * a click stages the add or the remove that matrixClickPlan names. An inert square carries
  * no data-from attribute, so bindMatrix wires it to no handler.
  */
 function bindMatrix(holder, id) {
