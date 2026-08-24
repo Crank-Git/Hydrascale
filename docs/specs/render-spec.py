@@ -159,9 +159,10 @@ def split_front_matter(text):
 
 def inline(text):
     text = html.escape(text, quote=False)
-    # A code span is literal text. Hold each rendered span aside behind a marker that
-    # holds no markdown character, because a substitution that follows otherwise pairs
-    # an asterisk of one code span with an asterisk of the next one. See issue #383.
+    # A code span is literal text. Each rendered span moves into spans, and a marker
+    # takes its place. The marker holds no markdown character, so the substitutions
+    # below read no asterisk and no bracket of a code span. Without the marker they
+    # pair an asterisk of one span with an asterisk of the next span. See issue #383.
     # split_cells tracks in_code for the same reason.
     spans = []
 
