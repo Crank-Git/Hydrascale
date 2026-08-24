@@ -83,13 +83,18 @@ function reachabilityOf(status, id) {
 
 /**
  * credentialOf returns the upstream policy credential problem of one tailnet as a dot
- * tone and its reason, word for word, and null when the credential is usable or the poll
- * holds no policy entry for the tailnet yet.
+ * tone, a short word, and the reason of the daemon word for word. It returns null when the
+ * credential is usable or the poll holds no policy entry for the tailnet yet.
  *
  * status.policy is the field that fetchConsoleState merges from GET /api/policy. Local
  * reachability and upstream policy are two independent systems (see
  * docs/specs/features/08-upstream-policy.md), so this state never replaces stateOf or
  * reachabilityOf; it is a second, additional line. See issue #287.
+ *
+ * The word and the reason are two fields, because the dot and word slot holds a short
+ * lowercase word only. A reason in that slot is a sentence, and it overlapped the peer
+ * count in the list row and it overflowed the panel. The word matches the word that the
+ * policy view states for the same credential state. See issue #347.
  */
 function credentialOf(status, id) {
   const entries = (status && status.policy) || [];
@@ -97,7 +102,8 @@ function credentialOf(status, id) {
   if (!entry || entry.credential_state === "usable") {
     return null;
   }
-  return { tone: "crit", word: entry.reason || "" };
+  const word = entry.credential_state === "rejected" ? "credential rejected" : "no credential";
+  return { tone: "crit", word, reason: entry.reason || "" };
 }
 
 /** addressOf returns the first tailnet address of a namespace, or the absent marker. */
@@ -181,7 +187,7 @@ export function buildPanel(status, details, events, id) {
       { label: "namespace", value: (actual && actual.NsName) || `ns-${id}` },
       { label: "address", value: addressOf(detail) },
       { label: "magicdns", value: (detail && detail.magic_dns_name) || ABSENT },
-      { label: "control server", value: desired.ControlURL || (credential && credential.word) || ABSENT },
+      { label: "control server", value: desired.ControlURL || ABSENT },
       { label: "host access", value: hostAccessWord(desired) },
       { label: "exit node", value: desired.ExitNode || ABSENT },
     ],
@@ -438,7 +444,7 @@ async function send(route, body, done) {
   }
 }
 
-/** drawRow draws one line of the list. */
+/** drawRow draws one row of the list. The row wraps when its line is too short. */
 function drawRow(row) {
   const node = el("div", row.muted ? "ns-row ns-muted" : "ns-row");
   node.setAttribute("role", "option");
@@ -507,6 +513,15 @@ function drawPanel(panel) {
   }
   aside.append(list);
 
+  // The reason is a sentence of the daemon, so it takes a note that wraps. The definition
+  // list holds one short value per row and it overflowed the panel with this text before.
+  // See issue #347.
+  if (panel.credential && panel.credential.reason) {
+    const card = el("div", "ns-notice");
+    card.append(el("span", "label", "Credential"));
+    card.append(el("p", "note ns-reason", panel.credential.reason));
+    aside.append(card);
+  }
   if (panel.loginURL) {
     const card = el("div", "ns-notice");
     card.append(el("span", "label", "Not authenticated"));

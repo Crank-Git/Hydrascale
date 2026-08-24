@@ -266,11 +266,26 @@ function policyCredentialNote(entries) {
 }
 
 /**
+ * ACTIVITY_ROW_LIMIT is the count of event rows that the activity view draws.
+ *
+ * The daemon keeps the newest 1000 events in memory. The view drew every one of them. A
+ * capture of the page reached 44681 pixels, which is 30 viewports. See issue #355.
+ *
+ * The view draws a count of the log. It holds no control that draws the rest. Such a
+ * control needs state that survives the poll, because activity.js draws the whole section
+ * again on every tick.
+ */
+export const ACTIVITY_ROW_LIMIT = 100;
+
+/**
  * activityMarkup returns the whole activity view as markup.
  * rows comes from activityRows. A time, a kind, and a tailnet identifier are machine
  * values, and a message is the sentence that the daemon wrote. policyEntries is the field
  * policy of the merged poll body, and it adds one note line above the event list when a
  * declared tailnet holds no usable credential.
+ *
+ * The view draws the newest ACTIVITY_ROW_LIMIT rows. When the log holds more, the view
+ * states the count of the log. See issue #355.
  */
 export function activityMarkup(rows, policyEntries = []) {
   const note = policyCredentialNote(policyEntries);
@@ -283,7 +298,12 @@ export function activityMarkup(rows, policyEntries = []) {
     );
   }
 
-  const list = rows
+  const drawn = rows.slice(0, ACTIVITY_ROW_LIMIT);
+  const cap = drawn.length < rows.length
+    ? `<p class="note">The view draws the newest ${drawn.length} events of ${rows.length}.</p>`
+    : "";
+
+  const list = drawn
     .map(
       (row) =>
         '<div class="ev">' +
@@ -299,6 +319,7 @@ export function activityMarkup(rows, policyEntries = []) {
   return (
     note +
     '<section class="card"><span class="label">Events</span>' +
+    cap +
     `<div class="events">${list}</div>` +
     '<p class="note">The daemon holds the newest events in memory. It records one event for every mutating request on the console listener.</p>' +
     "</section>"

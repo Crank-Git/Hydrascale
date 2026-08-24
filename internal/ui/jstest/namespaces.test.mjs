@@ -2,6 +2,7 @@
 // payload with pure functions, so these tests assert the whole output without a browser.
 // The Go test TestTheConsoleJavaScriptTestsPass starts them.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -126,6 +127,8 @@ test("the error row shows a critical dot", () => {
 test("a row with no usable policy credential shows an additional state, and the health word does not change", () => {
   // Issue #287. Local reachability and upstream policy are two independent systems, so
   // the credential problem is a second line, not a replacement of the health word.
+  // Issue #347. The word is short, because the row draws it in the dot and word slot. The
+  // reason travels beside the word and the row draws no reason.
   const status = statusOf([{ id: "havoc", reachability: { state: "reachable" } }]);
   status.policy = [
     { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
@@ -135,7 +138,22 @@ test("a row with no usable policy credential shows an additional state, and the 
   assert.deepEqual(rows[0].reachability, { word: "reachable", tone: "ok" });
   assert.deepEqual(rows[0].credential, {
     tone: "crit",
-    word: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+    word: "no credential",
+    reason: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+  });
+});
+
+test("a row of a tailnet the control server rejects states the rejection in two words", () => {
+  // Issue #347. The word matches the word of the policy view for the same state.
+  const status = statusOf([{ id: "havoc" }]);
+  status.policy = [
+    { id: "havoc", kind: "tailscale", credential_state: "rejected", reason: "the control server takes the credential for no request" },
+  ];
+  const rows = buildRows(status, {}, {});
+  assert.deepEqual(rows[0].credential, {
+    tone: "crit",
+    word: "credential rejected",
+    reason: "the control server takes the credential for no request",
   });
 });
 
@@ -205,9 +223,10 @@ test("the panel states the peers, the magicdns name, the control server and the 
   assert.equal(panel.events[0].kind, "namespace.created");
 });
 
-test("the panel states the credential problem beside the health and it fills the control server row with the reason", () => {
-  // Issue #287. havoc declares no ControlURL and holds no credential, so the panel showed
-  // a bare em dash before. It now shows the reason that the daemon reported.
+test("the panel states the credential problem beside the health and it keeps the reason out of the control server row", () => {
+  // Issue #287 put the reason in the control server row. Issue #347 took it out again: the
+  // row holds one short value, and a sentence in it overflowed the panel. The reason
+  // travels as its own field, which the panel draws in a note that wraps.
   const status = statusOf([{ id: "havoc" }]);
   status.policy = [
     { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
@@ -215,10 +234,53 @@ test("the panel states the credential problem beside the health and it fills the
   const panel = buildPanel(status, {}, [], "havoc");
   assert.deepEqual(panel.credential, {
     tone: "crit",
-    word: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+    word: "no credential",
+    reason: "the tailnet \"havoc\" has no Tailscale OAuth credential",
   });
   const value = (label) => panel.fields.find((field) => field.label === label).value;
-  assert.equal(value("control server"), "the tailnet \"havoc\" has no Tailscale OAuth credential");
+  assert.equal(value("control server"), "—");
+});
+
+test("the panel keeps the declared control server in its row when the credential is absent", () => {
+  // Issue #347. The row states the control server of the file, and the credential problem
+  // never replaces it.
+  const status = statusOf([{ id: "havoc", controlURL: "https://hs.example.net" }]);
+  status.policy = [
+    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+  ];
+  const panel = buildPanel(status, {}, [], "havoc");
+  const value = (label) => panel.fields.find((field) => field.label === label).value;
+  assert.equal(value("control server"), "https://hs.example.net");
+});
+
+test("app.css breaks the credential reason inside the panel", async () => {
+  // Issue #347. The reason names HYDRASCALE_TS_CLIENT_SECRET_HAVOC, which no space breaks,
+  // so the paragraph needs the rule to stay inside the panel.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ns-reason\{overflow-wrap:anywhere\}/);
+});
+
+test("app.css keeps the address of a row inside the row", async () => {
+  // Issue #354. The row is a flex line, and the address is its last item. The address
+  // holds no space that breaks it below its own width, so a line that is too short
+  // draws the address outside the row, where the panel paints over it. The row
+  // therefore wraps, and the address ends in an ellipsis when even its own line is too
+  // short.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+
+  // The pattern holds the anchor ^, because app.css holds the rule .ns-row + .ns-row and
+  // the rule .ns-addr of the media block as well. Each one ends in the same characters,
+  // so a pattern with no anchor reads whichever rule comes first in the file.
+  const row = style.match(/^\.ns-row\{([^}]*)\}/m);
+  assert.ok(row, "app.css holds no rule .ns-row");
+  assert.match(row[1], /flex-wrap:\s*wrap/);
+
+  const address = style.match(/^\.ns-addr\{([^}]*)\}/m);
+  assert.ok(address, "app.css holds no rule .ns-addr");
+  assert.match(address[1], /min-width:\s*0/);
+  assert.match(address[1], /overflow:\s*hidden/);
+  assert.match(address[1], /text-overflow:\s*ellipsis/);
+  assert.match(address[1], /white-space:\s*nowrap/);
 });
 
 test("the panel keeps the em dash of the control server row when no policy entry names the tailnet", () => {

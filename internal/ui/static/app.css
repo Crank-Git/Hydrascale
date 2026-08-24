@@ -376,8 +376,12 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-grid{display:grid; grid-template-columns:1fr var(--w-side); gap:var(--sp-3); align-items:start}
 .ns-list{min-width:0}
 
+/* The panel takes 320 pixels of the grid, so the row keeps what remains. A line that is
+   too short for every item draws the last item outside the row, under the panel. The row
+   therefore wraps. See issue #354. */
 .ns-row{
   display:flex;
+  flex-wrap:wrap;
   align-items:center;
   gap:var(--sp-4);
   padding:var(--pad-row);
@@ -397,7 +401,18 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-state{display:flex; align-items:center; gap:var(--sp-2); min-width:130px}
 .ns-word{color:var(--text-secondary); font-size:var(--fs-sm)}
 .ns-peers{color:var(--text-secondary); font-size:var(--fs-micro); min-width:76px}
-.ns-addr{color:var(--text-tertiary); font-size:var(--fs-micro); margin-left:auto}
+/* The longest part of the address is the address of the node, which no line break
+   divides. The minimum width lets the item shrink below that part, and the ellipsis
+   states the cut when the line of the address is too short as well. */
+.ns-addr{
+  color:var(--text-tertiary);
+  font-size:var(--fs-micro);
+  margin-left:auto;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
 
 .ns-panel{position:sticky; top:var(--sp-5)}
 .ns-panel-head{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3)}
@@ -424,6 +439,9 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-event-text{color:var(--text-secondary); font-size:var(--fs-sm)}
 
 .ns-notice{margin-top:var(--sp-4)}
+/* The credential reason names an environment variable of 33 characters, which no space
+   breaks. The rule breaks it inside the panel. See issue #347. */
+.ns-reason{overflow-wrap:anywhere}
 .ns-cmds{
   display:flex;
   flex-direction:column;
@@ -487,7 +505,6 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   .ns-grid{grid-template-columns:1fr}
   .ns-panel{position:static}
   .ns-addr{margin-left:0}
-  .ns-row{flex-wrap:wrap}
 }
 
 /* The access view: the header, the observe statement, and the mode dialog. The apply

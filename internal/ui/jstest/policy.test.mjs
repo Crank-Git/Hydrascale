@@ -2700,12 +2700,45 @@ test("an acls entry with no port reads all ports", () => {
   assert.match(ruleListMarkup(rows), /<span class="ac-noports mono">all ports<\/span>/);
 });
 
+test("a grants entry whose ip is the wildcard reads all ports", () => {
+  const rows = ruleRows(sectionsBody({ acls: [], grants: [{ src: ["a"], dst: ["b"], ip: ["*"] }] }));
+
+  assert.equal(rows[0].allPorts, true);
+  assert.deepEqual(rows[0].ports, []);
+  assert.match(ruleListMarkup(rows), /<span class="ac-noports mono">all ports<\/span>/);
+});
+
+test("the port field of a wildcard grants entry holds no value, so it shows the words all ports", () => {
+  const rows = ruleRows(sectionsBody({ acls: [], grants: [{ src: ["a"], dst: ["b"], ip: ["*"] }] }));
+
+  const markup = ruleListMarkup(rows);
+
+  assert.equal(rows[0].portsText, "");
+  assert.match(markup, /class="field ac-portfield mono" data-act="rule-ports" value="" placeholder="all ports"/);
+});
+
 test("ruleEntryWithPorts replaces a grants entry's ip field, converting the slash to a colon", () => {
   const row = { section: "grants", entry: { src: ["a"], dst: ["b"] } };
 
   const next = ruleEntryWithPorts(row, ["tcp/22", "udp/1-1024"]);
 
   assert.deepEqual(next, { src: ["a"], dst: ["b"], ip: ["tcp:22", "udp:1-1024"] });
+});
+
+test("ruleEntryWithPorts keeps the wildcard ip of a grants entry the operator clears back to all ports", () => {
+  const row = { section: "grants", entry: { src: ["a"], dst: ["b"], ip: ["*"] } };
+
+  const next = ruleEntryWithPorts(row, []);
+
+  assert.deepEqual(next, { src: ["a"], dst: ["b"], ip: ["*"] });
+});
+
+test("ruleEntryWithPorts replaces the wildcard ip of a grants entry with the ports the operator types", () => {
+  const row = { section: "grants", entry: { src: ["a"], dst: ["b"], ip: ["*"] } };
+
+  const next = ruleEntryWithPorts(row, ["tcp/22"]);
+
+  assert.deepEqual(next, { src: ["a"], dst: ["b"], ip: ["tcp:22"] });
 });
 
 test("ruleEntryWithPorts replaces an acls entry's dst ports and its proto", () => {
