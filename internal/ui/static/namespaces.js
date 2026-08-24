@@ -444,7 +444,7 @@ async function send(route, body, done) {
   }
 }
 
-/** drawRow draws one line of the list. */
+/** drawRow draws one row of the list. The row wraps when its line is too short. */
 function drawRow(row) {
   const node = el("div", row.muted ? "ns-row ns-muted" : "ns-row");
   node.setAttribute("role", "option");
