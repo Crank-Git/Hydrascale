@@ -413,6 +413,180 @@ export function toggleMarkup(toggle) {
 }
 
 /**
+ * NAMED_SET_LABELS names the singular word of each named-set section, because the
+ * staged summary states a count in front of it. FR-vacl-14.
+ */
+const NAMED_SET_LABELS = {
+  groups: "group",
+  hosts: "host",
+  tagOwners: "tag owner",
+  ipsets: "IP set",
+};
+
+/** pluralWord adds an s to label, and states label unchanged for a count of one. */
+function pluralWord(label, n) {
+  return n === 1 ? label : `${label}s`;
+}
+
+/** memberListOf returns value as a list: a host's value is one address, and every other
+ *  named-set section's value is already a list. */
+function memberListOf(value) {
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * namedSetDiffLines returns one line per section-level change between before and after,
+ * for one named-set section (Groups, Hosts, Tag owners, or IP sets), per FR-vacl-14.
+ *
+ * before and after are the section's object, name mapped to its member list (or, for
+ * Hosts, to its one address). A name that after holds and before does not is added; a
+ * name that before holds and after does not is removed; a name that both hold with a
+ * changed member list states how many members joined and how many left.
+ */
+function namedSetDiffLines(label, before, after) {
+  const beforeNames = Object.keys(before || {});
+  const afterNames = Object.keys(after || {});
+  const added = afterNames.filter((name) => !beforeNames.includes(name));
+  const removed = beforeNames.filter((name) => !afterNames.includes(name));
+  const lines = [];
+  if (added.length > 0) {
+    lines.push(`${added.length} ${pluralWord(label, added.length)} added`);
+  }
+  if (removed.length > 0) {
+    lines.push(`${removed.length} ${pluralWord(label, removed.length)} removed`);
+  }
+  for (const name of afterNames) {
+    if (!beforeNames.includes(name)) {
+      continue;
+    }
+    const beforeMembers = memberListOf(before[name]);
+    const afterMembers = memberListOf(after[name]);
+    if (JSON.stringify(beforeMembers) === JSON.stringify(afterMembers)) {
+      continue;
+    }
+    const joined = afterMembers.filter((member) => !beforeMembers.includes(member));
+    const left = beforeMembers.filter((member) => !afterMembers.includes(member));
+    if (joined.length > 0) {
+      lines.push(`${joined.length} ${pluralWord("member", joined.length)} added to ${label} ${name}`);
+    }
+    if (left.length > 0) {
+      lines.push(`${left.length} ${pluralWord("member", left.length)} removed from ${label} ${name}`);
+    }
+    if (joined.length === 0 && left.length === 0) {
+      lines.push(`${label} ${name} changed`);
+    }
+  }
+  return lines;
+}
+
+/**
+ * ruleIdentity returns the key that names one rule across a document edit, with its
+ * ports removed, so a port edit of the same source and the same destination reads as
+ * one changed rule and not as one added rule and one removed rule.
+ */
+function ruleIdentity(entry, section) {
+  const src = [...((entry && entry.src) || [])].sort();
+  const dst = section === "acls"
+    ? [...new Set(((entry && entry.dst) || []).map(destHost))].sort()
+    : [...((entry && entry.dst) || [])].sort();
+  return JSON.stringify({ src, dst });
+}
+
+/** ruleEffectivePorts returns the port count of one rule, and Infinity for a rule that
+ *  allows every port, so a comparison against another rule's count reads correctly. */
+function ruleEffectivePorts(ports) {
+  return ports.length === 0 ? Infinity : ports.length;
+}
+
+/** rulePortsWord names one port count, matching RULE_ALL_PORTS for a count of zero. */
+function rulePortsWord(n) {
+  const words = [RULE_ALL_PORTS, "one port", "two ports", "three ports"];
+  return n < words.length ? words[n] : `${n} ports`;
+}
+
+/**
+ * ruleDiffLines returns one line per section-level change between before and after, for
+ * one rule section (acls or grants), per FR-vacl-14.
+ */
+function ruleDiffLines(before, after, section) {
+  const portsOf = section === "acls" ? aclPortsOf : grantPortsOf;
+  const beforeByKey = new Map(before.map((entry) => [ruleIdentity(entry, section), entry]));
+  const afterByKey = new Map(after.map((entry) => [ruleIdentity(entry, section), entry]));
+  let added = 0;
+  let removed = 0;
+  const changed = [];
+  for (const [key, entry] of afterByKey) {
+    const prior = beforeByKey.get(key);
+    if (!prior) {
+      added += 1;
+      continue;
+    }
+    const beforePorts = portsOf(prior);
+    const afterPorts = portsOf(entry);
+    if (JSON.stringify(beforePorts) === JSON.stringify(afterPorts)) {
+      continue;
+    }
+    const beforeCount = ruleEffectivePorts(beforePorts);
+    const afterCount = ruleEffectivePorts(afterPorts);
+    const verb = afterCount > beforeCount ? "widened" : afterCount < beforeCount ? "narrowed" : "changed";
+    changed.push(`1 rule ${verb} to ${rulePortsWord(afterPorts.length)}`);
+  }
+  for (const key of beforeByKey.keys()) {
+    if (!afterByKey.has(key)) {
+      removed += 1;
+    }
+  }
+  const lines = [];
+  if (added > 0) {
+    lines.push(`${added} ${pluralWord("rule", added)} added`);
+  }
+  if (removed > 0) {
+    lines.push(`${removed} ${pluralWord("rule", removed)} removed`);
+  }
+  return [...lines, ...changed];
+}
+
+/**
+ * diffSummary returns one line per section-level change between the document the
+ * console last read and the staged document, per FR-vacl-14.
+ *
+ * sections is the answer of POST .../sections for the staged text, and baseSections is
+ * the answer for the document the console read; #316 and #317 already hold both to draw
+ * the matrix and the rule list, so diffSummary reads no new state. baseSections is null
+ * before the console holds the sections of the read document, and diffSummary states no
+ * line then, because it has nothing to compare the staged sections against.
+ */
+export function diffSummary(sections, baseSections) {
+  if (!sections || !baseSections) {
+    return [];
+  }
+  const lines = [];
+  for (const [key, label] of Object.entries(NAMED_SET_LABELS)) {
+    lines.push(...namedSetDiffLines(label, baseSections[key], sections[key]));
+  }
+  lines.push(...ruleDiffLines(baseSections.acls || [], sections.acls || [], "acls"));
+  lines.push(...ruleDiffLines(baseSections.grants || [], sections.grants || [], "grants"));
+  return lines;
+}
+
+/**
+ * diffbarMarkup returns the staged summary region, per FR-vacl-14. summary is the value
+ * that diffSummary returned. The region draws nothing while summary holds no line,
+ * because a staged count of zero states nothing new above the section nav.
+ */
+function diffbarMarkup(summary) {
+  if (summary.length === 0) {
+    return "";
+  }
+  return (
+    `<div class="diffbar">` +
+    `<span class="n mono">${summary.length}</span>` +
+    `<span>staged edits: ${esc(summary.join(", "))}</span>` +
+    `</div>`
+  );
+}
+
+/**
  * visualMarkup returns the visual editor region, drawn from the sections that the
  * daemon parsed out of the staged text.
  *
@@ -421,6 +595,8 @@ export function toggleMarkup(toggle) {
  * features/12-visual-acl-editor.md's sibling issue #316 builds the matrix and the rule
  * list, which the Rules row states the count of but does not open. The opaque keys
  * reach the screen once, per FR-vacl-18, so the operator knows to use Text for them.
+ * The staged summary draws above the section nav, per FR-vacl-14 and the mockup's
+ * diffbar region.
  */
 export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSections = null) {
   if (!sections) {
@@ -438,6 +614,7 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
   const opaque = sections.opaque_keys && sections.opaque_keys.length
     ? `<p class="note">Use Text to read or change ${esc(sections.opaque_keys.join(", "))}.</p>`
     : "";
+  const diffbar = diffbarMarkup(diffSummary(sections, baseSections));
   // Rules is the home section: an unset nav (the empty string) draws the matrix and the
   // rule list together, the same as a nav explicitly set to "rules", so that pair stays
   // the view the operator reaches before any nav row is clicked. #316 owns the matrix
@@ -447,7 +624,7 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
   const body = activeNav === "rules"
     ? matrixMarkup(matrixModel(sections)) + ruleListMarkup(ruleRows(sections, baseSections))
     : namedSetSectionMarkup(sections, activeNav, pendingRemoval);
-  return `<div class="pol-visual">${items}${opaque}${body}</div>`;
+  return `<div class="pol-visual">${diffbar}${items}${opaque}${body}</div>`;
 }
 
 /** namedSetNavRowMarkup returns one row of the section nav. Every row, Rules included,
@@ -1401,10 +1578,19 @@ export function createPolicyState(options = {}) {
       rest(entry);
     },
 
-    /** discard returns the text to the document that the console read. */
+    /**
+     * discard returns the text to the document that the console read, per FR-vacl-15.
+     *
+     * It also returns the sections to baseSections, the sections of that same document,
+     * so the visual editor's matrix, rule list, and staged summary read the read
+     * document too, with no second request against POST .../sections.
+     */
     discard(id) {
       const entry = entryOf(id);
       entry.text = entry.base;
+      if (entry.baseSections) {
+        entry.sections = entry.baseSections;
+      }
       rest(entry);
     },
 

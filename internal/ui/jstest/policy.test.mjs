@@ -20,6 +20,7 @@ import {
   actionsMarkup,
   actionsModel,
   createPolicyState,
+  diffSummary,
   editorMarkup,
   editorModel,
   emptyStatement,
@@ -1945,4 +1946,129 @@ test("the rule list escapes a hostile source", () => {
 
   const markup = ruleListMarkup(rows);
   assert.ok(!markup.includes("<script>"), markup);
+});
+
+// ---------------------------------------------------------------------------
+// The staged summary and Push. FR-vacl-13 to FR-vacl-16, issue #318.
+// ---------------------------------------------------------------------------
+
+test("the staged summary names each section-level change", () => {
+  const base = sectionsBody({
+    groups: { "group:eng": ["a@example.com"] },
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+  const staged = sectionsBody({
+    groups: { "group:eng": ["a@example.com"], "group:ops": ["b@example.com"] },
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] }],
+  });
+
+  const summary = diffSummary(staged, base);
+
+  assert.deepEqual(summary, ["1 group added", "1 rule narrowed to one port"]);
+});
+
+test("the staged summary is empty before the console holds the sections of the read document", () => {
+  assert.deepEqual(diffSummary(sectionsBody(), null), []);
+});
+
+test("the staged summary is empty while the staged text matches the read document", () => {
+  const base = sectionsBody();
+
+  assert.deepEqual(diffSummary(base, base), []);
+});
+
+test("the staged summary names an added member and a removed member of a named set", () => {
+  const base = sectionsBody({ tagOwners: { "tag:server": ["group:eng"] } });
+  const staged = sectionsBody({ tagOwners: { "tag:server": ["group:ops"] } });
+
+  const summary = diffSummary(staged, base);
+
+  assert.deepEqual(summary, [
+    "1 member added to tag owner tag:server",
+    "1 member removed from tag owner tag:server",
+  ]);
+});
+
+test("the staged summary names an added rule and a removed rule", () => {
+  const base = sectionsBody({ acls: [{ action: "accept", src: ["a"], dst: ["b:*"] }] });
+  const staged = sectionsBody({ acls: [{ action: "accept", src: ["c"], dst: ["d:*"] }] });
+
+  const summary = diffSummary(staged, base);
+
+  assert.deepEqual(summary, ["1 rule added", "1 rule removed"]);
+});
+
+test("the staged count and the staged summary render above the section nav", async () => {
+  const added = '{\n  "grants": [],\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    return body.document === added
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }], grants: [] })
+      : sectionsBody({ acls: [], grants: [] });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  const toggle = toggleModel(state, "jbones");
+  const markup = visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections);
+  const diffbarAt = markup.indexOf("diffbar");
+  const setrowAt = markup.indexOf("setrow");
+  assert.ok(diffbarAt !== -1, markup);
+  assert.ok(diffbarAt < setrowAt, markup);
+  assert.match(markup, /<span class="n mono">1<\/span>/);
+  assert.match(markup, /1 rule added/);
+});
+
+test("discard returns the visual editor to the document that the console read, and the staged count reads 0", async () => {
+  const added = '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    return body.document === added
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }] })
+      : sectionsBody({ acls: [] });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+  assert.equal(state.edited("jbones"), true);
+
+  state.discard("jbones");
+
+  assert.equal(state.edited("jbones"), false);
+  const toggle = toggleModel(state, "jbones");
+  assert.deepEqual(diffSummary(toggle.sections, toggle.baseSections), []);
+  assert.ok(!visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections).includes("diffbar"));
+});
+
+test("push sends the whole staged document through the existing route, after a visual edit", async () => {
+  const sent = [];
+  const added = '{\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    if (route.endsWith("/validate")) {
+      return { passed: true };
+    }
+    if (route.endsWith("/sections")) {
+      return sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }] });
+    }
+    return documentBody({ document: added, etag: "e0b2816b419" });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+  await state.validate("jbones");
+  await state.push("jbones");
+
+  const puts = sent.filter((one) => one.method === "PUT");
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].route, "/api/policy/jbones");
+  assert.deepEqual(puts[0].body, { document: added, etag: "e0b2816b418" });
 });
