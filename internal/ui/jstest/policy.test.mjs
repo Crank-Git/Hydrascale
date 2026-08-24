@@ -2415,7 +2415,7 @@ test("the matrix markup escapes a hostile node name", () => {
 
 test("the matrix draws a row and a column for a group that no rule references", () => {
   // Issue #351. The operator decided on 2026-08-24 that the matrix draws every named
-  // identity, so a group the operator stages reaches the axes before a rule names it.
+  // identity. A group therefore reaches the axes before a rule names it.
   const sections = sectionsBody({
     groups: { "group:admins": ["alice@example.com"], "group:new": ["bob@example.com"] },
     acls: [{ action: "accept", src: ["group:admins"], dst: ["*:*"] }],
@@ -2445,7 +2445,8 @@ test("the matrix draws a row and a column for a host alias and for a tag owner t
 });
 
 test("a click on the square of an identity that no rule references stages a new acls entry", () => {
-  // Issue #351. The row alone helps nobody; FR-vacl-8 must accept the click that it draws.
+  // Issue #351. The row alone grants no path. FR-vacl-8 must accept the click that the
+  // new square draws.
   const sections = sectionsBody({
     groups: {},
     hosts: { "build-box": "100.64.0.9" },
@@ -2463,9 +2464,9 @@ test("a click on the square of an identity that no rule references stages a new 
 
 test("the matrix draws no row for an IP set", () => {
   // Issue #351. The operator's decision of 2026-08-24 names a tag, a group, and a host
-  // alone. An ipsets key also names an identity as `ipset:<name>` in a rule, and this
-  // repository writes the key in both forms, so the key alone does not give the axis
-  // label. Headscale supports no ipsets section, per FR-vacl-19.
+  // alone. A rule names an IP set as `ipset:<name>`, and this repository writes the key
+  // in both forms. The key alone therefore does not give the axis label. Headscale
+  // supports no ipsets section, per FR-vacl-19.
   const sections = sectionsBody({
     groups: {},
     ipsets: { "ipset:corp": ["10.0.0.0/24"] },

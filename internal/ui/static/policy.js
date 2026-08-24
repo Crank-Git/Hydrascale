@@ -1434,10 +1434,10 @@ function reachabilityPairs(sections) {
  * the matrix places on an axis, per FR-vacl-7 and the operator's decision of 2026-08-24.
  *
  * A groups key, a tagOwners key, and a hosts key each name the identity in the exact form
- * that a rule's src field and dst field carry, so the key alone gives the axis label. The
- * ipsets section is absent, because a rule names an IP set as `ipset:<name>` and this
- * repository writes the key both with and without that prefix. A Headscale control server
- * also supports no ipsets section, per FR-vacl-19.
+ * that a rule's src field and dst field carry. The key alone therefore gives the axis
+ * label. The ipsets section is absent, because a rule names an IP set as `ipset:<name>`.
+ * This repository writes an ipsets key both with and without that prefix. A Headscale
+ * control server also supports no ipsets section, per FR-vacl-19.
  */
 const MATRIX_IDENTITY_SECTIONS = ["groups", "tagOwners", "hosts"];
 
@@ -1482,11 +1482,12 @@ function matrixSquare(from, to, allowed) {
  * matrixModel returns the grid of squares of the reachability matrix, per FR-vacl-7.
  *
  * sections is the answer of POST .../sections. The matrix places two kinds of identity on
- * both axes, sorted so the grid draws the same order on every call: every tag, group, and
- * autogroup that an acls entry or a grants entry references, and every tag, group, and
- * host alias that a named-set section defines. The second kind answers issue #351: a rule
- * is the only way to reach a square, so an identity that no rule references yet needs a
- * row before the operator can grant it a path. matrixModel carries no port, because the
+ * both axes, and it sorts them so the grid draws the same order on every call. The first
+ * kind is every tag, group, and autogroup that an acls entry or a grants entry
+ * references. The second kind is every tag, group, and host alias that a named-set
+ * section defines. The second kind answers issue #351. A rule is the only way to reach a
+ * square, so an identity that no rule references yet needs a row. The row gives the
+ * operator the square that grants the first path. matrixModel carries no port, because the
  * ports live in the rule list that features/12-visual-acl-editor.md's issue #317 builds.
  */
 export function matrixModel(sections) {
