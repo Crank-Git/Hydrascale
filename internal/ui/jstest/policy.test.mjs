@@ -2413,6 +2413,22 @@ test("the matrix markup escapes a hostile node name", () => {
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
+test("the matrix scrolls sideways inside its own card", async () => {
+  // Issue #387. The square holds a fixed size, therefore a document that names many
+  // identities makes the table wider than the card, and the table overflowed into the next
+  // card. The wrapper carries the scroll, so the matrix stays inside its own card. The
+  // mockup docs/specs/mockups/06-visual-acl-editor.html holds the same treatment in
+  // `.mtxwrap`.
+  const sections = sectionsBody({ groups: {}, acls: [], grants: [] });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.match(markup, /<div class="ac-mtx-wrap"><table class="ac-mtx"/);
+
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ac-mtx-wrap\{[^}]*overflow-x:auto/);
+});
+
 test("the matrix draws a row and a column for a group that no rule references", () => {
   // Issue #351. The operator decided on 2026-08-24 that the matrix draws every named
   // identity. A group therefore reaches the axes before a rule names it.
