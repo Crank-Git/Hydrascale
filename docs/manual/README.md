@@ -13,6 +13,7 @@ enforces, and to read and change the upstream policy that each control server ho
 | [Get oriented in the console](first-run.md) | The Overview, Namespaces, Access, Policy, Activity, and Settings views, on first arrival. |
 | [Change a local rule in Access](access-editor.md) | Stage a local rule, enter ports, and discard the staged edit. |
 | [Read and change the upstream policy in Policy](policy-editor.md) | The Policy tailnet list, the policy document editor, and the read-only state of a tailnet with no credential. |
+| [Use the Visual editor of Policy](policy-visual-editor.md) | The section nav, the SSH access section, the Auto-approvers and Node attributes sections, the Postures section, and the Tests section. |
 
 ## Getting started
 
