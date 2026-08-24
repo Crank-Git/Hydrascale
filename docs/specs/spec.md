@@ -116,6 +116,7 @@ the operator what is allowed.
 | document model | noun | The in-memory structure that the daemon builds from a policy document's text, used to read and change a policy section without altering a byte it does not touch. | AST, parse tree, document object |
 | visual editor | noun | The policy view's region that draws tags, groups, and rules instead of raw text. | drawn editor, GUI editor |
 | text editor | noun | The policy view's region that shows the huJSON document as editable text, which `features/08-upstream-policy.md` builds. | raw editor, code editor |
+| result region | noun | The policy view's region that states the answer of the last validate or push, with one line per error. | result panel, status area, message box |
 
 ## Goals
 
@@ -589,7 +590,8 @@ Covers: `features/13-visual-policy-advanced.md`.
 Depends on: Epic 12.
 Exit criteria: each of the five sections shows and edits its entries. A control server
 that does not support `postures` shows every entry read-only and disables Push while the
-key remains. Running Tests marks each assertion `pass` or `fail` without blocking Push.
+key remains. A run of the tests marks each assertion `pass` or `fail`. A failed assertion
+disables Push, and the result region states that reason.
 
 ## Milestones
 
@@ -823,7 +825,7 @@ advance to `status: built`. |
 | 2026-08-23 | 2 | **Correction: this work is version 1.2, not version 1.1.** The `/spec-update` round and the Epic 11-13 build both called it version 1.1, and the tag names `v1.1.0` and `v1.1.1` already belong to the console fixes and credential-state work that shipped between Epic 9 and Epic 10, before this round started. The Feature map and Milestone M7 now name it version 1.2. |
 | 2026-08-24 | 2 | **Design decision: the console caps a list it shares across views, not the daemon's route.** Issue #355 found the Activity view rendering every event the daemon ever recorded, unbounded. `GET /api/events` already caps its own log at 1000 entries (`internal/reconciler/reconciler.go`), and three other views (`namespaces.js`, `overview.js`, `topology.js`) read that same list for their own, smaller purposes. Capping the route itself would take history from every one of them. The fix caps the Activity view's render alone, at 100 rows, and states the count of what it draws against the count the log holds. A future view that reads `GET /api/events` inherits the full list and caps its own render the same way; it does not ask the route for a shorter list. |
 | 2026-08-24 | 2 | **Project review 2026-08-23-v1.2 found version 1.2 not ready to tag.** 13 defects filed (issues #345-357). Batch #360 (issues #345, #356, #357) shipped as a ship-partial merge: the fourth member, #353 ("a failing staged test blocks Push"), stays open because the Tailscale control server itself refuses to write a document whose test fails, so **FR-vadv-14 as written ("a failing test does not block Push") cannot be satisfied by the console alone** — the upstream write route decides first. The maintainer has not yet chosen between keeping FR-vadv-14 literally (Push proceeds, the operator reads the control server's own refusal) or correcting it to match the upstream limit (Push stays disabled, the console states the true reason, following the FR-vadv-11 precedent). See issue #353 for the open question. |
-| 2026-08-24 | 2 | Issue #353. **Decision: a failing test disables Push, and the console states the true reason.** The operator chose this over the literal reading of FR-vadv-14, which let Push proceed. The Tailscale write route refuses a document whose test fails, which the OpenAPI schema of operationId `setPolicyFile` states, therefore a Push that proceeds reaches a refusal every time. The decision follows the FR-vadv-11 precedent: the console disables Push for a write the control server refuses, and it names the reason. `features/13-visual-policy-advanced.md` FR-vadv-14 now states the true rule. FR-vadv-15 states how the console separates a failed test from a document error: the validate route answers with status 200 and the message `test(s) failed` for a failed assertion, and it refuses a malformed document with status 400. FR-vadv-16 records that a Headscale control server separates the two never, because `CheckPolicyResponse` holds no field. |
+| 2026-08-24 | 2 | Issue #353. **Decision: a failing test disables Push, and the console states the true reason.** The operator chose this over the literal reading of FR-vadv-14, which let Push proceed. The Tailscale write route refuses a document whose test fails. The OpenAPI schema of operationId `setPolicyFile` states that refusal. A Push that proceeds therefore reaches a refusal every time. The decision follows the FR-vadv-11 precedent: the console disables Push for a write the control server refuses, and it names the reason. `features/13-visual-policy-advanced.md` FR-vadv-14 and FR-vadv-15 now state the true rule. FR-vadv-16 states that the result region separates a failed test from a document error. The console reads the status for that: the validate route answers status 200 with the message `test(s) failed` for a failed assertion. It refuses a malformed document with status 400. FR-vadv-17 records the Headscale limit, because `CheckPolicyResponse` holds no field. |
 | 2026-08-24 | 2 | Issue #371. **`features/12-visual-acl-editor.md`'s FR-vacl-7 described the wrong rule for an inert square.** It stated that "the diagonal accepts no click". The diagonal names the square position, and the square from the wildcard `*` to the wildcard is a diagonal square. Issue #349 established that this square names the path from every source to every destination, therefore the operator adds and removes it like any other rule. `internal/ui/static/policy.js:1441` holds the true rule: a square is inert when both axes name the same value and that value is not the wildcard. FR-vacl-7 now states that a square is inert when it names one identity on both axes. It also states that the wildcard names every identity and not one identity, therefore the wildcard square accepts a click. |
 
 ## Issue map
@@ -890,9 +892,10 @@ Epics 11 to 13 were filed on 2026-08-23, after the `/spec-update` round that add
 | visual-policy-advanced | FR-vadv-8, 9 | #323 |
 | visual-policy-advanced | FR-vadv-10, 11 | #324 |
 | visual-policy-advanced | FR-vadv-12 to 14 | #325 |
+| visual-policy-advanced | FR-vadv-15 to 17 | #353 |
 
-Every one of the 239 requirements in these ten features is cited by at least one issue.
-Every one of the 44 requirements across `policy-document-model`, `visual-acl-editor`,
+Every one of the 242 requirements in these ten features is cited by at least one issue.
+Every one of the 47 requirements across `policy-document-model`, `visual-acl-editor`,
 and `visual-policy-advanced` is cited by exactly one issue.
 
 **FR-access-2 is covered and reversed.** The requirement states that the daemon appends the

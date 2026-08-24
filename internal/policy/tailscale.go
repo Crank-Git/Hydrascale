@@ -69,7 +69,7 @@ type TextDocument struct {
 // verbatim, because the console shows each error with its line number. See FR-policy-26.
 // TestsFailed is true when an assertion of the tests section failed, and false when the
 // control server refused the document itself. The console states a different reason for
-// each, per FR-vadv-14.
+// each, per FR-vadv-16.
 type ValidateResult struct {
 	Passed      bool
 	Body        string

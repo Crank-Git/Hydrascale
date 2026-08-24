@@ -253,20 +253,19 @@ body.rv-open .layout { padding-right:21rem; }
 </ul>
 <p>validate route (the same route <code>features/08-upstream-policy.md</code> FR-policy-14 already calls), reads the assertion results the response carries, and marks each row <code>pass</code> or <code>fail</code>.</p>
 <ul>
-<li><strong>FR-vadv-14</strong> — A failing test disables Push, and the result region states the reason:
+<li><strong>FR-vadv-14</strong> — A failing test disables Push.
+</li>
+<li><strong>FR-vadv-15</strong> — The result region names the failed test as the reason that Push stays
 </li>
 </ul>
-<p>the control server accepts no document whose test fails. The rule follows FR-vadv-11, where the console disables Push for a write that the control server refuses.</p>
+<p>disabled.</p>
 <ul>
-<li><strong>FR-vadv-15</strong> — The result region states a failed test apart from a document error.
+<li><strong>FR-vadv-16</strong> — The result region states a failed test apart from a document error.
+</li>
+<li><strong>FR-vadv-17</strong> — The result region states the message of the control server for a
 </li>
 </ul>
-<p>The Tailscale validate route answers with status 200 and the message <code>test(s) failed</code> for a failed assertion, and it refuses a malformed document with status 400.</p>
-<ul>
-<li><strong>FR-vadv-16</strong> — A Headscale control server answers the check route with an empty body,
-</li>
-</ul>
-<p>therefore the console states the message of the control server alone for that tailnet.</p>
+<p>Headscale tailnet.</p>
 <h3 id="visual-policy-advanced-user-flows">User flows</h3>
 <h4 id="visual-policy-advanced-the-operator-adds-an-ssh-rule-and-runs-the-tests">The operator adds an SSH rule and runs the tests</h4>
 <div class="diagram"><pre class="mermaid">flowchart TD
@@ -297,15 +296,18 @@ body.rv-open .layout { padding-right:21rem; }
 <ol>
 <li>Every row marks <code>pass</code> or <code>fail</code>.
 </li>
-<li>If a row marks <code>fail</code>, Push stays disabled. The result region states that the control
+<li>If a row marks <code>fail</code>, Push stays disabled, per FR-vadv-14.
+</li>
+<li>The result region states that the control server accepts no document whose test
 </li>
 </ol>
-<p>server accepts no document whose test fails, per FR-vadv-14.</p>
+<p>fails, per FR-vadv-15.</p>
 <ol>
-<li>The operator corrects the rule or removes the assertion, and Push re-enables after a
+<li>The operator corrects the rule, or the operator removes the assertion.
+</li>
+<li>Push re-enables after a validate that passes.
 </li>
 </ol>
-<p>validate that passes.</p>
 <h4 id="visual-policy-advanced-a-headscale-tailnet-s-document-holds-a-posture">A Headscale tailnet's document holds a posture</h4>
 <div class="diagram"><pre class="mermaid">flowchart TD
   A[Operator opens Postures] --&gt; B{"Control server supports postures?"}
@@ -360,12 +362,22 @@ body.rv-open .layout { padding-right:21rem; }
 <li>A failing test disables Push (FR-vadv-14). The Tailscale write route refuses a document
 </li>
 </ul>
-<p>whose test fails, which the OpenAPI schema of operationId <code>setPolicyFile</code> states, so a Push here reaches a refusal every time. The console states the reason instead, in the manner of FR-vadv-11.</p>
+<p>whose test fails. The OpenAPI schema of operationId <code>setPolicyFile</code> states that refusal. A Push here therefore reaches a refusal every time, so the console states the reason instead, in the manner of FR-vadv-11.</p>
+<ul>
+<li>The console reads the status of the validate answer to separate the two conditions
+</li>
+</ul>
+<p>(FR-vadv-16). Status 200 with the message <code>test(s) failed</code> names a failed assertion. A status outside the 2xx range names a document error.</p>
+<ul>
+<li>A Headscale control server answers the check route with an empty body. That answer holds
+</li>
+</ul>
+<p>no signal that separates the two conditions (FR-vadv-17). That tailnet keeps the message of the control server alone.</p>
 <ul>
 <li>This rule limits the edge case "The operator pushes a policy that locks this host out"
 </li>
 </ul>
-<p>of <code>features/08-upstream-policy.md</code>. The daemon second-guesses the operator never, and the control server holds this one gate ahead of the daemon.</p>
+<p>of <code>features/08-upstream-policy.md</code>. The daemon still does not second-guess the operator. The control server holds this one gate ahead of the daemon.</p>
 <h3 id="visual-policy-advanced-data-touched">Data touched</h3>
 <p>The same policy document that <code>features/08-upstream-policy.md</code> and <code>features/12-visual-acl-editor.md</code> read and write. No new entity, no new daemon route.</p>
 <h3 id="visual-policy-advanced-interfaces">Interfaces</h3>

@@ -125,7 +125,7 @@ type PolicyValidateRequest struct {
 // error with its line number. See FR-policy-26.
 // TestsFailed is true when an assertion of the tests section failed, and false when the
 // control server refused the document itself. The console states a different reason for
-// each, per FR-vadv-14. A Headscale control server answers with an empty body, therefore
+// each, per FR-vadv-16. A Headscale control server answers with an empty body, therefore
 // the Headscale path leaves this field false.
 type PolicyValidateResponse struct {
 	Passed      bool   `json:"passed"`

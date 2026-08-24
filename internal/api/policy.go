@@ -628,9 +628,10 @@ func (s *Server) validate(ctx context.Context, target policyTarget, document str
 	if target.kind == KindHeadscale {
 		// The Headscale check route answers with an empty body and status 200 when it
 		// accepts the document, therefore the error is the whole result.
-		// CheckPolicyResponse holds no field, per .claude/rules/external-apis.md, so this
-		// path separates a failed assertion from a document error never. It leaves
-		// TestsFailed false, and the console states the message of the control server.
+		// CheckPolicyResponse holds no field, per .claude/rules/external-apis.md. This path
+		// holds no signal that separates a failed assertion from a document error, so it
+		// leaves TestsFailed false and the console states the message of the control
+		// server, per FR-vadv-17.
 		if err := s.headscaleClient(target).Check(ctx, document); err != nil {
 			if errors.Is(err, policy.ErrHeadscaleNoPolicyRoute) {
 				return PolicyValidateResponse{}, err

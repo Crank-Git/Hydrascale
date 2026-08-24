@@ -345,9 +345,9 @@ export function readFailure(message) {
  * null. The state field names one of unselected, no-credential, loading, document,
  * read-only, and failed. Each one reads a value that the daemon reported.
  * The stage field names the stage of the two actions, and the result field holds the
- * answer of the last action word for word. The testsFailed field is true when the last
- * validate failed because an assertion failed, which the result region states apart from
- * a document error, per FR-vadv-14.
+ * answer of the last action word for word. The testsFailed field is true when an
+ * assertion of the document failed. The result region states that reason apart from a
+ * document error, per FR-vadv-16.
  */
 export function editorModel(state, id) {
   if (!id) {
@@ -1200,7 +1200,7 @@ function bindPosturesList(holder, id) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests (#325, FR-vadv-12 to FR-vadv-14)
+// Tests (#325, FR-vadv-12 to FR-vadv-17)
 // ---------------------------------------------------------------------------
 
 /** RUNNING_TESTS_LABEL is the label of the Run action while the control server checks
@@ -2213,7 +2213,7 @@ export function createPolicyState(options = {}) {
         loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "", stage: "read", result: "",
         // testsFailed is true when the last validate failed because an assertion of the
         // tests section failed. The result region states that reason apart from a
-        // document error, per FR-vadv-14.
+        // document error, per FR-vadv-16.
         testsFailed: false,
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last
@@ -2710,10 +2710,10 @@ export function createPolicyState(options = {}) {
      * runTests sends the text of the operator to POST /api/policy/{id}/validate and
      * holds the answer for the Tests section to read, per FR-vadv-13.
      *
-     * runTests touches no field of entry.stage or entry.result, which the top Validate
-     * action and the Push action read, so a run of the tests advances no stage and
-     * enables no push, per FR-vadv-14. runTests sends one request, and it sends no second
-     * request while the previous one runs.
+     * runTests touches no field of entry.stage or entry.result. The top Validate action
+     * and the Push action read those two fields, therefore a run of the tests advances no
+     * stage and it enables no push, per FR-vadv-14. runTests sends one request, and it
+     * sends no second request while the previous one runs.
      * The operator edits while the request runs, therefore runTests reads the text
      * again when the answer arrives. A text that changed holds no answer of a document
      * the entry no longer holds.
