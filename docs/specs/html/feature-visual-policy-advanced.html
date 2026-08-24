@@ -156,7 +156,7 @@ body.rv-open .layout { padding-right:21rem; }
 </ul></aside>
 <main>
 <h1>Feature: Visual policy editor — SSH and advanced constructs</h1>
-<p class="meta">Epic 13: Visual policy editor — SSH and advanced constructs &nbsp; <span class="badge">issued</span></p>
+<p class="meta">Epic 13: Visual policy editor — SSH and advanced constructs &nbsp; <span class="badge">built</span></p>
 <h3 id="visual-policy-advanced-purpose">Purpose</h3>
 <p><code>features/12-visual-acl-editor.md</code> draws tags, groups, and reachability rules. A policy document holds five more constructs that decide who reaches a shell, what a device auto-approves, what attribute a device carries, what posture a control server checks, and what a test asserts. This feature set draws those five, on the same document that <code>features/12-visual-acl-editor.md</code> and the text editor already edit.</p>
 <h3 id="visual-policy-advanced-user-stories">User stories</h3>
@@ -346,7 +346,14 @@ body.rv-open .layout { padding-right:21rem; }
 <h3 id="visual-policy-advanced-data-touched">Data touched</h3>
 <p>The same policy document that <code>features/08-upstream-policy.md</code> and <code>features/12-visual-acl-editor.md</code> read and write. No new entity, no new daemon route.</p>
 <h3 id="visual-policy-advanced-interfaces">Interfaces</h3>
-<p>None new. Test results come from <code>POST /api/policy/{id}/validate</code>, the existing route <code>features/08-upstream-policy.md</code> FR-policy-14 defines; the control server's validate answer carries the assertion results for <code>tests</code>/<code>sshTests</code>, per Tailscale's ACL syntax reference (<code>https://tailscale.com/kb/1337/acl-syntax</code>, retrieved 2026-08-23) and Headscale's <code>CheckPolicy</code> route (<code>docs/ref/policy.md</code> at tag <code>v0.29.3</code>).</p>
+<p>No new route. Test results come from <code>POST /api/policy/{id}/validate</code>, the existing route <code>features/08-upstream-policy.md</code> FR-policy-14 defines; the control server's validate answer carries the assertion results for <code>tests</code>/<code>sshTests</code>, per Tailscale's ACL syntax reference (<code>https://tailscale.com/kb/1337/acl-syntax</code>, retrieved 2026-08-23) and Headscale's <code>CheckPolicy</code> route (<code>docs/ref/policy.md</code> at tag <code>v0.29.3</code>).</p>
+<p><strong>New addressing scheme on the existing route (2026-08-23).</strong> <code>features/12-visual-acl-editor.md</code>'s <code>POST /api/policy/{id}/sections/edit</code> addresses an entry of a top-level array by <code>index</code>, and an entry of a top-level map by <code>key</code>. <code>autoApprovers</code> holds no top-level array or map: it is a top-level object that holds a map (<code>routes</code>) and a single field (<code>exitNode</code>), per the <code>autoApprovers</code> shape confirmed against Tailscale's ACL syntax reference. <code>sections/edit</code> therefore takes two more <code>section</code> values for this one object:</p>
+<div class="table-wrap"><table>
+<tr><th><code>section</code> value</th><th>Addressing</th><th><code>op</code> values</th></tr>
+<tr><td><code>autoApprovers.routes</code></td><td><code>key</code> names the route's CIDR; <code>entry</code> carries the approver list.</td><td><code>add</code>, <code>replace</code>, <code>remove</code></td></tr>
+<tr><td><code>autoApprovers.exitNode</code></td><td>No <code>key</code>: the exit node is one field, not a keyed collection. <code>entry</code> carries the whole approver list.</td><td><code>replace</code> alone; an empty <code>entry</code> list clears it</td></tr>
+</table></div>
+<p>Adding the first route, or setting the exit node on a document that holds no <code>autoApprovers</code> section yet, creates the section, matching <code>features/11-policy-document-model.md</code> FR-model-7's rule that adding the first entry creates the section key, extended one level deeper for this nested object.</p>
 <h3 id="visual-policy-advanced-edge-cases-failures">Edge cases &amp; failures</h3>
 <div class="table-wrap"><table>
 <tr><th>Case</th><th>Behaviour</th></tr>

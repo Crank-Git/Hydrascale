@@ -808,6 +808,16 @@ document, returns every named section) and `POST /api/policy/{id}/sections/edit`
 stateless, matching the document model's own Data touched section. Caught before any
 Epic 12 code was written. |
 | 2026-08-23 | 2 | Issue #322. **`autoApprovers` needed a new addressing scheme on the existing `POST /api/policy/{id}/sections/edit` route.** `internal/policy/document.go`'s `AddMapEntry`/`AddEntry` family operates on a top-level array or a top-level map alone, and `autoApprovers` is neither: it is a top-level object holding a map (`routes`) and a single field (`exitNode`). `Document` gains `AddAutoApproverRoute`, `ReplaceAutoApproverRoute`, `RemoveAutoApproverRoute`, and `SetAutoApproverExitNode`, and the route gains two `section` values, `autoApprovers.routes` (keyed by CIDR) and `autoApprovers.exitNode` (no key; `replace` alone). `features/13-visual-policy-advanced.md`'s Interfaces section records the addressing scheme. |
+| 2026-08-23 | 2 | **Version 1.1 is built.** Epics 11, 12, and 13 all merged into `dev`. The
+operator edits a policy document's tags, groups, reachability rules, SSH access,
+auto-approvers, node attributes, postures, and tests by drawing them, with the same
+byte-for-byte preservation guarantee the text editor already held. Three findings
+during the build, each closed before it reached a later issue: Epic 12's feature file
+wrongly said no new route was needed; Epic 11's edit methods only handled array-shaped
+sections, not the map-shaped ones Epic 12 needed; `autoApprovers`' nested shape needed
+its own addressing scheme, which Epic 13 added. `features/11-policy-document-model.md`,
+`features/12-visual-acl-editor.md`, and `features/13-visual-policy-advanced.md` all
+advance to `status: built`. |
 
 ## Issue map
 
