@@ -268,10 +268,10 @@ function policyCredentialNote(entries) {
 /**
  * ACTIVITY_ROW_LIMIT is the count of event rows that the activity view draws.
  *
- * The daemon keeps the newest 1000 events in memory, and the view drew every one of them.
- * A capture of the page reached 44500 pixels, which is 30 viewports. See issue #355.
+ * The daemon keeps the newest 1000 events in memory. The view drew every one of them. A
+ * capture of the page reached 44681 pixels, which is 30 viewports. See issue #355.
  *
- * The view draws a count of the log, and it holds no control that draws the rest. Such a
+ * The view draws a count of the log. It holds no control that draws the rest. Such a
  * control needs state that survives the poll, because activity.js draws the whole section
  * again on every tick.
  */
@@ -284,8 +284,8 @@ export const ACTIVITY_ROW_LIMIT = 100;
  * policy of the merged poll body, and it adds one note line above the event list when a
  * declared tailnet holds no usable credential.
  *
- * The view draws the newest ACTIVITY_ROW_LIMIT rows, and it states the count of the log
- * when the log holds more. See issue #355.
+ * The view draws the newest ACTIVITY_ROW_LIMIT rows. When the log holds more, the view
+ * states the count of the log. See issue #355.
  */
 export function activityMarkup(rows, policyEntries = []) {
   const note = policyCredentialNote(policyEntries);
