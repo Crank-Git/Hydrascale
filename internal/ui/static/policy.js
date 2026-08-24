@@ -110,12 +110,13 @@ export const NAMED_SET_SECTIONS = [
 const REFERENCE_CHECKED_SECTIONS = new Set(["groups", "tagOwners"]);
 
 /**
- * HEADSCALE_UNSUPPORTED_SECTIONS lists the named-set section key that a Headscale
- * control server does not support, per FR-vacl-19 and `docs/ref/policy.md` at Headscale
- * tag v0.29.3. Postures is also unsupported on Headscale, but FR-vacl-17 keeps it off
- * this screen entirely, so no editor exists there to replace.
+ * HEADSCALE_UNSUPPORTED_SECTIONS lists the section key that a Headscale control server
+ * does not support, per FR-vacl-19 and FR-vadv-11, confirmed against
+ * `docs/ref/policy.md` at Headscale tag v0.29.3. ipsets hides its entries behind the
+ * reason; postures keeps its entries visible and read-only beside the reason, per
+ * FR-vadv-11's rule that a read-only section never hides an entry.
  */
-const HEADSCALE_UNSUPPORTED_SECTIONS = new Set(["ipsets"]);
+const HEADSCALE_UNSUPPORTED_SECTIONS = new Set(["ipsets", "postures"]);
 
 /**
  * unsupportedSectionMarkup returns the reason that this tailnet's control server does
@@ -366,6 +367,7 @@ export function editorModel(state, id) {
     etag: held.etag,
     detail: held.error,
     sentence: "",
+    sections: held.sections,
   };
 
   if (row && row.word === "no credential") {
@@ -685,7 +687,7 @@ const SECTION_MARKUP = {
   ssh: (sections) => sshSectionMarkup(sections),
   autoApprovers: () => placeholderSectionMarkup(),
   nodeAttrs: (sections) => nodeAttrsSectionMarkup(sections),
-  postures: () => placeholderSectionMarkup(),
+  postures: (sections, pendingRemoval, kind) => posturesSectionMarkup(sections, kind),
   tests: () => placeholderSectionMarkup(),
 };
 
@@ -996,6 +998,132 @@ function bindNodeAttrsList(holder, id, sections) {
     const rowAttr = row.querySelector('[data-act="nodeattrs-attr"]');
     if (rowAttr) {
       rowAttr.addEventListener("change", () => replace("attr", membersFromInput(rowAttr.value)));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Postures (#324)
+// ---------------------------------------------------------------------------
+
+/** postureExpression joins a posture's clause list into the single expression string
+ *  the mockup shows, per FR-vadv-10. */
+function postureExpression(clauses) {
+  return (clauses || []).join(" && ");
+}
+
+/** postureClauses splits an expression string back into its clause list on the "&&"
+ *  separator that postureExpression joins with, dropping every empty clause. */
+function postureClauses(text) {
+  return text
+    .split("&&")
+    .map((clause) => clause.trim())
+    .filter((clause) => clause !== "");
+}
+
+/**
+ * postureEntryMarkup returns one row of the Postures section: its name and its
+ * expression, per FR-vadv-10. readOnly drops the name field and the rename and remove
+ * controls, per FR-vadv-11: the entry stays visible, but this screen does not change it.
+ */
+function postureEntryMarkup(name, clauses, readOnly) {
+  const expression = esc(postureExpression(clauses));
+  if (readOnly) {
+    return (
+      `<div class="setentry" data-key="${esc(name)}">` +
+      `<div class="setentry-head"><span class="name mono">${esc(name)}</span></div>` +
+      `<div class="setentry-value"><span class="expr mono">${expression}</span></div>` +
+      `</div>`
+    );
+  }
+  return (
+    `<div class="setentry" data-key="${esc(name)}">` +
+    `<div class="setentry-head">` +
+    `<input type="text" class="field mono setentry-key" value="${esc(name)}" aria-label="Name">` +
+    `<button type="button" class="btn" data-act="rename-posture">Rename</button>` +
+    `<button type="button" class="btn" data-act="remove-posture">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">` +
+    `<input type="text" class="field mono" data-act="posture-expr" value="${expression}" aria-label="Expression of ${esc(name)}">` +
+    `<button type="button" class="btn" data-act="save-posture">Save</button>` +
+    `</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * posturesSectionMarkup returns the Postures section: one row per postures entry, per
+ * FR-vadv-10. On a Headscale control server, HEADSCALE_UNSUPPORTED_SECTIONS marks the
+ * entries read-only and states the reason, per FR-vadv-11; unlike an unsupported
+ * named-set section, every entry stays visible.
+ */
+function posturesSectionMarkup(sections, kind) {
+  const entries = namedSetEntries(sections, "postures");
+  const readOnly = kind === "headscale" && HEADSCALE_UNSUPPORTED_SECTIONS.has("postures");
+  const rows = entries.map(([name, clauses]) => postureEntryMarkup(name, clauses, readOnly)).join("");
+  const empty = entries.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const reason = readOnly ? unsupportedSectionMarkup("Postures") : "";
+  const addRegion = readOnly
+    ? ""
+    : `<div class="setadd">` +
+      `<input type="text" class="field mono" data-add-key placeholder="name" aria-label="New posture name">` +
+      `<input type="text" class="field mono" data-add-value placeholder="expression" aria-label="New posture expression">` +
+      `<button type="button" class="btn" data-act="add-posture">Add</button>` +
+      `</div>`;
+  return `<div class="setlist" data-section="postures">${reason}${rows}${empty}${addRegion}</div>`;
+}
+
+/**
+ * bindPosturesList wires the add, rename, remove, and expression controls of the
+ * Postures section, per FR-vadv-10. A read-only render carries none of these controls,
+ * per FR-vadv-11, so it wires nothing.
+ */
+function bindPosturesList(holder, id) {
+  const list = holder.querySelector('.setlist[data-section="postures"]');
+  if (!list) {
+    return;
+  }
+
+  const nameField = list.querySelector("[data-add-key]");
+  const exprField = list.querySelector("[data-add-value]");
+  const addButton = list.querySelector('[data-act="add-posture"]');
+  if (addButton) {
+    addButton.addEventListener("click", () => {
+      const name = nameField.value.trim();
+      const expression = exprField.value.trim();
+      if (!name || expression === "") {
+        return;
+      }
+      runAction(state.addSetEntry(id, "postures", name, postureClauses(expression)));
+    });
+  }
+
+  for (const entry of list.querySelectorAll(".setentry")) {
+    const name = entry.getAttribute("data-key");
+
+    const keyField = entry.querySelector(".setentry-key");
+    const renameButton = entry.querySelector('[data-act="rename-posture"]');
+    if (renameButton && keyField) {
+      renameButton.addEventListener("click", () => {
+        const newName = keyField.value.trim();
+        if (!newName || newName === name) {
+          return;
+        }
+        runAction(state.renameSetEntry(id, "postures", name, newName));
+      });
+    }
+
+    const removeButton = entry.querySelector('[data-act="remove-posture"]');
+    if (removeButton) {
+      removeButton.addEventListener("click", () => runAction(state.removeSetEntry(id, "postures", name)));
+    }
+
+    const exprInput = entry.querySelector('[data-act="posture-expr"]');
+    const saveButton = entry.querySelector('[data-act="save-posture"]');
+    if (saveButton && exprInput) {
+      saveButton.addEventListener("click", () => {
+        runAction(state.replaceSetValue(id, "postures", name, postureClauses(exprInput.value)));
+      });
     }
   }
 }
@@ -1543,6 +1671,8 @@ export const PUSHING_LABEL = "The control server takes the document";
  * because the push is the affirmative action of this view.
  * A tailnet that takes no write gets every control disabled, and a request that runs
  * disables every control until the answer arrives.
+ * Push also stays disabled while a Headscale document holds a posture, per FR-vadv-11,
+ * because the control server does not support the key that a push would send.
  */
 export function actionsModel(model) {
   if (model.state !== "document") {
@@ -1550,6 +1680,11 @@ export function actionsModel(model) {
   }
   const busy = model.stage === "validating" || model.stage === "pushing";
   const writable = !model.readOnly && !busy;
+  const postures = model.sections && model.sections.postures;
+  const holdsUnsupportedPosture =
+    model.kind === "headscale" &&
+    HEADSCALE_UNSUPPORTED_SECTIONS.has("postures") &&
+    Boolean(postures && Object.keys(postures).length > 0);
   return [
     {
       id: "validate",
@@ -1562,7 +1697,7 @@ export function actionsModel(model) {
       id: "push",
       label: model.stage === "pushing" ? PUSHING_LABEL : "Push",
       accent: true,
-      disabled: model.stage !== "validated",
+      disabled: model.stage !== "validated" || holdsUnsupportedPosture,
     },
   ];
 }
@@ -2767,6 +2902,7 @@ function draw(section, snapshot) {
       bindNamedSetList(editor, selected);
       bindSSHList(editor, selected, toggle.sections);
       bindNodeAttrsList(editor, selected, toggle.sections);
+      bindPosturesList(editor, selected);
     }
   }
   grid.append(editor);
