@@ -792,6 +792,20 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 }
 .diffbar .n{color:var(--text-body); font-weight:600}
 
+/* The reason a control server does not support one section, per FR-vacl-19. The dot
+   carries the warn state; the box stays a neutral surface, per docs/DESIGN.md. */
+.unsup{
+  display:flex;
+  gap:var(--sp-3);
+  align-items:flex-start;
+  padding:var(--pad-row);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+  border:1px solid var(--border-default);
+}
+.unsup .dot{margin-top:5px; flex:none}
+.unsup .note{margin:0}
+
 /* The two sentences of the push come before the controls, because a warning comes before
    the step that it applies to. */
 .pol-acts{

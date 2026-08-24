@@ -1228,6 +1228,40 @@ test("the visual region names an opaque key once, per FR-vacl-18", () => {
   assert.match(markup, /randomizeClientPort/);
 });
 
+test("the visual region never draws ssh, autoApprovers, nodeAttrs, postures, tests, or sshTests, per FR-vacl-17", () => {
+  const markup = visualMarkup(
+    sectionsBody({
+      ssh: [{ action: "accept", src: ["autogroup:member"], dst: ["autogroup:self"], users: ["autogroup:nonroot"] }],
+      autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] } },
+      nodeAttrs: [{ target: ["tag:server"], attr: ["funnel"] }],
+      postures: { "posture:latest": ["node:os in ['linux']"] },
+      tests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+      sshTests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+    }),
+  );
+
+  assert.doesNotMatch(markup, /autogroup:nonroot/);
+  assert.doesNotMatch(markup, /10\.0\.0\.0\/8/);
+  assert.doesNotMatch(markup, /funnel/);
+  assert.doesNotMatch(markup, /posture:latest/);
+  assert.doesNotMatch(markup, /group:eng/);
+});
+
+test("an unsupported section shows the reason in place of its editor, per FR-vacl-19", () => {
+  const markup = visualMarkup(sectionsBody({ ipsets: { "ipset:eng": ["10.0.0.0/24"] } }), "ipsets", null, null, "headscale");
+
+  assert.match(markup, /does not support/);
+  assert.doesNotMatch(markup, /data-add-key/);
+  assert.doesNotMatch(markup, /ipset:eng/);
+});
+
+test("a Tailscale tailnet still edits IP sets normally, per FR-vacl-19", () => {
+  const markup = visualMarkup(sectionsBody({ ipsets: { "ipset:eng": ["10.0.0.0/24"] } }), "ipsets", null, null, "tailscale");
+
+  assert.match(markup, /ipset:eng/);
+  assert.match(markup, /data-add-key/);
+});
+
 test("the visual region draws nothing before the first load", () => {
   assert.equal(visualMarkup(null), `<div class="pol-visual"></div>`);
 });
