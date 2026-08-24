@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale — Policy, visual editor</title>
+<style>
+:root{
+  color-scheme:dark;
+  --ink:#0d0c0b; --s1:#141312; --s2:#1c1a18; --s3:#24211e;
+  --line:#262320; --line-soft:#1a1816;
+  --tx:#eceae6; --mu:#8d867d; --dim:#5b544c;
+  --lime:#c8ff2e; --lime-ink:#101208; --lime-soft:rgba(200,255,46,.14);
+  --ok:#7ddc8f; --warn:#f0a63c; --crit:#ff5f52;
+  --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Space Mono',ui-monospace,Menlo,monospace;
+  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px; --r-pill:999px;
+  --dur-1:90ms; --dur-2:160ms; --ease:cubic-bezier(.2,.7,.3,1);
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--tx);font-family:var(--sans);font-size:14px;
+  letter-spacing:-.01em;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:0}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh;max-width:1440px;margin:0 auto}
+.nav{border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 22px}
+.wordmark{font-size:15px;font-weight:600;letter-spacing:-.03em}
+.wordmark i{font-style:normal;color:var(--lime)}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-sm);color:var(--mu);
+  text-decoration:none;transition:background var(--dur-1) var(--ease),color var(--dur-1) var(--ease)}
+.nav a:hover{background:var(--s2);color:var(--tx)}
+.nav a[aria-current]{background:var(--s2);color:var(--tx)}
+.nav a[aria-current] svg{color:var(--lime)}
+.nav svg{width:16px;height:16px;flex:none;color:var(--dim)}
+.nav .foot{margin-top:auto;padding:10px;color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.main{padding:28px 32px;min-width:0}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:18px;flex-wrap:wrap}
+h1{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin:0 0 6px}
+.sub{color:var(--mu);max-width:620px;margin:0}
+.headact{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{font:inherit;font-weight:500;padding:10px 16px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--tx);cursor:pointer;transition:background var(--dur-1) var(--ease)}
+.btn:hover{background:var(--s3)}
+.btn.primary{background:var(--lime);color:var(--lime-ink);border-color:var(--lime);font-weight:600}
+.btn:disabled{background:var(--s2);color:var(--dim);border-color:var(--line);cursor:not-allowed}
+.btn:focus-visible,.trow:focus-visible,.nav a:focus-visible,.cell:focus-visible,.seg button:focus-visible{
+  outline:none;box-shadow:0 0 0 2px rgba(200,255,46,.45)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:var(--r-pill);
+  border:1px solid var(--line);background:var(--s2);font-family:var(--mono);font-size:11.5px;color:var(--mu)}
+.chip.staged{border-color:var(--lime);color:var(--lime);background:var(--lime-soft)}
+.chip.tag{color:var(--tx)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px}
+.card+.card{margin-top:14px}
+.note{color:var(--mu);font-size:13px;margin:8px 0 0}
+
+/* tailnet + control server context bar */
+.ctx{display:flex;align-items:center;gap:16px;padding:12px 16px;border-radius:var(--r);background:var(--s2);
+  border:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap}
+.ctx .kind{font-family:var(--mono);font-size:11.5px;color:var(--mu)}
+.ctx select{font:inherit;background:var(--s3);border:1px solid var(--line);border-radius:var(--r-sm);
+  color:var(--tx);padding:7px 10px}
+
+/* view toggle: Visual / Text */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-pill);padding:2px;background:var(--s2)}
+.seg button{font:inherit;font-size:12.5px;font-weight:500;padding:6px 14px;border-radius:var(--r-pill);
+  border:none;background:transparent;color:var(--mu);cursor:pointer}
+.seg button[aria-selected=true]{background:var(--s3);color:var(--tx)}
+
+/* section nav within the visual editor: groups/hosts/tagOwners/rules */
+.sections{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.sections button{font:inherit;font-size:12.5px;padding:8px 13px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--mu);cursor:pointer}
+.sections button[aria-current]{background:var(--s3);color:var(--tx);border-color:var(--dim)}
+.sections .badge{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-left:5px}
+
+/* named-set editor: groups, hosts, tagOwners, ipsets */
+.setrow{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:var(--r);background:var(--s1);
+  border:1px solid var(--line)}
+.setrow+.setrow{margin-top:6px}
+.setrow .name{font-family:var(--mono);font-size:12.5px;min-width:150px}
+.setrow .members{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+.setrow .add{font:inherit;font-size:12px;color:var(--dim);background:transparent;border:1px dashed var(--line);
+  border-radius:var(--r-pill);padding:3px 10px;cursor:pointer}
+.setrow .del{font:inherit;color:var(--dim);background:transparent;border:none;cursor:pointer;padding:4px}
+.setrow .del:hover{color:var(--crit)}
+
+@media (max-width:1100px){.app{grid-template-columns:1fr}.nav{display:none}}
+
+/* grants/acls matrix, same visual grammar as the local access editor: a grid of
+   fixed-size cells, never stretched to fill its card, so a wide matrix scrolls
+   inside its own row rather than overflowing into the next card. */
+.mtxwrap{overflow-x:auto}
+.mtx{border-collapse:separate;border-spacing:5px}
+.mtx th{font-family:var(--mono);font-size:11px;color:var(--mu);font-weight:500;text-align:center;padding:4px;
+  white-space:nowrap}
+.mtx th.row{text-align:right;padding-right:10px}
+.cell{width:38px;height:38px;border-radius:6px;border:1px solid var(--line);background:var(--s2);cursor:pointer;
+  transition:background var(--dur-1) var(--ease),border-color var(--dur-1) var(--ease)}
+.cell:hover{border-color:var(--dim)}
+.cell.on{background:var(--lime-soft);border-color:var(--lime)}
+.cell.staged-on{background:transparent;border:1.5px dashed var(--lime)}
+.cell.inert{background:transparent;border-color:var(--line-soft);cursor:default}
+.hot{color:var(--tx)}
+
+/* rule list: one row per acls/grants entry */
+.rule{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--r);background:var(--s1);
+  border:1px solid var(--line);flex-wrap:wrap}
+.rule+.rule{margin-top:6px}
+.rule.staged{border-color:var(--lime)}
+.rule .end{font-family:var(--mono);font-size:12.5px}
+.rule .arrow{color:var(--dim)}
+.rule .ports{display:flex;gap:5px;flex-wrap:wrap}
+.rule .grant-caps{font-family:var(--mono);font-size:11px;color:var(--mu)}
+
+/* diff / staged summary */
+.diffbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-radius:var(--r);
+  background:var(--lime-soft);border:1px solid var(--lime);margin-bottom:16px}
+.diffbar .n{font-family:var(--mono);font-weight:700;color:var(--lime)}
+
+/* unsupported-key notice, e.g. postures on Headscale */
+.unsup{display:flex;gap:11px;align-items:flex-start;padding:14px 16px;border-radius:var(--r);
+  background:rgba(240,166,60,.08);border:1px solid rgba(240,166,60,.3)}
+.unsup p{margin:0;font-size:13px}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/>
+      </svg>
+      <span class="wordmark">hydra<i>scale</i></span>
+    </div>
+    <a href="01-overview.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Overview</a>
+    <a href="02-namespace-detail.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Namespaces</a>
+    <a href="03-acl-editor.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="17" r="2.4"/><path d="M8.4 7h4.2a3 3 0 0 1 3 3v4" stroke-dasharray="2 3"/></svg>Access</a>
+    <a href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>Policy</a>
+    <a href="05-dns-and-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.5 2.5 13 0 16M12 4c-2.5 2.5-2.5 13 0 16"/></svg>DNS</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h4l2.5-6 3 12L16 12h4"/></svg>Activity</a>
+    <div class="foot">v1.1.0<br>converged 4s ago</div>
+  </nav>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h1>Policy — jbones</h1>
+        <p class="sub">Draw the tags, the groups, and the rules that this tailnet's control server holds. Every edit stages here first.</p>
+      </div>
+      <div class="headact">
+        <span class="seg" role="tablist" aria-label="Editor view">
+          <button role="tab" aria-selected="true">Visual</button>
+          <button role="tab" aria-selected="false">Text</button>
+        </span>
+        <button class="btn">Discard</button>
+        <button class="btn">Validate</button>
+        <button class="btn primary" disabled>Push</button>
+      </div>
+    </div>
+
+    <div class="ctx">
+      <span class="kind">tailscale</span>
+      <span class="chip"><span class="dot ok"></span>usable credential</span>
+      <select aria-label="Tailnet"><option>jbones</option><option>havoc</option></select>
+    </div>
+
+    <div class="diffbar">
+      <span class="n">4</span>
+      <span>staged edits: 1 group added, 1 rule narrowed to two ports, 2 tags added to <span class="mono">tag:server</span></span>
+    </div>
+
+    <nav class="sections" aria-label="Policy sections">
+      <button aria-current="page">Rules <span class="badge">6</span></button>
+      <button>Groups <span class="badge">2</span></button>
+      <button>Hosts <span class="badge">3</span></button>
+      <button>Tag owners <span class="badge">4</span></button>
+      <button>IP sets <span class="badge">1</span></button>
+    </nav>
+
+    <section class="card" aria-labelledby="mtxh">
+      <span class="label" id="mtxh">Reachability by tag and group</span>
+      <p class="note">A filled square means at least one rule allows the path. Ports and capabilities live in the rule list below.</p>
+      <div class="mtxwrap">
+        <table class="mtx">
+          <thead><tr><th></th>
+            <th class="col hot">tag:server</th><th class="col">tag:laptop</th><th class="col">group:eng</th>
+            <th class="col">autogroup:internet</th></tr></thead>
+          <tbody>
+            <tr><th class="row hot">tag:server</th>
+              <td><button class="cell inert" disabled aria-label="tag:server to tag:server, not applicable"></button></td>
+              <td><button class="cell" aria-label="tag:server to tag:laptop, denied"></button></td>
+              <td><button class="cell" aria-label="tag:server to group:eng, denied"></button></td>
+              <td><button class="cell on" aria-label="tag:server to autogroup:internet, allowed"></button></td></tr>
+            <tr><th class="row">tag:laptop</th>
+              <td><button class="cell staged-on" aria-label="tag:laptop to tag:server, staged allow"></button></td>
+              <td><button class="cell inert" disabled></button></td>
+              <td><button class="cell" aria-label="tag:laptop to group:eng, denied"></button></td>
+              <td><button class="cell on" aria-label="tag:laptop to autogroup:internet, allowed"></button></td></tr>
+            <tr><th class="row">group:eng</th>
+              <td><button class="cell on" aria-label="group:eng to tag:server, allowed"></button></td>
+              <td><button class="cell" aria-label="group:eng to tag:laptop, denied"></button></td>
+              <td><button class="cell inert" disabled></button></td>
+              <td><button class="cell on" aria-label="group:eng to autogroup:internet, allowed"></button></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="rlh">
+      <span class="label" id="rlh">Rules</span>
+      <div class="rule staged">
+        <span class="end mono">group:eng</span><span class="arrow">→</span><span class="end mono">tag:server</span>
+        <span class="ports"><span class="chip">tcp/22</span><span class="chip">tcp/443</span></span>
+        <span class="grant-caps">acls</span>
+      </div>
+      <div class="rule">
+        <span class="end mono">tag:server</span><span class="arrow">→</span><span class="end mono">autogroup:internet</span>
+        <span class="ports"><span class="chip">all ports</span></span>
+        <span class="grant-caps">acls</span>
+      </div>
+      <div class="rule staged">
+        <span class="end mono">tag:laptop</span><span class="arrow">→</span><span class="end mono">tag:server</span>
+        <span class="ports"><span class="chip">tcp/443</span></span>
+        <span class="grant-caps">grants · app: ssh-web</span>
+      </div>
+      <p class="note">A <span class="mono">grants</span> rule carries an application capability alongside ports; an
+        <span class="mono">acls</span> rule carries ports alone. The chip on the right names which block a rule
+        belongs to.</p>
+    </section>
+
+    <section class="card" aria-labelledby="unsh">
+      <span class="label" id="unsh">Not modelled here</span>
+      <div class="unsup">
+        <span class="dot warn" style="margin-top:5px"></span>
+        <p>The tailnet <span class="mono">corp-prod</span> uses a Headscale control server, which does not support
+          <span class="mono">postures</span> or <span class="mono">ipsets</span>. Switch to Text to read or change
+          either block for that tailnet; the visual editor leaves them untouched and never removes them.</p>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

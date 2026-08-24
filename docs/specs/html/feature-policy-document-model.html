@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale v1.0 — Feature: Policy document model</title>
+<style>
+:root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
+        --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#14141b; --fg:#e8e8ee; --muted:#9a9aa8; --line:#2c2c38; --accent:#8ea6ff;
+          --card:#1c1c26; --warn-bg:#2a2318; --warn-line:#a87c2a; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:16px/1.6 system-ui,-apple-system,sans-serif; }
+.layout { display:flex; min-height:100vh; }
+aside.site { width:17rem; flex:none; border-right:1px solid var(--line);
+             padding:1.2rem 1rem 3rem; position:sticky; top:0; height:100vh;
+             overflow-y:auto; background:var(--card); }
+aside.site h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+                color:var(--muted); margin:1.2rem 0 .3rem; border:none; padding:0; }
+aside.site ul { list-style:none; margin:0; padding:0; }
+aside.site li { margin:.15rem 0; }
+aside.site a { text-decoration:none; color:var(--fg); font-size:.92rem;
+               display:block; padding:.15rem .5rem; border-radius:6px; }
+aside.site a:hover { background:var(--bg); }
+aside.site a.current { background:var(--accent); color:#fff; }
+aside.site a.sub { padding-left:1.3rem; font-size:.84rem; color:var(--muted); }
+aside.site .brand { font-weight:700; font-size:1.05rem; }
+main { max-width:60rem; margin:0 auto; padding:2rem 1.5rem 6rem; min-width:0; flex:1; }
+h1,h2,h3,h4 { line-height:1.25; }
+h1 { font-size:2rem; margin:.2rem 0; }
+h2 { border-bottom:1px solid var(--line); padding-bottom:.3rem; margin-top:2.5rem; }
+a { color:var(--accent); }
+code { background:var(--card); padding:.1em .35em; border-radius:4px; font-size:.9em; }
+pre.code { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; overflow-x:auto; }
+pre.code code { background:none; padding:0; }
+.table-wrap { overflow-x:auto; }
+table { border-collapse:collapse; margin:1rem 0; min-width:50%; }
+th,td { border:1px solid var(--line); padding:.4rem .7rem; text-align:left; }
+th { background:var(--card); }
+blockquote { border-left:3px solid var(--accent); margin:1rem 0; padding:.2rem 1rem;
+             color:var(--muted); }
+.meta { color:var(--muted); margin-bottom:2rem; }
+.badge { display:inline-block; padding:.1rem .6rem; border-radius:999px;
+         border:1px solid var(--accent); color:var(--accent); font-size:.85rem; }
+.diagram { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; margin:1rem 0; overflow-x:auto; }
+.diagram pre.mermaid { margin:0; }
+.diagram.raw::before { content:"diagram source (assets/mermaid.min.js not vendored)";
+                       display:block; color:var(--muted); font-size:.8rem;
+                       margin-bottom:.5rem; }
+.callout-h, .callout-h ~ p, .callout-h ~ ul { background:var(--warn-bg); }
+.callout-h { border-left:4px solid var(--warn-line); padding:.3rem .8rem; }
+.mockup { margin:1.5rem 0; }
+.mockup iframe { width:100%; height:32rem; border:1px solid var(--line);
+                 border-radius:8px; background:#fff; }
+nav.pager { display:flex; justify-content:space-between; margin-top:3rem;
+            border-top:1px solid var(--line); padding-top:1rem; }
+@media (max-width: 900px) {
+  .layout { display:block; }
+  aside.site { width:auto; height:auto; position:static; border-right:none;
+               border-bottom:1px solid var(--line); }
+}
+h1[id]:hover .rv-add, h2[id]:hover .rv-add, h3[id]:hover .rv-add,
+h4[id]:hover .rv-add { opacity:1; }
+.rv-add { opacity:0; margin-left:.5rem; font-size:.75rem; cursor:pointer;
+          border:1px solid var(--accent); color:var(--accent); background:none;
+          border-radius:6px; padding:0 .45rem; vertical-align:middle;
+          transition:opacity .15s; }
+.rv-comment { border:1px solid var(--warn-line); border-left-width:4px;
+              background:var(--warn-bg); border-radius:8px; padding:.6rem .9rem;
+              margin:.8rem 0; font-size:.92rem; }
+.rv-comment.rv-resolved { opacity:.6; border-left-color:var(--line); }
+.rv-comment .rv-head { display:flex; gap:.6rem; align-items:center;
+                       color:var(--muted); font-size:.8rem; margin-bottom:.3rem; }
+.rv-comment .rv-head button { font-size:.75rem; cursor:pointer; background:none;
+                              border:1px solid var(--line); border-radius:6px;
+                              color:var(--muted); padding:0 .4rem; }
+.rv-comment .rv-body { white-space:pre-wrap; }
+.rv-editor textarea { width:100%; min-height:5rem; background:var(--bg);
+                      color:var(--fg); border:1px solid var(--line);
+                      border-radius:6px; padding:.5rem; font:inherit; }
+.rv-editor .rv-actions { margin-top:.4rem; display:flex; gap:.5rem; }
+.rv-editor button { cursor:pointer; border-radius:6px; padding:.2rem .8rem;
+                    border:1px solid var(--accent); background:var(--accent);
+                    color:#fff; }
+.rv-editor button.rv-cancel { background:none; color:var(--accent); }
+#rv-toggle { position:fixed; right:1rem; bottom:1rem; z-index:60;
+             background:var(--accent); color:#fff; border:none; cursor:pointer;
+             border-radius:999px; padding:.5rem 1rem; font-size:.85rem;
+             box-shadow:0 2px 10px rgba(0,0,0,.2); }
+#rv-drawer { position:fixed; top:0; right:0; bottom:0; width:21rem; z-index:55;
+             background:var(--card); border-left:1px solid var(--line);
+             display:flex; flex-direction:column; transform:translateX(100%);
+             transition:transform .2s ease; box-shadow:-4px 0 16px rgba(0,0,0,.12); }
+body.rv-open #rv-drawer { transform:none; }
+body.rv-open .layout { padding-right:21rem; }
+#rv-drawer header { padding:.8rem 1rem .5rem; border-bottom:1px solid var(--line); }
+#rv-drawer header .rv-count { color:var(--muted); font-size:.8rem; }
+#rv-drawer .rv-compose { padding:.8rem 1rem; border-bottom:1px solid var(--line); }
+#rv-drawer .rv-compose label { display:block; font-size:.75rem;
+                               color:var(--muted); margin-bottom:.25rem; }
+#rv-drawer .rv-compose select { width:100%; margin-bottom:.4rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.3rem; font:inherit; font-size:.85rem; }
+#rv-drawer .rv-compose textarea { width:100%; min-height:5.5rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.5rem; font:inherit; font-size:.9rem; }
+#rv-drawer .rv-compose .rv-live { font-size:.72rem; color:var(--muted); }
+#rv-drawer .rv-list { flex:1; overflow-y:auto; padding:.6rem 1rem; }
+#rv-drawer .rv-item { border:1px solid var(--line); border-left:3px solid
+             var(--warn-line); border-radius:8px; padding:.45rem .6rem;
+             margin-bottom:.6rem; font-size:.82rem; cursor:pointer; }
+#rv-drawer .rv-item.rv-resolved { opacity:.55; border-left-color:var(--line); }
+#rv-drawer .rv-item .rv-where { color:var(--accent); font-size:.72rem; }
+#rv-drawer .rv-item .rv-meta { color:var(--muted); font-size:.72rem;
+                               display:flex; gap:.5rem; align-items:center; }
+#rv-drawer .rv-item .rv-meta button { font-size:.7rem; cursor:pointer;
+             background:none; border:1px solid var(--line); border-radius:5px;
+             color:var(--muted); padding:0 .35rem; }
+#rv-drawer .rv-item .rv-text { white-space:pre-wrap; margin:.15rem 0; }
+#rv-drawer footer { padding:.6rem 1rem; border-top:1px solid var(--line);
+                    display:flex; gap:.5rem; flex-wrap:wrap; }
+#rv-drawer footer button, #rv-drawer .rv-compose button {
+  cursor:pointer; border:1px solid var(--accent); background:none;
+  color:var(--accent); border-radius:6px; padding:.2rem .7rem; font-size:.8rem; }
+#rv-drawer .rv-compose button.rv-primary { background:var(--accent); color:#fff; }
+#rv-drawer .rv-otherpages { color:var(--muted); font-size:.75rem;
+                            margin:.4rem 0 0; }
+@media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
+</style>
+</head>
+<body data-page="feature-policy-document-model" data-rvkey="hydrascale-v1">
+<div class="layout">
+<aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
+<h2>Spec</h2><ul>
+<li><a href="../spec.html">Overview &amp; index</a></li>
+</ul>
+<h2>Features</h2><ul>
+<li><a href="feature-foundation.html">Foundation</a></li>
+<li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
+<li><a href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-fixes.html">Security fixes</a></li>
+<li><a href="feature-dns-integrity.html">DNS integrity</a></li>
+<li><a href="feature-reachability-model.html">Local reachability model</a></li>
+<li><a href="feature-console-foundation.html">Console foundation</a></li>
+<li><a href="feature-console-access-editor.html">Console access editor</a></li>
+<li><a href="feature-upstream-policy.html">Upstream policy control</a></li>
+<li><a href="feature-docs-and-release.html">Documentation, terminal interface restyle, and the release</a></li>
+<li><a href="feature-agent-skills.html">Agent skills for the operator, and the two command defects they expose</a></li>
+<li><a class="current" href="feature-policy-document-model.html">Policy document model</a></li>
+<li><a href="feature-visual-acl-editor.html">Visual ACL editor</a></li>
+<li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
+</ul></aside>
+<main>
+<h1>Feature: Policy document model</h1>
+<p class="meta">Epic 11: Policy document model &nbsp; <span class="badge">built</span></p>
+<h3 id="policy-document-model-purpose">Purpose</h3>
+<p><code>features/08-upstream-policy.md</code> reads and writes the policy document as text. This feature set gives the daemon a structured view of that same text: a document model that a caller reads as tags, groups, and rules, and edits in place, without changing one byte that the edit did not touch.</p>
+<p><code>features/12-visual-acl-editor.md</code> and <code>features/13-visual-policy-advanced.md</code> are the console screens that a document model makes possible. This feature set builds no screen. It is the engine underneath both.</p>
+<h3 id="policy-document-model-user-stories">User stories</h3>
+<ul>
+<li>As the operator, I want the visual editor to add one rule without reformatting the
+</li>
+</ul>
+<p>rest of my policy document, so that a colleague's hand-written comment survives my edit.</p>
+<ul>
+<li>As the operator, I want a policy document with a construct the visual editor does not
+</li>
+</ul>
+<p>model to load anyway, so that an unusual document does not lock me out of every edit.</p>
+<h3 id="policy-document-model-functional-requirements">Functional requirements</h3>
+<h4 id="policy-document-model-parsing">Parsing</h4>
+<ul>
+<li><strong>FR-model-1</strong> — The daemon parses a policy document into a document model that
+</li>
+</ul>
+<p>preserves every comment, every trailing comma, and the exact byte range of every value, which the huJSON grammar allows and <code>features/08-upstream-policy.md</code> <code>Behaviour rules</code> requires the daemon to accept.</p>
+<ul>
+<li><strong>FR-model-2</strong> — The document model holds one section per top-level key present in the
+</li>
+</ul>
+<p>document: <code>groups</code>, <code>hosts</code>, <code>tagOwners</code>, <code>ipsets</code>, <code>acls</code>, <code>grants</code>, <code>ssh</code>, <code>autoApprovers</code>, <code>nodeAttrs</code>, <code>postures</code>, <code>tests</code>, <code>sshTests</code>.</p>
+<ul>
+<li><strong>FR-model-3</strong> — A key the document model does not name in FR-model-2 stays in the
+</li>
+</ul>
+<p>document as an opaque section: the model reads its byte range and writes it back unchanged on every edit.</p>
+<ul>
+<li><strong>FR-model-4</strong> — Parsing a document that does not parse as huJSON returns an error
+</li>
+</ul>
+<p>that states the line and the column of the failure, and it builds no document model.</p>
+<h4 id="policy-document-model-reading-a-section">Reading a section</h4>
+<ul>
+<li><strong>FR-model-5</strong> — The document model returns the list of entries of one named section:
+</li>
+</ul>
+<p>every group with its member list, every host alias with its address, every tag owner mapping, every allow rule, every grant, every SSH rule, every auto-approver, every node attribute, every posture, every test.</p>
+<ul>
+<li><strong>FR-model-6</strong> — A section absent from the document returns an empty list, not an
+</li>
+</ul>
+<p>error.</p>
+<h4 id="policy-document-model-editing-a-section">Editing a section</h4>
+<ul>
+<li><strong>FR-model-7</strong> — Adding, changing, or removing one entry of a named section changes
+</li>
+</ul>
+<p>the byte range of that entry and the structural bytes the huJSON grammar requires around it (a comma, a bracket), and it changes no byte outside that range.</p>
+<ul>
+<li><strong>FR-model-8</strong> — An edit inside a section keeps every comment of every other entry of
+</li>
+</ul>
+<p>that section.</p>
+<ul>
+<li><strong>FR-model-9</strong> — An edit to a document with no comment and no unusual spacing produces
+</li>
+</ul>
+<p>output that a human reads as a normal edit: the new entry matches the indentation and the quoting style of its neighbours.</p>
+<h4 id="policy-document-model-serializing">Serializing</h4>
+<ul>
+<li><strong>FR-model-10</strong> — The document model serializes back to huJSON text. Serializing a
+</li>
+</ul>
+<p>model that received no edit returns the exact bytes it was built from.</p>
+<ul>
+<li><strong>FR-model-11</strong> — Serializing a model that received one edit returns the original
+</li>
+</ul>
+<p>bytes outside the edited range, and valid huJSON inside it.</p>
+<h3 id="policy-document-model-user-flows">User flows</h3>
+<h4 id="policy-document-model-the-visual-editor-adds-one-rule-to-a-commented-document">The visual editor adds one rule to a commented document</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Console: add a rule via the visual editor] --&gt; B["daemon: parse the current document\ninto a document model"]
+  B --&gt;|parse fails| C["Return the huJSON error, line and column\nNo document model built"]
+  B --&gt;|parse succeeds| D["Locate the acls section\nor create an empty one"]
+  D --&gt; E["Insert the new entry\nkeep every existing comment and entry"]
+  E --&gt; F["Serialize: original bytes unchanged\noutside the edited range"]
+  F --&gt; G["Console shows the new document\nas the edited state, FR-policy-24"]</pre></div>
+<ol>
+<li>The operator opens the visual editor for a tailnet whose document holds a comment
+</li>
+</ol>
+<p>above one existing rule.</p>
+<ol>
+<li>The operator adds a new rule through the matrix.
+</li>
+<li>The daemon parses the current document into a document model.
+</li>
+<li>The daemon inserts the new entry into the <code>acls</code> section.
+</li>
+<li>The daemon serializes the model. The comment, and every byte outside the new entry,
+</li>
+</ol>
+<p>reads the same as before the edit.</p>
+<ol>
+<li>The console marks the document as edited, per <strong>FR-policy-24</strong>.
+</li>
+</ol>
+<h4 id="policy-document-model-a-document-holds-a-construct-the-model-does-not-name">A document holds a construct the model does not name</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Console: open the visual editor] --&gt; B["daemon: parse the document"]
+  B --&gt; C{"Does the document hold a key\nFR-model-2 does not name?"}
+  C --&gt;|yes| D["Keep it as an opaque section\nFR-model-3"]
+  C --&gt;|no| E["Every section is structured"]
+  D --&gt; F["Visual editor reads and edits\nevery named section normally"]
+  F --&gt; G["A later edit re-serializes the\nopaque section unchanged"]</pre></div>
+<ol>
+<li>The operator opens the visual editor for a document that holds a key outside
+</li>
+</ol>
+<p>FR-model-2's list.</p>
+<ol>
+<li>The daemon parses the document. The unknown key becomes one opaque section.
+</li>
+<li>The operator edits an <code>acls</code> rule through the matrix.
+</li>
+<li>The daemon serializes the model. The opaque section's bytes are unchanged.
+</li>
+</ol>
+<h3 id="policy-document-model-screens-states">Screens &amp; states</h3>
+<p>None. This feature set builds no screen.</p>
+<h3 id="policy-document-model-behaviour-rules">Behaviour rules</h3>
+<ul>
+<li>The document model never reorders a section relative to another section.
+</li>
+<li>The document model never reorders the entries of a section the caller did not edit.
+</li>
+<li>A parse failure never partially builds a model. The caller receives an error or a
+</li>
+</ul>
+<p>complete model, never one that silently drops a section.</p>
+<ul>
+<li>The document model is a pure function of its input bytes and the edits applied to it:
+</li>
+</ul>
+<p>the same document and the same edits always produce the same output bytes.</p>
+<h3 id="policy-document-model-data-touched">Data touched</h3>
+<p>The document model holds no state between requests. It parses the text that <code>features/08-upstream-policy.md</code>'s read route already returns, and it serializes the text that its write route already accepts. It adds no new entity, no new file, and no new daemon route of its own — <code>features/12-visual-acl-editor.md</code> and <code>features/13-visual-policy-advanced.md</code> add the routes that use it.</p>
+<h3 id="policy-document-model-interfaces">Interfaces</h3>
+<p>None. This feature set is an internal Go package (<code>internal/policy/document</code>, or the equivalent the implementer chooses), not a route.</p>
+<h3 id="policy-document-model-edge-cases-failures">Edge cases &amp; failures</h3>
+<div class="table-wrap"><table>
+<tr><th>Case</th><th>Behaviour</th></tr>
+<tr><td>The document is empty.</td><td>Every section reads as an empty list. Adding the first entry to a section creates that section's key.</td></tr>
+<tr><td>The document holds a top-level key twice.</td><td>huJSON forbids a duplicate key inside one object; the parse fails per FR-model-4, and it states the line of the second occurrence.</td></tr>
+<tr><td>An edit removes the last entry of a section.</td><td>The section's key stays with an empty list, unless the operator explicitly removes the key, which is a distinct edit.</td></tr>
+<tr><td>A value inside a named section holds a construct the section's own reader does not name (an object where FR-model-5 expects a string, for instance).</td><td>The reader returns an error naming the entry and the expected shape. It does not guess.</td></tr>
+<tr><td>The document is 400 kilobytes, the limit that <code>features/08-upstream-policy.md</code>'s edge cases already state.</td><td>Parsing and editing complete within the request's timeout. Epic 11 measures this on the test host before it ships.</td></tr>
+</table></div>
+<h3 id="policy-document-model-acceptance-criteria">Acceptance criteria</h3>
+<ul>
+<li>[ ] A document with a comment above one rule keeps that comment after an edit adds a
+</li>
+</ul>
+<p>second rule to the same section.</p>
+<ul>
+<li>[ ] A document whose <code>acls</code> section holds four entries, edited to change the ports of
+</li>
+</ul>
+<p>the second entry, produces output where the first, third, and fourth entries are byte-for-byte identical to the input.</p>
+<ul>
+<li>[ ] A document holding an unmodelled key (<code>randomizeClientPort</code>, for instance)
+</li>
+</ul>
+<p>round-trips that key unchanged through an edit to a modelled section.</p>
+<ul>
+<li>[ ] A document that fails to parse returns an error naming the line and the column.
+</li>
+<li>[ ] Reading a section absent from the document returns an empty list, not an error.
+</li>
+<li>[ ] Serializing a model that received no edit returns the exact input bytes.
+</li>
+</ul>
+<h3 id="policy-document-model-out-of-scope">Out of scope</h3>
+<ul>
+<li>Any console screen. <code>features/12-visual-acl-editor.md</code> and
+</li>
+</ul>
+<p><code>features/13-visual-policy-advanced.md</code> own the UI.</p>
+<ul>
+<li>Validating a rule's meaning against Tailscale's or Headscale's grammar beyond huJSON
+</li>
+</ul>
+<p>syntax — <code>features/08-upstream-policy.md</code>'s existing validate route already sends the document to the control server for that.</p>
+<ul>
+<li>A merge of two concurrent edits. <code>features/08-upstream-policy.md</code>'s existing conflict
+</li>
+</ul>
+<p>handling (the <code>ETag</code> value, HTTP 412 to HTTP 409) still applies unchanged.</p>
+<h3 id="policy-document-model-open-questions" class="callout-h">Open questions</h3>
+<p>None.</p><nav class="pager">
+<a href="feature-agent-skills.html">&larr; Feature: Agent skills for the operator, and the two command defects they expose</a>
+<a href="feature-visual-acl-editor.html">Feature: Visual ACL editor &rarr;</a>
+</nav>
+</main>
+</div>
+<script>document.querySelectorAll('.diagram').forEach(function(d){d.classList.add('raw')});</script>
+<script type="application/json" id="rv-embedded">[]</script>
+<script>
+(function(){
+  'use strict';
+  var PAGE = document.body.getAttribute('data-page');
+  // storage key carries the spec's slug: file:// pages can share one
+  // localStorage pool, and two specs must never share a comment store
+  var RVKEY = 'spec-review:' + (document.body.getAttribute('data-rvkey') || 'spec');
+  var EMBED = [];
+  var embedEl = document.getElementById('rv-embedded');
+  if (embedEl) { try { EMBED = JSON.parse(embedEl.textContent); } catch(e){} }
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(RVKEY)) || {comments:[], deleted:[]}; } catch(e){ return {comments:[], deleted:[]}; } }
+  function saveLocal(s){ try { localStorage.setItem(RVKEY, JSON.stringify(s)); } catch(e){} }
+  function cid(c){ return c.page + '|' + c.section + '|' + (c.date||'') + '|' + c.body.slice(0,24); }
+  function allComments(){
+    var s = loadLocal(), map = {};
+    EMBED.forEach(function(c){ map[cid(c)] = c; });
+    s.comments.forEach(function(c){ map[cid(c)] = c; });
+    s.deleted.forEach(function(id){ delete map[id]; });
+    return Object.keys(map).map(function(k){ return map[k]; });
+  }
+  function upsert(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    s.comments.push(c);
+    s.deleted = s.deleted.filter(function(x){ return x !== id; });
+    saveLocal(s); refresh();
+  }
+  function remove(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    if (EMBED.some(function(x){ return cid(x) === id; })) s.deleted.push(id);
+    saveLocal(s); refresh();
+  }
+  function today(){ return new Date().toISOString().slice(0,10); }
+  function exportMd(){
+    var lines = ['# Review comments', '',
+      '<!-- Exported from the spec review layer. Save this file as',
+      '     docs/specs/review-comments.md and re-run render-spec.py to embed',
+      '     every comment under its section for the next review round. -->', ''];
+    allComments().sort(function(a,b){
+      return (a.page+a.section).localeCompare(b.page+b.section);
+    }).forEach(function(c){
+      lines.push('## [' + c.page + '] ' + (c.section||''));
+      lines.push('status: ' + (c.status||'open'));
+      lines.push('date: ' + (c.date||today()));
+      lines.push(c.body); lines.push('');
+    });
+    var blob = new Blob([lines.join('\n')], {type:'text/markdown'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-comments.md';
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function importMd(file){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var text = String(reader.result);
+      var blocks = text.split(/^## /m).slice(1);
+      blocks.forEach(function(b){
+        var head = b.match(/^\[([^\]]+)\]\s*(\S*)/);
+        if (!head) return;
+        var status = (b.match(/^status:\s*(\S+)/m)||[])[1] || 'open';
+        var date = (b.match(/^date:\s*(\S+)/m)||[])[1] || today();
+        var body = b.replace(/^\[[^\]]*\]\s*\S*\s*\n/, '')
+                    .replace(/^status:.*\n?/m,'').replace(/^date:.*\n?/m,'').trim();
+        if (body) upsert({page:head[1], section:head[2]||'', status:status, date:date, body:body});
+      });
+      refresh();
+    };
+    reader.readAsText(file);
+  }
+  function commentBox(c){
+    var div = document.createElement('div');
+    div.className = 'rv-comment' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var head = document.createElement('div'); head.className = 'rv-head';
+    head.textContent = '💬 ' + (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(){ remove(c); c = Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'}); upsert(c); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(){ if (confirm('Delete this comment?')) remove(c); };
+    head.appendChild(tog); head.appendChild(del);
+    var body = document.createElement('div'); body.className = 'rv-body';
+    body.textContent = c.body;
+    div.appendChild(head); div.appendChild(body);
+    return div;
+  }
+  function editor(section, after){
+    var wrap = document.createElement('div');
+    wrap.className = 'rv-comment rv-editor';
+    var ta = document.createElement('textarea');
+    ta.placeholder = 'Comment on this section…';
+    var actions = document.createElement('div'); actions.className = 'rv-actions';
+    var save = document.createElement('button'); save.textContent = 'Save';
+    save.onclick = function(){
+      if (ta.value.trim()) upsert({page:PAGE, section:section, status:'open', date:today(), body:ta.value.trim()});
+      wrap.remove();
+    };
+    var cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+    cancel.className = 'rv-cancel'; cancel.onclick = function(){ wrap.remove(); };
+    actions.appendChild(save); actions.appendChild(cancel);
+    wrap.appendChild(ta); wrap.appendChild(actions);
+    after.insertAdjacentElement('afterend', wrap);
+    ta.focus();
+  }
+  // --- headings, inline buttons ---
+  var mainH1 = document.querySelector('main h1');
+  if (mainH1 && !mainH1.id) { mainH1.id = 'page-title'; }
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll('main h1[id], main h2[id], main h3[id], main h4[id]'));
+  headings.forEach(function(h){
+    var b = document.createElement('button');
+    b.className = 'rv-add'; b.textContent = '💬 comment'; b.title = 'Comment on this section';
+    b.onclick = function(){ editor(h.id, h); };
+    h.appendChild(b);
+  });
+  function headingTitle(h){
+    var t = h.childNodes[0] ? h.childNodes[0].textContent : h.textContent;
+    return t.trim();
+  }
+  function titleFor(section){
+    var el = section && document.getElementById(section);
+    return el ? headingTitle(el) : (section || '(page)');
+  }
+
+  // --- drawer ---
+  var drawer = document.createElement('div');
+  drawer.id = 'rv-drawer';
+  drawer.innerHTML =
+    '<header><strong>Review</strong> <span class="rv-count"></span></header>' +
+    '<div class="rv-compose">' +
+    '<div class="rv-live">Commenting on the section in view:</div>' +
+    '<label for="rv-sec"></label><select id="rv-sec"></select>' +
+    '<textarea id="rv-text" placeholder="Type as you read… (Ctrl+Enter saves)"></textarea>' +
+    '<div style="margin-top:.4rem; display:flex; gap:.5rem;">' +
+    '<button class="rv-primary" id="rv-save">Save comment</button>' +
+    '<button id="rv-clear">Clear</button></div></div>' +
+    '<div class="rv-list"></div>' +
+    '<footer><button id="rv-export">Export .md</button>' +
+    '<button id="rv-import">Import</button>' +
+    '<span class="rv-otherpages"></span></footer>';
+  document.body.appendChild(drawer);
+  var toggle = document.createElement('button');
+  toggle.id = 'rv-toggle';
+  toggle.onclick = function(){
+    document.body.classList.toggle('rv-open');
+    try { localStorage.setItem(RVKEY + ':open', document.body.classList.contains('rv-open') ? '1' : ''); } catch(e){}
+  };
+  document.body.appendChild(toggle);
+  try { if (localStorage.getItem(RVKEY + ':open')) document.body.classList.add('rv-open'); } catch(e){}
+
+  var sel = drawer.querySelector('#rv-sec');
+  headings.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h.id; opt.textContent = headingTitle(h);
+    sel.appendChild(opt);
+  });
+  var followScroll = true;
+  sel.onchange = function(){ followScroll = false; };
+
+  // scroll spy: pick the last heading above the upper third of the viewport
+  function currentSection(){
+    var line = window.innerHeight * 0.33, best = headings[0];
+    for (var i = 0; i < headings.length; i++) {
+      if (headings[i].getBoundingClientRect().top <= line) best = headings[i];
+    }
+    return best ? best.id : '';
+  }
+  window.addEventListener('scroll', function(){
+    if (!followScroll) return;
+    var s = currentSection();
+    if (s && sel.value !== s) sel.value = s;
+  }, {passive:true});
+  // typing pins the target section so a stray scroll can't retarget the comment
+  drawer.querySelector('#rv-text').addEventListener('input', function(){
+    if (this.value.trim()) followScroll = false;
+    else followScroll = true;
+  });
+
+  function saveFromDrawer(){
+    var ta = drawer.querySelector('#rv-text');
+    if (!ta.value.trim()) return;
+    upsert({page:PAGE, section:sel.value, status:'open', date:today(), body:ta.value.trim()});
+    ta.value = ''; followScroll = true;
+  }
+  drawer.querySelector('#rv-save').onclick = saveFromDrawer;
+  drawer.querySelector('#rv-text').addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveFromDrawer();
+  });
+  drawer.querySelector('#rv-clear').onclick = function(){
+    drawer.querySelector('#rv-text').value = ''; followScroll = true;
+  };
+  drawer.querySelector('#rv-export').onclick = exportMd;
+  var fileIn = document.createElement('input');
+  fileIn.type = 'file'; fileIn.accept = '.md,text/markdown'; fileIn.style.display = 'none';
+  fileIn.onchange = function(){ if (fileIn.files[0]) importMd(fileIn.files[0]); };
+  drawer.appendChild(fileIn);
+  drawer.querySelector('#rv-import').onclick = function(){ fileIn.click(); };
+
+  function drawerItem(c){
+    var div = document.createElement('div');
+    div.className = 'rv-item' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var where = document.createElement('div'); where.className = 'rv-where';
+    where.textContent = titleFor(c.section);
+    var text = document.createElement('div'); text.className = 'rv-text';
+    text.textContent = c.body;
+    var meta = document.createElement('div'); meta.className = 'rv-meta';
+    meta.textContent = (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(e){ e.stopPropagation(); remove(c);
+      upsert(Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'})); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(e){ e.stopPropagation();
+      if (confirm('Delete this comment?')) remove(c); };
+    meta.appendChild(tog); meta.appendChild(del);
+    div.appendChild(where); div.appendChild(text); div.appendChild(meta);
+    div.onclick = function(){
+      var el = c.section && document.getElementById(c.section);
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+    return div;
+  }
+
+  function refresh(){
+    document.querySelectorAll('.rv-comment:not(.rv-editor)').forEach(function(el){ el.remove(); });
+    var all = allComments();
+    var mine = all.filter(function(c){ return c.page === PAGE; });
+    mine.forEach(function(c){
+      var target = c.section && document.getElementById(c.section);
+      var anchor = target || mainH1 || document.body.querySelector('main') || document.body;
+      anchor.insertAdjacentElement('afterend', commentBox(c));
+    });
+    var open = all.filter(function(c){ return c.status !== 'resolved'; }).length;
+    toggle.textContent = '💬 Review (' + open + ')';
+    drawer.querySelector('.rv-count').textContent =
+      open + ' open / ' + all.length + ' total';
+    var list = drawer.querySelector('.rv-list');
+    list.innerHTML = '';
+    mine.slice().reverse().forEach(function(c){ list.appendChild(drawerItem(c)); });
+    var others = {};
+    all.forEach(function(c){ if (c.page !== PAGE) others[c.page] = (others[c.page]||0) + 1; });
+    var otherKeys = Object.keys(others);
+    drawer.querySelector('.rv-otherpages').textContent = otherKeys.length
+      ? 'Other pages: ' + otherKeys.map(function(k){ return k + ' (' + others[k] + ')'; }).join(', ')
+      : '';
+  }
+  refresh();
+  var s0 = currentSection();
+  if (s0) sel.value = s0;
+})();
+</script>
+</body>
+</html>

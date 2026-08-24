@@ -553,7 +553,7 @@ func TestTheConsoleJavaScriptTestsPass(t *testing.T) {
 // minimumConsoleJavaScriptTests is the floor that internal/ui/jstest must reach. The
 // value is a floor rather than an exact count, because a new console test must not fail
 // the build. Raise it when a batch of tests lands. See issue 231.
-const minimumConsoleJavaScriptTests = 218
+const minimumConsoleJavaScriptTests = 226
 
 // nodeTestPassLine matches the summary line "ℹ pass 218" that node --test writes last.
 var nodeTestPassLine = regexp.MustCompile(`(?m)^(?:ℹ|#)\s+pass\s+(\d+)\s*$`)

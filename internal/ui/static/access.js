@@ -628,7 +628,7 @@ const portPattern = /^(tcp|udp)\/([0-9]{1,5})(?:-([0-9]{1,5}))?$/;
 function portFailure(entry) {
   const match = portPattern.exec(entry);
   if (match === null) {
-    return `invalid port ${JSON.stringify(entry)}: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>`;
+    return `invalid port ${JSON.stringify(entry)}: the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22`;
   }
   const range = `invalid port ${JSON.stringify(entry)}: a port number is between 1 and 65535`;
   const low = Number(match[2]);
@@ -851,7 +851,7 @@ function chip(text, dotTone) {
 
 /** control builds one button of the header from its model. */
 function control(model, onClick) {
-  const button = el("button", model.accent ? "btn primary" : "btn", model.label);
+  const button = el("button", model.accent && !model.disabled ? "btn primary" : "btn", model.label);
   button.type = "button";
   button.disabled = model.disabled;
   button.addEventListener("click", onClick);
@@ -1388,6 +1388,42 @@ function drawModeDialog(mode) {
  * snapshot.status.access_model holds the answer of GET /api/access, which the poll layer
  * reads on every tick. The view opens no request of its own and it starts no timer.
  */
+/**
+ * accessSectionOrder returns the order that draw appends the sections of the view, as an
+ * array of section names. shown states which optional section holds content for this draw.
+ * The staged list renders last, after the matrix and the rule list, so a section that a
+ * value turns on or off never moves the matrix or the flow overview. Issue #289.
+ */
+export function accessSectionOrder(shown) {
+  const order = ["header"];
+  if (shown.warning) {
+    order.push("warning");
+  }
+  if (shown.offer) {
+    order.push("offer");
+  }
+  if (shown.dropped) {
+    order.push("dropped");
+  }
+  if (shown.applyError) {
+    order.push("applyFailure");
+  }
+  if (shown.observe) {
+    order.push("observe");
+  }
+  order.push(shown.empty ? "empty" : "flow");
+  if (shown.matrixRows) {
+    order.push("matrix");
+  }
+  if (shown.ruleRows) {
+    order.push("rules");
+  }
+  if (shown.stagedCount > 0) {
+    order.push("staged");
+  }
+  return order;
+}
+
 function draw(section, snapshot) {
   redraw = () => draw(section, snapshot);
   section.replaceChildren();
@@ -1406,68 +1442,69 @@ function draw(section, snapshot) {
   }
   const base = state.base();
 
-  section.append(drawHeader(base));
-
   // The warning, the offer, the dropped statement, and the failure all come before the
   // staged list, and the operator reads each one before the next apply. The warning comes
   // first, because it names the one edit that stops a session of the operator.
   const warning = activePathWarning(state.difference(), body && body.active_paths);
-  if (warning) {
-    section.append(drawActivePathWarning(warning));
-  }
-
   const offer = rebaseOffer(state.baseChanged(), state.count());
-  if (offer) {
-    section.append(drawRebaseOffer(offer));
-  }
-
   const dropped = droppedStatement(state.dropped());
-  if (dropped) {
-    section.append(drawDropped(dropped));
-  }
-
-  if (applyError !== null) {
-    section.append(drawApplyFailure(applyFailureStatement(applyError)));
-  }
-
   const stagedList = stagedListModel(state.difference());
-  if (stagedList.count > 0) {
-    section.append(drawStagedList(stagedList));
-  }
-
   const observe = observeStatement(base.mode);
-  if (observe) {
-    section.append(drawObserve(observe));
-  }
 
   // The empty state reads the staged rule set, because the view draws that rule set. A
   // view that reads the rule set of the daemon states that no rule exists while the
   // picture already holds a staged curve.
   const empty = emptyStatement({ nodes: base.nodes, rules: state.rules() });
-  if (empty) {
-    section.append(drawEmpty(empty));
-  } else {
-    section.append(drawFlow(snapshot.status, base.nodes));
-  }
 
   // A host that declares no tailnet and no host node produces no row, so the empty
   // statement stands alone and the view draws no grid with no square.
   const matrix = matrixModel(base, state.rules());
-  if (matrix.rows.length > 0) {
-    section.append(drawMatrix(matrix));
-  }
 
   // A rule set with no rule draws no list, because the empty statement above already names
   // the matrix as the first step.
   const list = ruleListModel(base, state.rules());
+
+  let restore = [];
+  const elements = {
+    header: drawHeader(base),
+    warning: warning ? drawActivePathWarning(warning) : null,
+    offer: offer ? drawRebaseOffer(offer) : null,
+    dropped: dropped ? drawDropped(dropped) : null,
+    applyFailure: applyError !== null ? drawApplyFailure(applyFailureStatement(applyError)) : null,
+    observe: observe ? drawObserve(observe) : null,
+    empty: empty ? drawEmpty(empty) : null,
+    flow: empty ? null : drawFlow(snapshot.status, base.nodes),
+    matrix: matrix.rows.length > 0 ? drawMatrix(matrix) : null,
+    rules: null,
+    staged: stagedList.count > 0 ? drawStagedList(stagedList) : null,
+  };
   if (list.rows.length > 0) {
     const rules = drawRules(list);
-    section.append(rules.card);
-    // The field is in the document now, therefore the view returns the focus that the poll
-    // took from the operator.
-    for (const field of rules.restore) {
-      field.focus();
-    }
+    elements.rules = rules.card;
+    restore = rules.restore;
+  }
+
+  // The staged list renders last, after the matrix and the rule list, so staging the first
+  // edit grows content below the matrix rather than shifting it. accessSectionOrder holds
+  // that order. Issue #289.
+  for (const key of accessSectionOrder({
+    warning: Boolean(warning),
+    offer: Boolean(offer),
+    dropped: Boolean(dropped),
+    applyError: applyError !== null,
+    observe: Boolean(observe),
+    empty: Boolean(empty),
+    matrixRows: matrix.rows.length > 0,
+    ruleRows: list.rows.length > 0,
+    stagedCount: stagedList.count,
+  })) {
+    section.append(elements[key]);
+  }
+
+  // The field is in the document now, therefore the view returns the focus that the poll
+  // took from the operator.
+  for (const field of restore) {
+    field.focus();
   }
 
   if (dialog) {

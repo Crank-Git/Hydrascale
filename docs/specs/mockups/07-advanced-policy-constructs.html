@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale — Policy, advanced constructs</title>
+<style>
+:root{
+  color-scheme:dark;
+  --ink:#0d0c0b; --s1:#141312; --s2:#1c1a18; --s3:#24211e;
+  --line:#262320; --line-soft:#1a1816;
+  --tx:#eceae6; --mu:#8d867d; --dim:#5b544c;
+  --lime:#c8ff2e; --lime-ink:#101208; --lime-soft:rgba(200,255,46,.14);
+  --ok:#7ddc8f; --warn:#f0a63c; --crit:#ff5f52;
+  --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Space Mono',ui-monospace,Menlo,monospace;
+  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px; --r-pill:999px;
+  --dur-1:90ms; --dur-2:160ms; --ease:cubic-bezier(.2,.7,.3,1);
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--tx);font-family:var(--sans);font-size:14px;
+  letter-spacing:-.01em;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:0}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh;max-width:1440px;margin:0 auto}
+.nav{border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 22px}
+.wordmark{font-size:15px;font-weight:600;letter-spacing:-.03em}
+.wordmark i{font-style:normal;color:var(--lime)}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-sm);color:var(--mu);
+  text-decoration:none}
+.nav a:hover{background:var(--s2);color:var(--tx)}
+.nav a[aria-current]{background:var(--s2);color:var(--tx)}
+.nav a[aria-current] svg{color:var(--lime)}
+.nav svg{width:16px;height:16px;flex:none;color:var(--dim)}
+.nav .foot{margin-top:auto;padding:10px;color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.main{padding:28px 32px;min-width:0;max-width:920px}
+.head{margin-bottom:18px}
+h1{font-size:30px;letter-spacing:-.035em;line-height:1.12;margin:0 0 6px}
+.sub{color:var(--mu);max-width:620px;margin:0}
+.btn{font:inherit;font-weight:500;padding:9px 14px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--tx);cursor:pointer}
+.btn:hover{background:var(--s3)}
+.btn.primary{background:var(--lime);color:var(--lime-ink);border-color:var(--lime);font-weight:600}
+.btn:disabled{background:var(--s2);color:var(--dim);border-color:var(--line);cursor:not-allowed}
+.btn.sm{font-size:12px;padding:6px 11px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:var(--r-pill);
+  border:1px solid var(--line);background:var(--s2);font-family:var(--mono);font-size:11.5px;color:var(--mu)}
+.chip.staged{border-color:var(--lime);color:var(--lime);background:var(--lime-soft)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px}
+.card+.card{margin-top:14px}
+.note{color:var(--mu);font-size:13px;margin:8px 0 0}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)}
+
+.sections{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.sections button{font:inherit;font-size:12.5px;padding:8px 13px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--s2);color:var(--mu);cursor:pointer}
+.sections button[aria-current]{background:var(--s3);color:var(--tx);border-color:var(--dim)}
+
+/* ssh rule row */
+.rule{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--r);background:var(--s1);
+  border:1px solid var(--line);flex-wrap:wrap}
+.rule+.rule{margin-top:6px}
+.rule.staged{border-color:var(--lime)}
+.rule .end{font-family:var(--mono);font-size:12.5px}
+.rule .arrow{color:var(--dim)}
+.rule .users{display:flex;gap:5px;flex-wrap:wrap}
+.rule .act{margin-left:auto;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:var(--r-pill)}
+.rule .act.accept{color:var(--ok);background:rgba(125,220,143,.12)}
+.rule .act.check{color:var(--warn);background:rgba(240,166,60,.12)}
+
+/* auto-approvers */
+.aarow{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:var(--r);background:var(--s1);
+  border:1px solid var(--line)}
+.aarow+.aarow{margin-top:6px}
+.aarow .cidr{font-family:var(--mono);font-size:12.5px;min-width:150px}
+.aarow .approvers{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+
+/* posture list */
+.posture{display:flex;align-items:baseline;gap:10px;padding:11px 14px;border-radius:var(--r);background:var(--s1);
+  border:1px solid var(--line)}
+.posture+.posture{margin-top:6px}
+.posture .name{font-family:var(--mono);font-size:12.5px;min-width:170px}
+.posture .expr{color:var(--mu);font-family:var(--mono);font-size:12px}
+
+/* node attrs */
+.attr{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:var(--r);background:var(--s1);
+  border:1px solid var(--line)}
+.attr+.attr{margin-top:6px}
+.attr .target{font-family:var(--mono);font-size:12.5px;min-width:170px}
+
+.unsup{display:flex;gap:11px;align-items:flex-start;padding:14px 16px;border-radius:var(--r);
+  background:rgba(240,166,60,.08);border:1px solid rgba(240,166,60,.3);margin-top:14px}
+.unsup p{margin:0;font-size:13px}
+
+/* test assertions */
+.test{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--r);background:var(--s1);
+  border:1px solid var(--line);font-family:var(--mono);font-size:12px}
+.test+.test{margin-top:5px}
+.test .res{margin-left:auto;font-size:11px}
+.test .res.pass{color:var(--ok)}
+.test .res.fail{color:var(--crit)}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/>
+      </svg>
+      <span class="wordmark">hydra<i>scale</i></span>
+    </div>
+    <a href="01-overview.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Overview</a>
+    <a href="02-namespace-detail.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Namespaces</a>
+    <a href="03-acl-editor.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="17" r="2.4"/><path d="M8.4 7h4.2a3 3 0 0 1 3 3v4" stroke-dasharray="2 3"/></svg>Access</a>
+    <a href="06-visual-acl-editor.html" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>Policy</a>
+    <a href="05-dns-and-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.5 2.5 13 0 16M12 4c-2.5 2.5-2.5 13 0 16"/></svg>DNS</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h4l2.5-6 3 12L16 12h4"/></svg>Activity</a>
+    <div class="foot">v1.1.0<br>converged 4s ago</div>
+  </nav>
+
+  <main class="main">
+    <div class="head">
+      <h1>Policy — jbones — SSH and node attributes</h1>
+      <p class="sub">The rest of the policy document: who reaches a shell, what a device auto-approves, and what a
+        posture requires. The rule matrix stays on the Rules section.</p>
+    </div>
+
+    <nav class="sections" aria-label="Advanced policy sections">
+      <button aria-current="page">SSH access <span class="mono">3</span></button>
+      <button>Auto-approvers</button>
+      <button>Node attributes</button>
+      <button>Postures</button>
+      <button>Tests</button>
+    </nav>
+
+    <section class="card" aria-labelledby="sshh">
+      <span class="label" id="sshh">SSH access</span>
+      <p class="note">One rule per row. <span class="mono">check</span> asks the connecting user to re-authenticate on
+        the period named.</p>
+      <div class="rule staged">
+        <span class="end mono">group:eng</span><span class="arrow">→</span><span class="end mono">tag:server</span>
+        <span class="users"><span class="chip">autogroup:nonroot</span></span>
+        <span class="act accept">accept</span>
+      </div>
+      <div class="rule">
+        <span class="end mono">tag:laptop</span><span class="arrow">→</span><span class="end mono">tag:server</span>
+        <span class="users"><span class="chip">root</span></span>
+        <span class="act check">check · 20h</span>
+      </div>
+      <button class="btn sm" style="margin-top:10px">Add an SSH rule</button>
+    </section>
+
+    <section class="card" aria-labelledby="aah" style="margin-top:14px">
+      <span class="label" id="aah">Auto-approvers</span>
+      <p class="note">A route or an exit node that these approvers advertise skips the manual approval step.</p>
+      <div class="aarow">
+        <span class="cidr">10.200.0.0/16</span>
+        <span class="approvers"><span class="chip">tag:router</span></span>
+      </div>
+      <div class="aarow">
+        <span class="cidr">exit node</span>
+        <span class="approvers"><span class="chip">group:eng</span></span>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="nah" style="margin-top:14px">
+      <span class="label" id="nah">Node attributes</span>
+      <div class="attr">
+        <span class="target">tag:server</span>
+        <span class="chip">funnel</span>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="posh" style="margin-top:14px">
+      <span class="label" id="posh">Postures</span>
+      <p class="note"><span class="mono">jbones</span> is a Tailscale tailnet, so this section is fully editable.</p>
+      <div class="posture">
+        <span class="name">posture:latestMac</span>
+        <span class="expr">node:os == 'macos' && node:tsVersion >= '1.40'</span>
+      </div>
+      <button class="btn sm" style="margin-top:10px">Add a posture</button>
+    </section>
+
+    <section class="card" aria-labelledby="posh2" style="margin-top:14px">
+      <span class="label" id="posh2">Postures — corp-prod</span>
+      <p class="note">A different tailnet, shown for contrast: <span class="mono">corp-prod</span> uses a Headscale
+        control server, which does not support <span class="mono">postures</span>.</p>
+      <div class="unsup">
+        <span class="dot warn" style="margin-top:5px"></span>
+        <p>This section reads as text-only for <span class="mono">corp-prod</span>, and Push disables while its
+          document holds a <span class="mono">postures</span> key. Every existing entry stays visible; the visual
+          editor never removes one on its own.</p>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="testh" style="margin-top:14px">
+      <span class="label" id="testh">Tests</span>
+      <p class="note">Each assertion runs against the staged rule set before Push is offered.</p>
+      <div class="test"><span>group:eng can tcp/22 tag:server</span><span class="res pass">accept</span></div>
+      <div class="test"><span>tag:laptop cannot tag:server *</span><span class="res pass">deny</span></div>
+      <div class="test"><span>tag:server can tcp/443 autogroup:internet</span><span class="res fail">denied, want accept</span></div>
+      <button class="btn sm" style="margin-top:10px">Add a test</button>
+    </section>
+  </main>
+</div>
+</body>
+</html>

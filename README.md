@@ -34,6 +34,7 @@ loopback address.
 - [The console](#the-console)
 - [Local rules](#local-rules)
 - [Upstream policy](#upstream-policy)
+- [The Visual policy editor](#the-visual-policy-editor)
 - [Credentials](#credentials)
 - [Host access](#host-access)
 - [Headscale and a custom control server](#headscale-and-a-custom-control-server)
@@ -350,6 +351,51 @@ PolicyModeFile = "file"
 
 Policy access also needs Headscale v0.29 or later, because an older server exposes no
 policy route.
+
+## The Visual policy editor
+
+The Policy view offers a second way to read and change the policy document: the
+**Visual** tab, next to **Text**. The Visual tab shows the document as sections, and it
+stages an edit to one section at a time. Text stays the way to read or change a section
+that Visual does not yet build.
+
+<p align="center">
+  <img src="docs/manual/screenshots/visual-acl-editor/03-visual-tab-rules.png" alt="The section nav of the Visual editor, with ten sections and their entry counts, and the Rules section open below it." width="900">
+</p>
+
+<p align="center"><i>The section nav. Rules opens by default, next to a reachability matrix.</i></p>
+
+The section nav lists ten sections, each with a count of the entries it holds:
+
+- **Groups**, **Hosts**, **Tag owners**, and **IP sets** hold the named sets that a
+  rule refers to.
+- **Rules** holds the reachability matrix and the rule list. A filled square in the
+  matrix marks an allowed path, in the same visual language as the Access view.
+- **SSH access** holds the rules that grant or check an SSH connection, each with a
+  source, a destination, a user list, and an action.
+- **Auto-approvers** holds the routes and the exit node that the control server
+  approves without an operator step.
+- **Node attributes** holds the `nodeAttrs` entries of the document, each with a
+  target list and an attribute list.
+- **Postures** holds the device posture definitions that a check rule refers to.
+- **Tests** holds the assertions that the document declares. A **Run** button sends
+  the staged document to the validate route of the control server, and each row shows
+  its result as a state dot and a word.
+
+<p align="center">
+  <img src="docs/manual/screenshots/ssh-autoapprovers-nodeattrs/08-ssh-staged-2rows.png" alt="The SSH access section, with two rules staged and Discard and Push both enabled." width="900">
+</p>
+
+<p align="center"><i>The SSH access section. A staged rule enables Discard and Push, the same as a Text edit.</i></p>
+
+<p align="center">
+  <img src="docs/manual/screenshots/postures-tests/08-tests-pass.png" alt="The Tests section, with one staged test marked pass after Run." width="900">
+</p>
+
+<p align="center"><i>The Tests section, after Run. A test marks pass or names the reason the control server gives.</i></p>
+
+`docs/manual/policy-visual-editor.md` walks each section in order, with a screenshot
+per step.
 
 ## Credentials
 

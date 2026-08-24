@@ -17,6 +17,7 @@ import {
   OBSERVE_LOG_COMMAND,
   SQUARE_SIDE,
   SQUARE_SIDE_DENSE,
+  accessSectionOrder,
   activePathWarning,
   applyFailureStatement,
   applyStagedRules,
@@ -830,7 +831,10 @@ test("entering the port 22 shows an error that names the expected format", () =>
   // FR-editor-22, and the edge case "A port entry is 22".
   const result = parsePorts("22");
   assert.equal(result.ports, null);
-  assert.equal(result.error, 'invalid port "22": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>');
+  assert.equal(
+    result.error,
+    'invalid port "22": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22',
+  );
 });
 
 test("the rule list rejects tcp/0, tcp/65536, and tcp/22-21", () => {
@@ -849,7 +853,7 @@ test("the console repeats the port rule that internal/access holds", async () =>
   // states what PUT /api/access states rather than a second grammar.
   const rules = await readFile(new URL("../../access/rules.go", import.meta.url), "utf8");
   assert.match(rules, /\^\(tcp\|udp\)\/\(\[0-9\]\{1,5\}\)\(\?:-\(\[0-9\]\{1,5\}\)\)\?\$/);
-  assert.match(rules, /the form is tcp\/<n>, udp\/<n>, tcp\/<n>-<m>, or udp\/<n>-<m>/);
+  assert.match(rules, /the form is tcp\/<n>, udp\/<n>, tcp\/<n>-<m>, or udp\/<n>-<m>, for example tcp\/22/);
   assert.match(rules, /a port number is between 1 and 65535/);
   assert.match(rules, /the second number is lower than the first/);
 });
@@ -931,6 +935,56 @@ test("a staged list of 40 edits holds 40 rows, it scrolls, and the count is exac
 
   const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
   assert.match(style, /\.ac-stagedlist\{[^}]*overflow-y:auto/);
+});
+
+// ---------------------------------------------------------------------------
+// The section order
+// ---------------------------------------------------------------------------
+
+test("the matrix and the flow overview hold the same position whether or not an edit is staged", () => {
+  // Issue #289. drawStagedList grows the section above it, so a section before the staged
+  // list moves down the page when the operator stages the first edit. The matrix and the
+  // flow overview must not be that section, therefore the staged list renders last among
+  // the sections that a value can turn on or off.
+  const shown = {
+    warning: false,
+    offer: false,
+    dropped: false,
+    applyError: false,
+    observe: false,
+    empty: false,
+    matrixRows: true,
+    ruleRows: true,
+    stagedCount: 0,
+  };
+
+  const withoutStaged = accessSectionOrder(shown);
+  const withStaged = accessSectionOrder({ ...shown, stagedCount: 1 });
+
+  assert.equal(withoutStaged.indexOf("matrix"), withStaged.indexOf("matrix"));
+  assert.equal(withoutStaged.indexOf("flow"), withStaged.indexOf("flow"));
+  assert.ok(!withoutStaged.includes("staged"));
+  assert.equal(withStaged.indexOf("staged"), withStaged.length - 1);
+});
+
+test("the active-path warning and the apply action still read above the staged list", () => {
+  // FR-editor-28. The apply action lives in the header, which the order always places
+  // first, so this test asserts the ordering constraint that remains: the warning above
+  // the staged list.
+  const order = accessSectionOrder({
+    warning: true,
+    offer: false,
+    dropped: false,
+    applyError: false,
+    observe: false,
+    empty: false,
+    matrixRows: false,
+    ruleRows: false,
+    stagedCount: 1,
+  });
+
+  assert.ok(order.indexOf("header") < order.indexOf("staged"));
+  assert.ok(order.indexOf("warning") < order.indexOf("staged"));
 });
 
 // ---------------------------------------------------------------------------

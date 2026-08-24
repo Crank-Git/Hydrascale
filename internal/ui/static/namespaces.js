@@ -81,6 +81,31 @@ function reachabilityOf(status, id) {
   return { word: "not probed", tone: "" };
 }
 
+/**
+ * credentialOf returns the upstream policy credential problem of one tailnet as a dot
+ * tone, a short word, and the reason of the daemon word for word. It returns null when the
+ * credential is usable or the poll holds no policy entry for the tailnet yet.
+ *
+ * status.policy is the field that fetchConsoleState merges from GET /api/policy. Local
+ * reachability and upstream policy are two independent systems (see
+ * docs/specs/features/08-upstream-policy.md), so this state never replaces stateOf or
+ * reachabilityOf; it is a second, additional line. See issue #287.
+ *
+ * The word and the reason are two fields, because the dot and word slot holds a short
+ * lowercase word only. A reason in that slot is a sentence, and it overlapped the peer
+ * count in the list row and it overflowed the panel. The word matches the word that the
+ * policy view states for the same credential state. See issue #347.
+ */
+function credentialOf(status, id) {
+  const entries = (status && status.policy) || [];
+  const entry = entries.find((tailnet) => tailnet.id === id);
+  if (!entry || entry.credential_state === "usable") {
+    return null;
+  }
+  const word = entry.credential_state === "rejected" ? "credential rejected" : "no credential";
+  return { tone: "crit", word, reason: entry.reason || "" };
+}
+
 /** addressOf returns the first tailnet address of a namespace, or the absent marker. */
 function addressOf(detail) {
   if (detail && detail.tailscale_ips && detail.tailscale_ips.length > 0) {
@@ -117,6 +142,7 @@ export function buildRows(status, details, options = {}) {
         id,
         state: stateOf(status, detail, id, isRemoving),
         reachability: reachabilityOf(status, id),
+        credential: credentialOf(status, id),
         peerCount: count,
         peers: count === null ? "no peer count yet" : peerWord(count),
         address: addressOf(detail),
@@ -150,11 +176,13 @@ export function buildPanel(status, details, events, id) {
   const desired = status.desired[id];
   const actual = (status.actual && status.actual[id]) || null;
   const peers = (detail && detail.peers) || [];
+  const credential = credentialOf(status, id);
 
   return {
     id,
     state: stateOf(status, detail, id, false),
     reachability: reachabilityOf(status, id),
+    credential,
     fields: [
       { label: "namespace", value: (actual && actual.NsName) || `ns-${id}` },
       { label: "address", value: addressOf(detail) },
@@ -416,7 +444,7 @@ async function send(route, body, done) {
   }
 }
 
-/** drawRow draws one line of the list. */
+/** drawRow draws one row of the list. The row wraps when its line is too short. */
 function drawRow(row) {
   const node = el("div", row.muted ? "ns-row ns-muted" : "ns-row");
   node.setAttribute("role", "option");
@@ -426,6 +454,9 @@ function drawRow(row) {
   node.append(el("span", "ns-id mono", row.id));
   node.append(stateSpan(row.state));
   node.append(stateSpan(row.reachability));
+  if (row.credential) {
+    node.append(stateSpan(row.credential));
+  }
   node.append(el("span", "ns-peers mono", row.peers));
 
   const address = el("span", "ns-addr mono");
@@ -468,6 +499,9 @@ function drawPanel(panel) {
   const states = el("div", "ns-panel-states");
   states.append(stateSpan(panel.state));
   states.append(stateSpan(panel.reachability));
+  if (panel.credential) {
+    states.append(stateSpan(panel.credential));
+  }
   aside.append(states);
 
   const list = el("dl", "ns-kv");
@@ -479,6 +513,15 @@ function drawPanel(panel) {
   }
   aside.append(list);
 
+  // The reason is a sentence of the daemon, so it takes a note that wraps. The definition
+  // list holds one short value per row and it overflowed the panel with this text before.
+  // See issue #347.
+  if (panel.credential && panel.credential.reason) {
+    const card = el("div", "ns-notice");
+    card.append(el("span", "label", "Credential"));
+    card.append(el("p", "note ns-reason", panel.credential.reason));
+    aside.append(card);
+  }
   if (panel.loginURL) {
     const card = el("div", "ns-notice");
     card.append(el("span", "label", "Not authenticated"));

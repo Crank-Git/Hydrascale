@@ -22,6 +22,9 @@ export const EVENTS_ROUTE = "/api/events";
 /** The route that holds the resolver settings and the DNS protection state. */
 export const DNS_ROUTE = "/api/dns";
 
+/** The route that lists every tailnet with its control server kind and credential state. */
+export const POLICY_ROUTE = "/api/policy";
+
 /** The poll interval that the console uses when the operator sets none. FR-console-15. */
 export const DEFAULT_POLL_INTERVAL_MS = 5000;
 
@@ -143,31 +146,38 @@ export async function requestJSON(route, method = "GET", body) {
 }
 
 /**
- * fetchConsoleState reads the four routes of one poll and returns one body.
+ * fetchConsoleState reads the five routes of one poll and returns one body.
  *
  * The status route holds neither the peer count, nor the local rule set, nor the event
- * log, nor the DNS state, and the console shows all four. The console therefore reads the
- * four routes together on one tick rather than on four timers, so the whole console still
- * holds one data source and one cadence. See FR-console-15.
+ * log, nor the DNS state, nor the policy credential state, and the console shows all
+ * five. The console therefore reads the five routes together on one tick rather than on
+ * five timers, so the whole console still holds one data source and one cadence. See
+ * FR-console-15.
  *
- * A failure of any one route fails the poll, which marks the state stale. The four routes
+ * The policy route is GET /api/policy, the list route. It reports the credential state of
+ * every declared tailnet and it never reaches a control server, unlike
+ * GET /api/policy/{id}, so it never fails the whole poll on a missing credential.
+ *
+ * A failure of any one route fails the poll, which marks the state stale. The five routes
  * come from the one daemon on the one listener, so a partial answer states nothing that a
  * whole answer does not.
  *
  * @param {function} [request] the transport, which a test replaces.
  */
 export async function fetchConsoleState(request = requestJSON) {
-  const [status, access, events, dns] = await Promise.all([
+  const [status, access, events, dns, policy] = await Promise.all([
     request(STATUS_ROUTE),
     request(ACCESS_ROUTE),
     request(EVENTS_ROUTE),
     request(DNS_ROUTE),
+    request(POLICY_ROUTE),
   ]);
   return {
     ...status,
     access_model: access,
     events: (events && events.events) || [],
     dns,
+    policy: (policy && policy.tailnets) || [],
   };
 }
 

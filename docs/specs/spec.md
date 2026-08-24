@@ -5,8 +5,8 @@ repo: Crank-Git/Hydrascale
 status: approved
 spec_version: 2
 created: 2026-08-04
-approved: 2026-08-04
-html_generated: 2026-08-04
+approved: 2026-08-23
+html_generated: 2026-08-24
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -31,6 +31,12 @@ features:
     file: features/09-docs-and-release.md
   - id: agent-skills
     file: features/10-agent-skills.md
+  - id: policy-document-model
+    file: features/11-policy-document-model.md
+  - id: visual-acl-editor
+    file: features/12-visual-acl-editor.md
+  - id: visual-policy-advanced
+    file: features/13-visual-policy-advanced.md
 ---
 
 # Hydrascale v1.0
@@ -90,12 +96,28 @@ the operator what is allowed.
 | access token | noun | The short-lived bearer token that the Tailscale OAuth token endpoint returns for a credential. | token, API key, bearer |
 | ETag value | noun | The value of the `ETag` header that a Tailscale policy read returns, which the write sends back as `If-Match`. | version, hash, revision |
 | conflict | noun | The condition where the policy changed between the read and the write, which the control server reports as HTTP 412. | collision, race, clash |
+| warning | noun | The condition where a control server accepts a policy document and reports a fact about it, which a Tailscale control server states as the message `warning(s) found`. | caution, notice, alert |
 | control server kind | noun | The type of control server that one tailnet joins: `tailscale` or `headscale`. | provider, backend, flavour, type |
 | credential state | noun | The condition where a tailnet holds a complete credential, or holds none. | credential status, auth state |
 | write availability | noun | The condition where the daemon can write the policy of one tailnet to its control server. | writable, editable, permission |
 | coding agent | noun | The program that reads a skill and runs a command for the operator, such as Claude Code. | AI, assistant, LLM, bot, harness |
 | skill | noun | One Markdown file that a coding agent loads, which states how the agent performs one task. | prompt, instruction file, plugin, rule |
 | routing form | noun | One command that sends work into the namespace of a named tailnet, such as `hydrascale exec`. | wrapper, prefix, invocation |
+| tag | noun | An ownership label that a control server assigns to a device, named `tag:<name>` in a policy document. | label, group (for a tag) |
+| group | noun | A named set of users that a policy document's `groups` block defines, named `group:<name>`. | tag (for a group), team |
+| host alias | noun | A named alias for a device or a subnet that a policy document's `hosts` block defines. Distinct from `host`, the Linux machine that runs the daemon. | host, alias |
+| autogroup | noun | A control-server-defined group that a policy document references by name, such as `autogroup:internet`. | built-in group |
+| allow rule | noun | One entry of a policy document's `acls` block: a source, a destination, and a port list. | acl, rule |
+| grant | noun | One entry of a policy document's `grants` block: a source, a destination, and an optional application capability. | acl (for a grant) |
+| SSH rule | noun | One entry of a policy document's `ssh` block: a source, a destination, an SSH user list, and an action. | ssh acl |
+| auto-approver | noun | An entry of a policy document's `autoApprovers` block that lets a route or an exit node skip manual approval. | approver |
+| node attribute | noun | An entry of a policy document's `nodeAttrs` block that applies one attribute to a set of targets. | attribute, flag |
+| posture | noun | An entry of a policy document's `postures` block that a control server checks against a connecting device. | device posture, check |
+| IP set | noun | A named set of network segments that a policy document's `ipsets` block defines. | ipset, CIDR set |
+| document model | noun | The in-memory structure that the daemon builds from a policy document's text, used to read and change a policy section without altering a byte it does not touch. | AST, parse tree, document object |
+| visual editor | noun | The policy view's region that draws tags, groups, and rules instead of raw text. | drawn editor, GUI editor |
+| text editor | noun | The policy view's region that shows the huJSON document as editable text, which `features/08-upstream-policy.md` builds. | raw editor, code editor |
+| result region | noun | The policy view's region that states the answer of the last validate or push, with one line per error. | result panel, status area, message box |
 
 ## Goals
 
@@ -155,8 +177,14 @@ version 1.0.
 | Upstream policy control | `features/08-upstream-policy.md` | Epic 8 | `mockups/04-upstream-policy.html` |
 | Documentation and release | `features/09-docs-and-release.md` | Epic 9 | none |
 | Agent skills | `features/10-agent-skills.md` | Epic 10 | none |
+| Policy document model | `features/11-policy-document-model.md` | Epic 11 | none |
+| Visual ACL editor | `features/12-visual-acl-editor.md` | Epic 12 | `mockups/06-visual-acl-editor.html` |
+| Visual policy editor — SSH and advanced constructs | `features/13-visual-policy-advanced.md` | Epic 13 | `mockups/07-advanced-policy-constructs.html` |
 
-Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0.
+Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11
+to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1
+already covers the console fixes and the credential-state work between Epic 9 and Epic
+10, tagged `v1.1.0` and `v1.1.1`.)
 
 ## Architecture & stack
 
@@ -533,6 +561,39 @@ Exit criteria: `hydrascale switch` states that it changes no state. The help of
 `skills/`. `hydrascale skills install` writes them to the skill directory of the
 operator. A test fails when a skill names a command that the command tree does not hold.
 
+### Epic 11: Policy document model
+
+Goal: an edit to one part of a policy document changes no byte outside that part.
+Covers: `features/11-policy-document-model.md`.
+Depends on: Epic 8.
+Exit criteria: parsing a document with a comment, then editing one `acls` entry,
+produces output where every other line is byte-for-byte identical to the input. A
+document holding a key the model does not name round-trips that key unchanged. A parse
+failure names its line and column.
+
+### Epic 12: Visual ACL editor
+
+Goal: the operator edits tags, groups, and reachability rules by drawing them, on the
+same document the text editor edits.
+Covers: `features/12-visual-acl-editor.md`.
+Depends on: Epic 11.
+Exit criteria: the Policy view carries a Visual and a Text control over one staged
+document. The matrix draws every tag and group a rule references. A click stages an
+`acls` entry. Push sends the whole document through the existing validate-then-write
+path. A section the control server does not support states the reason and stays
+editable in Text.
+
+### Epic 13: Visual policy editor — SSH and advanced constructs
+
+Goal: the operator edits SSH access, auto-approvers, node attributes, postures, and
+tests by drawing them.
+Covers: `features/13-visual-policy-advanced.md`.
+Depends on: Epic 12.
+Exit criteria: each of the five sections shows and edits its entries. A control server
+that does not support `postures` shows every entry read-only and disables Push while the
+key remains. A run of the tests marks each assertion `pass` or `fail`. A failed assertion
+disables Push, and the result region states that reason.
+
 ## Milestones
 
 | Milestone | Epics | What is shippable |
@@ -543,6 +604,7 @@ operator. A test fails when a skill names a command that the command tree does n
 | M4 — Console | 6, 7 | The operator sees and edits local rules in a browser. This is the headline of version 1.0. |
 | M5 — Upstream and release | 8, 9 | Upstream policy control works and version 1.0 ships. |
 | M6 — Agent skills | 10 | A coding agent routes a command to the named tailnet. This follows version 1.0. |
+| M7 — Visual policy editor | 11, 12, 13 | The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (`v1.1.0`, `v1.1.1`). |
 
 M2 is the point at which the release is worth cutting even if nothing else lands. The
 security and DNS work must not wait behind the console.
@@ -581,6 +643,8 @@ security and DNS work must not wait behind the console.
 | R6 | The default-deny migration may break an install that relies on a path the operator does not know about. | An upgrade could cut off a working tailnet. | Epic 5 writes the preserving rule set on first start and records it as an event. `access.mode: observe` lets the operator check before enforcement. |
 | R7 | The rule engine must not fight a host firewall. | An operator who runs `ufw` or `firewalld` may see rules disappear on reload. | Epic 5 uses a dedicated chain with a single jump, so a reload is detectable and repairable. Epic 5 tests this on the test host. |
 | R8 | ~~Whether `docs/specs/` should be tracked in a public repository is unresolved.~~ **Resolved 2026-08-04.** | The build loop reads tracked files only, because a worker runs in a git worktree. | The operator tracks `docs/specs/`, `CLAUDE.md`, and `.claude/`. A GitHub issue on a public repository is public in any case, so an untracked spec produces a dead link rather than privacy. |
+| R9 | The operator chose byte-for-byte huJSON round-trip fidelity (Epic 11) over a simpler best-effort reformat. This is a token-level partial rewrite, closer to a small huJSON-aware editor than a parse-and-reprint. | The engineering cost is materially higher than a naive JSON marshal/unmarshal, and a defect here corrupts an operator's real policy document, including comments a colleague wrote. | Epic 11's acceptance criteria require a byte-for-byte diff test on every edit path before Epic 12 or Epic 13 build against it. If the cost proves too high during Epic 11, the operator revisits this decision rather than shipping a silent reformatter. |
+| R10 | Headscale does not support `postures`, `srcPosture`, or `ipsets` (confirmed against `docs/ref/policy.md` at tag `v0.29.3`, retrieved 2026-08-23). Its support for `groups`, `hosts`, `tagOwners`, `autoApprovers`, `tests`, and `sshTests` is not explicitly documented at that page. | The visual editor could show a control that a Headscale write silently drops. | Epic 12 and Epic 13 confirm each section's Headscale support against a live Headscale test instance before they ship that section as editable; an unconfirmed section defaults to the read-only treatment FR-vadv-11 defines for `postures`, never to a silent assumption that it works. |
 
 ## Changelog
 
@@ -735,6 +799,37 @@ security and DNS work must not wait behind the console.
 | 2026-08-10 | 1 | Epic 10 built. **One omission appeared in four places.** `hydrascale exec` runs `ip netns exec`, which needs root, and only `skills/tailnet-exec/SKILL.md` stated it. Issue #261 corrected the cheat sheet of `hydrascale init`, issue #263 corrected `hydrascale env`, issue #265 corrected `README.md`, and issue #267 corrected `hydrascale switch`. The specification propagated the defect, because FR-skills-2 and FR-skills-6 each pinned a form that holds no `sudo`. A test that reads printed bytes passes on a form that fails on the host, therefore the test host caught this and the test suite did not. |
 | 2026-08-13 | 1 | Issue #272. **`SA-48` measures the value that the configuration requires, and no longer the value `0`.** A test on the host found that host access and the unified resolver both failed, because no code writes `net.ipv4.ip_forward` inside a namespace and a new namespace holds `0`. `README.md` promises `host_access: true # the host reaches this tailnet`, and the host reached no peer: `ping -c2 100.83.43.65` from the host returned `100% packet loss` while the same command inside `ns-havoc` returned `0% packet loss`. Every query for a tailnet name timed out. The operator decided on 2026-08-13 that `SetupHostAccess` writes the value `1` and `TeardownHostAccess` writes the value `0`, therefore forwarding follows `host_access` and an isolated tailnet keeps `0`. The reconciler now records `access.namespace_forwarding` when the value differs from the value that the configuration requires. The deny happens in `HYDRASCALE-FWD` on the host, therefore the containment does not depend on this value: with the value `1` in both namespaces, `ns-jbones` reached neither `10.200.0.86`, nor a peer of `havoc`, nor `192.168.1.1`. |
 | 2026-08-13 | 1 | Issue #276. **A credential that the control server refuses now holds its own state.** On 2026-08-13 an operator wrote a Tailscale device authentication key, whose prefix is `tskey-auth`, into the field `tailscale_oauth_client_secret`, whose value carries the prefix `tskey-client`. `GET /api/policy` answered `credential_present: true` and `write_available: true`, and the policy view drew `read and write`. The control server answered the token request with HTTP 401 and the message `API token invalid`, which names neither the mistake nor the value, therefore the mistake reached the operator through a failed policy read alone. **FR-policy-5a** and **FR-policy-5b** add a third state. The daemon reads the prefix of the client secret before any request, and it records the answer of a control server that refuses the credential with HTTP 401. A 403 states that the credential is valid and that its scopes do not cover the request, therefore it marks no credential. |
+| 2026-08-23 | 1 | Issue #294 resolved. **The toolchain moves to Go 1.26.6.** `govulncheck` named five called standard library advisories on `dev` — GO-2026-6218, GO-2026-6090, GO-2026-6089, GO-2026-5972, and GO-2026-5026 — that a project-review run found while merging an unrelated pull request. Each names `go1.26.6` as its fix. `go.mod`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` now hold `1.26.6`, which closes the gap and clears every advisory. |
+| 2026-08-23 | 1 | **A `/spec-update` round adds version 1.1: the visual policy editor.** `features/08-upstream-policy.md`'s Out of scope explicitly deferred a visual editor for the policy document; the operator asked for one, scoped to a full model of Tailscale's ACL grammar (groups, hosts, tagOwners, ipsets, acls, grants, ssh, autoApprovers, nodeAttrs, postures, tests) with byte-for-byte preservation of every part an edit does not touch, for both Tailscale and Headscale. That scope does not fit one epic under the sizing rule of 3 to 6 sub-issues, so it splits into three: Epic 11 (`features/11-policy-document-model.md`), the document model that makes the round-trip fidelity possible; Epic 12 (`features/12-visual-acl-editor.md`), the matrix-and-rule-list editor for tags, groups, and reachability rules, reusing `features/07-console-access-editor.md`'s visual grammar; Epic 13 (`features/13-visual-policy-advanced.md`), the five remaining constructs. `features/08-upstream-policy.md` itself is unchanged — it still describes the shipped text editor, which the new features extend rather than replace. Confirmed against `https://tailscale.com/kb/1337/acl-syntax` (retrieved 2026-08-23) for the field shapes, and against `docs/ref/policy.md` at Headscale tag `v0.29.3` (retrieved 2026-08-23) for the `postures`/`ipsets` gap that R10 records. R9 records the round-trip fidelity decision as a risk, not a settled fact. |
+| 2026-08-23 | 2 | **Approved.** The operator reviewed the first draft's two new mockups and found a layout defect: the reachability matrix, sized to fill a 300px grid column, overflowed its card and bled onto the adjacent Rules card. Both mockups moved to a single stacked column with fixed-size matrix cells in a scrollable wrapper, and the example data's self-contradiction about which tailnet is Headscale (`jbones`, used as Tailscale everywhere else in the package) was corrected to name `corp-prod` instead. The operator approved the revised round. |
+| 2026-08-23 | 2 | Issue #309. **The document model adds an eighth direct dependency.** `features/11-policy-document-model.md`'s **FR-model-1** requires the daemon to preserve every comment, every trailing comma, and the exact byte range of every value. A marshal-and-unmarshal round trip through `encoding/json` cannot hold that guarantee, because it discards a comment and it does not track a byte range. `github.com/tailscale/hujson` parses a policy document into an AST that keeps both, and its `Pack` method serializes the AST back to the exact input bytes when no edit changed it. `CLAUDE.md` now states eight direct dependencies. |
+| 2026-08-23 | 2 | **`features/12-visual-acl-editor.md`'s Interfaces section was wrong.** It stated
+that the visual editor adds no new route. Planning Epic 12 found that browser
+JavaScript cannot parse or edit huJSON with the byte-preservation guarantee
+`features/11-policy-document-model.md` built — only the daemon's Go document model can.
+Two new routes were added: `POST /api/policy/{id}/sections` (parses the staged
+document, returns every named section) and `POST /api/policy/{id}/sections/edit`
+(applies one add/replace/remove to a section, returns the new document text). Both are
+stateless, matching the document model's own Data touched section. Caught before any
+Epic 12 code was written. |
+| 2026-08-23 | 2 | Issue #322. **`autoApprovers` needed a new addressing scheme on the existing `POST /api/policy/{id}/sections/edit` route.** `internal/policy/document.go`'s `AddMapEntry`/`AddEntry` family operates on a top-level array or a top-level map alone, and `autoApprovers` is neither: it is a top-level object holding a map (`routes`) and a single field (`exitNode`). `Document` gains `AddAutoApproverRoute`, `ReplaceAutoApproverRoute`, `RemoveAutoApproverRoute`, and `SetAutoApproverExitNode`, and the route gains two `section` values, `autoApprovers.routes` (keyed by CIDR) and `autoApprovers.exitNode` (no key; `replace` alone). `features/13-visual-policy-advanced.md`'s Interfaces section records the addressing scheme. |
+| 2026-08-23 | 2 | **Version 1.1 is built.** Epics 11, 12, and 13 all merged into `dev`. The
+operator edits a policy document's tags, groups, reachability rules, SSH access,
+auto-approvers, node attributes, postures, and tests by drawing them, with the same
+byte-for-byte preservation guarantee the text editor already held. Three findings
+during the build, each closed before it reached a later issue: Epic 12's feature file
+wrongly said no new route was needed; Epic 11's edit methods only handled array-shaped
+sections, not the map-shaped ones Epic 12 needed; `autoApprovers`' nested shape needed
+its own addressing scheme, which Epic 13 added. `features/11-policy-document-model.md`,
+`features/12-visual-acl-editor.md`, and `features/13-visual-policy-advanced.md` all
+advance to `status: built`. |
+| 2026-08-23 | 2 | **Correction: this work is version 1.2, not version 1.1.** The `/spec-update` round and the Epic 11-13 build both called it version 1.1, and the tag names `v1.1.0` and `v1.1.1` already belong to the console fixes and credential-state work that shipped between Epic 9 and Epic 10, before this round started. The Feature map and Milestone M7 now name it version 1.2. |
+| 2026-08-24 | 2 | **Design decision: the console caps a list it shares across views, not the daemon's route.** Issue #355 found the Activity view rendering every event the daemon ever recorded, unbounded. `GET /api/events` already caps its own log at 1000 entries (`internal/reconciler/reconciler.go`), and three other views (`namespaces.js`, `overview.js`, `topology.js`) read that same list for their own, smaller purposes. Capping the route itself would take history from every one of them. The fix caps the Activity view's render alone, at 100 rows, and states the count of what it draws against the count the log holds. A future view that reads `GET /api/events` inherits the full list and caps its own render the same way; it does not ask the route for a shorter list. |
+| 2026-08-24 | 2 | **Project review 2026-08-23-v1.2 found version 1.2 not ready to tag.** 13 defects filed (issues #345-357). Batch #360 (issues #345, #356, #357) shipped as a ship-partial merge: the fourth member, #353 ("a failing staged test blocks Push"), stays open because the Tailscale control server itself refuses to write a document whose test fails, so **FR-vadv-14 as written ("a failing test does not block Push") cannot be satisfied by the console alone** — the upstream write route decides first. The maintainer has not yet chosen between keeping FR-vadv-14 literally (Push proceeds, the operator reads the control server's own refusal) or correcting it to match the upstream limit (Push stays disabled, the console states the true reason, following the FR-vadv-11 precedent). See issue #353 for the open question. |
+| 2026-08-24 | 2 | Issue #371. **`features/12-visual-acl-editor.md`'s FR-vacl-7 described the wrong rule for an inert square.** It stated that "the diagonal accepts no click". The diagonal names the square position, and the square from the wildcard `*` to the wildcard is a diagonal square. Issue #349 established that this square names the path from every source to every destination, therefore the operator adds and removes it like any other rule. `internal/ui/static/policy.js:1458` holds the true rule: a square is inert when both axes name the same value and that value is not the wildcard. FR-vacl-7 now states that a square is inert when it names one identity on both axes. It also states that the wildcard names every identity and not one identity, therefore the wildcard square accepts a click. |
+| 2026-08-24 | 2 | Issue #351. **Decision: the matrix draws every named identity, and not the referenced identity alone.** FR-vacl-7 derived the axes from the `src` and the `dst` of an existing rule. A group, a tag owner, or a host alias that the operator had just staged therefore reached no axis. FR-vacl-8 makes a click on a square the documented way to add a rule. An identity with no rule yet held no square, so it had no path to its first rule. The operator had to edit the Text view instead. The operator chose to draw every named identity over the second option, a free-text source and destination picker in the rule list. An `ipsets` key names no axis: a rule names an IP set as `ipset:<name>`, and a Headscale control server supports no `ipsets` section, per FR-vacl-19. Confirmed against `https://tailscale.com/kb/1337/acl-syntax` (retrieved 2026-08-24). |
+| 2026-08-24 | 2 | Issue #353. **Decision: a failing test disables Push, and the console states the true reason.** The operator chose this over the literal reading of FR-vadv-14, which let Push proceed. The Tailscale write route refuses a document whose test fails. The OpenAPI schema of operationId `setPolicyFile` states that refusal. A Push that proceeds therefore reaches a refusal every time. The decision follows the FR-vadv-11 precedent: the console disables Push for a write the control server refuses, and it names the reason. `features/13-visual-policy-advanced.md` FR-vadv-14 and FR-vadv-15 now state the true rule. FR-vadv-16 states that the result region separates a failed test from a document error. The console reads the status for that: the validate route answers status 200 with the message `test(s) failed` for a failed assertion. It refuses a malformed document with status 400. FR-vadv-17 records the Headscale limit, because `CheckPolicyResponse` holds no field. |
+| 2026-08-24 | 2 | Issue #389. **A warning of the control server is not a rejection.** The validate route answers status 200 with the message `warning(s) found` when the document is valid and it holds a warning. `internal/policy/tailscale.go` set `Passed` from an empty message alone, therefore a warning read as a rejection: Push stayed disabled and the result region stated "The control server rejected the document." The write route accepts that document. `features/13-visual-policy-advanced.md` gains FR-vadv-18, which keeps Push available for a warning, and FR-vadv-19, which states that the result region names a warning as a warning. The `## Terms` table gains the row `warning`. `ValidateResult` and `PolicyValidateResponse` gain the field `Warning`, which follows the `TestsFailed` pattern of issue #353. The OpenAPI schema of operationId `validateAndTestPolicyFile` names the two status 200 messages `test(s) failed` and `warning(s) found`. Verified against `https://api.tailscale.com/api/v2?outputOpenapiSchema=true` (retrieved 2026-08-24). |
 
 ## Issue map
 
@@ -756,6 +851,12 @@ fix.
 | Epic 9: Documentation and release | #160 | #161 #162 #163 #164 #165 | `features/09-docs-and-release.md` |
 | Epic 10: Agent skills | #246 | #247 #248 #249 #250 #251 #252 | `features/10-agent-skills.md` |
 | Epic 10 follow-up: the root privilege | none | #261 #263 #265 #267 | `features/10-agent-skills.md` |
+| Epic 11: Policy document model | #308 | #309 #310 #311 #312 | `features/11-policy-document-model.md` |
+| Epic 12: Visual ACL editor | #313 | #314 #315 #316 #317 #318 #319 | `features/12-visual-acl-editor.md` |
+| Epic 13: Visual policy editor — SSH and advanced constructs | #320 | #321 #322 #323 #324 #325 | `features/13-visual-policy-advanced.md` |
+
+Epics 11 to 13 were filed on 2026-08-23, after the `/spec-update` round that added version
+1.1 was approved.
 
 ### Requirement coverage
 
@@ -779,8 +880,27 @@ fix.
 | agent-skills | FR-skills-30 to 35 | #252 |
 | agent-skills | FR-skills-6, 36 | #263 |
 | agent-skills | FR-skills-2, 37 | #267 |
+| policy-document-model | FR-model-1 to 4 | #309 |
+| policy-document-model | FR-model-5, 6 | #310 |
+| policy-document-model | FR-model-7 to 9 | #311 |
+| policy-document-model | FR-model-10, 11 | #312 |
+| visual-acl-editor | FR-vacl-1 to 3 | #314 |
+| visual-acl-editor | FR-vacl-4 to 6 | #315 |
+| visual-acl-editor | FR-vacl-7 to 9 | #316 |
+| visual-acl-editor | FR-vacl-10 to 12 | #317 |
+| visual-acl-editor | FR-vacl-13 to 16 | #318 |
+| visual-acl-editor | FR-vacl-17 to 19 | #319 |
+| visual-policy-advanced | FR-vadv-1 to 5 | #321 |
+| visual-policy-advanced | FR-vadv-6, 7 | #322 |
+| visual-policy-advanced | FR-vadv-8, 9 | #323 |
+| visual-policy-advanced | FR-vadv-10, 11 | #324 |
+| visual-policy-advanced | FR-vadv-12 to 14 | #325 |
+| visual-policy-advanced | FR-vadv-15 to 17 | #353 |
+| visual-policy-advanced | FR-vadv-18, 19 | #389 |
 
-Every one of the 239 requirements in these ten features is cited by at least one issue.
+Every one of the 244 requirements in these ten features is cited by at least one issue.
+Every one of the 49 requirements across `policy-document-model`, `visual-acl-editor`,
+and `visual-policy-advanced` is cited by exactly one issue.
 
 **FR-access-2 is covered and reversed.** The requirement states that the daemon appends the
 jump rule into `FORWARD`. The operator decided on 2026-08-05 that the daemon keeps the

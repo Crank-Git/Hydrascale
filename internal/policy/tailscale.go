@@ -58,8 +58,8 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("%s failed with HTTP %d: %s", e.Operation, e.StatusCode, e.Message)
 }
 
-// Document is one policy document and the ETag value that the control server returned.
-type Document struct {
+// TextDocument is one policy document and the ETag value that the control server returned.
+type TextDocument struct {
 	Text string
 	ETag string
 }
@@ -67,10 +67,31 @@ type Document struct {
 // ValidateResult is the answer of the validate endpoint.
 // Passed is true when the control server accepted the document. Body holds the response
 // verbatim, because the console shows each error with its line number. See FR-policy-26.
+// TestsFailed is true when an assertion of the tests section failed, and false when the
+// control server refused the document itself. The console states a different reason for
+// each, per FR-vadv-16.
+// Warning is true when the control server accepted the document and it stated a warning.
+// Passed is also true then, because the control server accepts a write of that document,
+// per FR-vadv-18.
 type ValidateResult struct {
-	Passed bool
-	Body   string
+	Passed      bool
+	Body        string
+	TestsFailed bool
+	Warning     bool
 }
+
+// testsFailedMessage is the message that the validate endpoint states when an assertion
+// of the tests section or of the sshTests section fails. The OpenAPI schema of
+// operationId validateAndTestPolicyFile names this value and the value
+// "warning(s) found", retrieved 2026-08-24. A message outside this set reaches the
+// console as a document error, which states the answer of the control server verbatim.
+const testsFailedMessage = "test(s) failed"
+
+// warningMessage is the message that the validate endpoint states when the document is
+// valid and it holds a warning. The OpenAPI schema of operationId
+// validateAndTestPolicyFile names this value, retrieved 2026-08-24. The write route
+// accepts such a document, therefore this message marks no rejection.
+const warningMessage = "warning(s) found"
 
 // TailscaleClient reads, validates, and writes the policy of one Tailscale tailnet.
 //
@@ -110,18 +131,18 @@ func NewTailscaleClient(baseURL, tailnet string, credential func() (secrets.Tail
 // ReadPolicy returns ErrNoCredential when the tailnet holds no credential, and it then
 // sends no request. It returns an *APIError when the control server rejects the request.
 // See FR-policy-9 and FR-policy-12.
-func (c *TailscaleClient) ReadPolicy(ctx context.Context) (Document, error) {
+func (c *TailscaleClient) ReadPolicy(ctx context.Context) (TextDocument, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, "/tailnet/"+url.PathEscape(c.tailnet)+"/acl", "")
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
 	req.Header.Set("Accept", hujsonContentType)
 
 	body, header, err := c.send(req, "the policy read")
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
-	return Document{Text: body, ETag: header.Get("ETag")}, nil
+	return TextDocument{Text: body, ETag: header.Get("ETag")}, nil
 }
 
 // WritePolicy writes document to the control server and returns the document that the
@@ -129,10 +150,10 @@ func (c *TailscaleClient) ReadPolicy(ctx context.Context) (Document, error) {
 // etag carries the ETag value from the read, and the client sends it as the If-Match
 // header. An empty etag sends no If-Match header. A mismatch returns an error that wraps
 // ErrPolicyConflict. See FR-policy-16 and FR-policy-17.
-func (c *TailscaleClient) WritePolicy(ctx context.Context, document, etag string) (Document, error) {
+func (c *TailscaleClient) WritePolicy(ctx context.Context, document, etag string) (TextDocument, error) {
 	req, err := c.newRequest(ctx, http.MethodPost, "/tailnet/"+url.PathEscape(c.tailnet)+"/acl", document)
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
 	req.Header.Set("Content-Type", hujsonContentType)
 	req.Header.Set("Accept", hujsonContentType)
@@ -143,12 +164,12 @@ func (c *TailscaleClient) WritePolicy(ctx context.Context, document, etag string
 	body, header, err := c.send(req, "the policy write")
 	var apiErr *APIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusPreconditionFailed {
-		return Document{}, fmt.Errorf("%w: %s", ErrPolicyConflict, apiErr.Message)
+		return TextDocument{}, fmt.Errorf("%w: %s", ErrPolicyConflict, apiErr.Message)
 	}
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
-	return Document{Text: body, ETag: header.Get("ETag")}, nil
+	return TextDocument{Text: body, ETag: header.Get("ETag")}, nil
 }
 
 // ValidatePolicy sends document to the validate endpoint and returns the result.
@@ -178,7 +199,17 @@ func (c *TailscaleClient) ValidatePolicy(ctx context.Context, document string) (
 	if err := json.Unmarshal([]byte(trimmed), &answer); err != nil {
 		return ValidateResult{Passed: false, Body: body}, nil
 	}
-	return ValidateResult{Passed: answer.Message == "", Body: body}, nil
+	// A non-2xx status reaches send, which returns an error, therefore this point holds
+	// status 200 alone. The control server states a failed assertion at status 200, and it
+	// refuses a malformed document with status 400.
+	message := strings.TrimSpace(answer.Message)
+	warning := message == warningMessage
+	return ValidateResult{
+		Passed:      answer.Message == "" || warning,
+		Body:        body,
+		TestsFailed: message == testsFailedMessage,
+		Warning:     warning,
+	}, nil
 }
 
 // newRequest returns a request to path with the access token as the bearer token.

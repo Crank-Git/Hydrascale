@@ -15,7 +15,7 @@ Design lives in `docs/specs/`. Read `docs/specs/spec.md` and the relevant
 
 ## Stack
 
-- Go 1.26.5, standard library first. Seven direct dependencies. The build reaches the Go
+- Go 1.26.6, standard library first. Eight direct dependencies. The build reaches the Go
   module proxy, and `go.sum` pins the hash of each dependency.
 - Bubble Tea and Lip Gloss for the terminal interface.
 - The console is a static single-page application with no build step. `go:embed` places
@@ -49,19 +49,27 @@ go vet ./...                   # vet
 gofmt -l .                     # must print nothing
 govulncheck ./...              # dependency check
 node --version                 # the test suite needs node
+python3 --version              # the test suite needs python3
 ```
 
-The test suite needs `node` as well as the Go tools.
+The test suite needs `node` and `python3` as well as the Go tools.
 `TestTheConsoleJavaScriptTestsPass` in `internal/ui/shell_test.go` runs the console
 JavaScript tests of `internal/ui/jstest` with `node --test`. The console has no build step
 and `internal/ui/package.json` names no dependency, so `node` alone is enough. The test
 reads the count from the run and fails when the count falls below the constant
 `minimumConsoleJavaScriptTests`, so no document records the count.
 
-A developer machine that holds no `node` skips these tests. A gate that holds no `node`
-fails, because a silent loss of these tests reads exactly like success. The environment
-variable `CI` marks a gate, and GitHub Actions sets it. The test host gate exports
-`HYDRASCALE_GATE`, which marks a gate the same way.
+`TestTheSpecificationRendererTestsPass` in `docs/specs/render_spec_test.go` runs
+`docs/specs/render-spec-test.py` with `python3`. That file tests the renderer that writes
+`docs/specs/spec.html`, which is the published form of the specification. The test reads
+the count from the run and fails when the count falls below the constant
+`minimumRendererTests`.
+
+A developer machine that holds no `node` skips the console tests, and a machine that
+holds no `python3` skips the renderer tests. A gate that holds no `node`, or no `python3`,
+fails, because a silent loss of these tests reads exactly like success. The environment variable `CI`
+marks a gate, and GitHub Actions sets it. The test host gate exports `HYDRASCALE_GATE`,
+which marks a gate the same way.
 
 Run the daemon on the test host rather than on a developer machine. Use the
 `verify-on-phobos` skill; it builds, deploys, and rolls back.

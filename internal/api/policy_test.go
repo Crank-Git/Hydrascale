@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +31,7 @@ type wirePolicyTailnet struct {
 	Kind              string `json:"kind"`
 	CredentialPresent bool   `json:"credential_present"`
 	WriteAvailable    bool   `json:"write_available"`
+	CredentialState   string `json:"credential_state"`
 	Reason            string `json:"reason"`
 }
 
@@ -46,12 +48,43 @@ type wirePolicy struct {
 }
 
 type wireValidate struct {
-	Passed bool   `json:"passed"`
-	Result string `json:"result"`
+	Passed      bool   `json:"passed"`
+	Result      string `json:"result"`
+	TestsFailed bool   `json:"tests_failed"`
+	Warning     bool   `json:"warning"`
 }
 
 type wireError struct {
 	Error string `json:"error"`
+}
+
+// The test file declares the response shape of the two sections routes rather than
+// reading it from the package, matching the wire structs above.
+
+type wireACLRule struct {
+	Action string   `json:"action"`
+	Src    []string `json:"src"`
+	Dst    []string `json:"dst"`
+}
+
+type wireSections struct {
+	Groups      map[string][]string `json:"groups"`
+	Hosts       map[string]string   `json:"hosts"`
+	TagOwners   map[string][]string `json:"tagOwners"`
+	IPSets      map[string][]string `json:"ipsets"`
+	ACLs        []wireACLRule       `json:"acls"`
+	Grants      []json.RawMessage   `json:"grants"`
+	SSH         []json.RawMessage   `json:"ssh"`
+	NodeAttrs   []json.RawMessage   `json:"nodeAttrs"`
+	Postures    map[string][]string `json:"postures"`
+	Tests       []json.RawMessage   `json:"tests"`
+	SSHTests    []json.RawMessage   `json:"sshTests"`
+	OpaqueKeys  []string            `json:"opaque_keys"`
+	SectionKeys []string            `json:"section_keys"`
+}
+
+type wireSectionsEdit struct {
+	Document string `json:"document"`
 }
 
 // The credential values that every test uses. No test reaches a real control server, so
@@ -74,6 +107,7 @@ type fakeTailscale struct {
 	etag           string
 	writtenETag    string
 	validateResult string
+	validateStatus int
 	writeStatus    int
 	ifMatch        string
 	paths          []string
@@ -98,6 +132,11 @@ func (f *fakeTailscale) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"access_token":%q,"token_type":"Bearer","expires_in":3600}`, testAccessToken)
 	case "/tailnet/-/acl/validate":
+		if f.validateStatus != 0 {
+			w.WriteHeader(f.validateStatus)
+			fmt.Fprint(w, `{"message":"API token invalid"}`)
+			return
+		}
 		if f.validateResult != "" {
 			fmt.Fprint(w, f.validateResult)
 		}
@@ -396,6 +435,637 @@ func TestValidateReturnsTheResultOfTheControlServer(t *testing.T) {
 	}
 }
 
+func TestValidateReportsAFailedTestApartFromADocumentError(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	tailscale.mu.Lock()
+	tailscale.validateResult = `{"message":"test(s) failed","data":[{"user":"user1@example.com","errors":["address \"2.2.2.2:22\": want: Drop, got: Accept"]}]}`
+	tailscale.mu.Unlock()
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/validate", `{"document":"{}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireValidate
+	decodePolicy(t, payload, &got)
+	if got.Passed {
+		t.Error("passed = true, want false")
+	}
+	if !got.TestsFailed {
+		t.Errorf("tests_failed = false, want true; body %s", payload)
+	}
+
+	tailscale.mu.Lock()
+	tailscale.validateResult = `{"message":"line 3: unknown field \"acl\""}`
+	tailscale.mu.Unlock()
+
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/validate", `{"document":"{}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	// The field carries omitempty, therefore a false value reaches the client as an absent
+	// key. A second decode into the same value would hold the previous true.
+	rejected := wireValidate{}
+	decodePolicy(t, payload, &rejected)
+	if rejected.TestsFailed {
+		t.Errorf("tests_failed = true, and the control server rejected the document; body %s", payload)
+	}
+}
+
+func TestValidateReportsAWarningAsAnAcceptedDocument(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	warning := `{"message":"warning(s) found","data":[{"user":"group:unknown@example.com","warnings":["group is not syncing from SCIM and will be ignored by rules in the policy file"]}]}`
+	tailscale.mu.Lock()
+	tailscale.validateResult = warning
+	tailscale.mu.Unlock()
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/validate", `{"document":"{}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireValidate
+	decodePolicy(t, payload, &got)
+	if !got.Passed {
+		t.Errorf("passed = false, and the control server accepts a write of this document; body %s", payload)
+	}
+	if !got.Warning {
+		t.Errorf("warning = false, and the control server stated warning(s) found; body %s", payload)
+	}
+	if got.TestsFailed {
+		t.Errorf("tests_failed = true, and no test of this document failed; body %s", payload)
+	}
+	if got.Result != warning {
+		t.Errorf("result = %q, want the answer of the control server verbatim", got.Result)
+	}
+}
+
+// --- POST /api/policy/{id}/sections ---
+
+func TestPolicySectionsReturnsEveryNamedSectionAndTheOpaqueKeys(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "groups": {"group:admins": ["alice@example.com"]},
+  "hosts": {"server": "100.64.0.1"},
+  "acls": [{"action": "accept", "src": ["group:admins"], "dst": ["*:*"]}],
+  "randomizeClientPort": true,
+}
+`
+	req, err := json.Marshal(map[string]string{"document": document})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireSections
+	decodePolicy(t, payload, &got)
+	if len(got.Groups["group:admins"]) != 1 {
+		t.Errorf("Groups = %v, want one member of group:admins", got.Groups)
+	}
+	if got.Hosts["server"] != "100.64.0.1" {
+		t.Errorf("Hosts = %v, want server = 100.64.0.1", got.Hosts)
+	}
+	if len(got.ACLs) != 1 || got.ACLs[0].Action != "accept" {
+		t.Errorf("ACLs = %v, want one accept entry", got.ACLs)
+	}
+	if len(got.OpaqueKeys) != 1 || got.OpaqueKeys[0] != "randomizeClientPort" {
+		t.Errorf("OpaqueKeys = %v, want [randomizeClientPort]", got.OpaqueKeys)
+	}
+}
+
+func TestPolicySectionsReturnsHTTP400WithTheLineAndTheColumnOnAParseFailure(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	req, err := json.Marshal(map[string]string{"document": "{\n  \"groups\": {\n"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+	var got wireError
+	decodePolicy(t, payload, &got)
+	if !strings.Contains(got.Error, "line") || !strings.Contains(got.Error, "column") {
+		t.Errorf("Error = %q, want a message naming the line and the column", got.Error)
+	}
+}
+
+func TestPolicySectionsAnAbsentSectionReturnsAnEmptyListNotNull(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", `{"document":"{}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	for _, want := range []string{`"groups":{}`, `"acls":[]`, `"opaque_keys":[]`} {
+		if !strings.Contains(string(payload), want) {
+			t.Errorf("body %s does not hold %s", payload, want)
+		}
+	}
+}
+
+// FR-vadv-11 disables Push while the document holds a postures key. The response must
+// separate an empty postures key from an absent one. Both decode into the same empty map,
+// therefore SectionKeys carries the signal.
+func TestPolicySectionsNamesEveryNamedSectionKeyTheDocumentHolds(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	cases := []struct {
+		name     string
+		document string
+		want     bool
+	}{
+		{name: "an empty postures key", document: `{"postures": {}}`, want: true},
+		{name: "a postures key with one entry", document: `{"postures": {"posture:latest": ["node:os == 'linux'"]}}`, want: true},
+		{name: "no postures key", document: `{"groups": {}}`, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := json.Marshal(map[string]string{"document": tc.document})
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+			if code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+			}
+			var got wireSections
+			decodePolicy(t, payload, &got)
+			if slices.Contains(got.SectionKeys, "postures") != tc.want {
+				t.Errorf("SectionKeys = %v, want it to hold %q = %v", got.SectionKeys, "postures", tc.want)
+			}
+		})
+	}
+}
+
+// --- POST /api/policy/{id}/sections/edit ---
+
+func TestPolicySectionsEditAddsAnEntryAndKeepsEveryOtherByte(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+  ],
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "acls",
+		"op":       "add",
+		"entry":    map[string]interface{}{"action": "accept", "src": []string{"tag:laptop"}, "dst": []string{"tag:server:*"}},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireSectionsEdit
+	decodePolicy(t, payload, &got)
+	if !strings.Contains(got.Document, "tag:laptop") {
+		t.Errorf("Document = %q, want it to hold the new entry", got.Document)
+	}
+	if !strings.Contains(got.Document, `{"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},`) {
+		t.Errorf("Document = %q, want the existing entry byte-for-byte unchanged", got.Document)
+	}
+}
+
+func TestPolicySectionsEditReplacesAndRemovesAnEntryByIndex(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "acls": [
+    {"action": "accept", "src": ["a"], "dst": ["b"]},
+    {"action": "accept", "src": ["c"], "dst": ["d"]},
+  ],
+}
+`
+	index := 1
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "acls",
+		"op":       "replace",
+		"index":    &index,
+		"entry":    map[string]interface{}{"action": "accept", "src": []string{"e"}, "dst": []string{"f"}},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var replaced wireSectionsEdit
+	decodePolicy(t, payload, &replaced)
+	if !strings.Contains(replaced.Document, `"e"`) || strings.Contains(replaced.Document, `"src": ["c"]`) {
+		t.Errorf("Document = %q, want the second entry replaced", replaced.Document)
+	}
+	if !strings.Contains(replaced.Document, `"src": ["a"]`) {
+		t.Errorf("Document = %q, want the first entry unchanged", replaced.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": replaced.Document,
+		"section":  "acls",
+		"op":       "remove",
+		"index":    &index,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, `"e"`) {
+		t.Errorf("Document = %q, want the replaced entry removed", removed.Document)
+	}
+	if !strings.Contains(removed.Document, `"src": ["a"]`) {
+		t.Errorf("Document = %q, want the first entry unchanged", removed.Document)
+	}
+}
+
+func TestPolicySectionsEditAddsRenamesAndRemovesAMapEntryByKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "groups": {
+    "group:admins": ["alice@example.com"],
+  },
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "groups",
+		"op":       "add",
+		"key":      "group:eng",
+		"entry":    []string{"carol@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var added wireSectionsEdit
+	decodePolicy(t, payload, &added)
+	if !strings.Contains(added.Document, "group:eng") || !strings.Contains(added.Document, "carol@example.com") {
+		t.Errorf("Document = %q, want it to hold the new key", added.Document)
+	}
+	if !strings.Contains(added.Document, "group:admins") {
+		t.Errorf("Document = %q, want the existing key unchanged", added.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": added.Document,
+		"section":  "groups",
+		"op":       "rename",
+		"key":      "group:eng",
+		"new_key":  "group:owners",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var renamed wireSectionsEdit
+	decodePolicy(t, payload, &renamed)
+	if strings.Contains(renamed.Document, "group:eng") || !strings.Contains(renamed.Document, "group:owners") {
+		t.Errorf("Document = %q, want group:eng renamed to group:owners", renamed.Document)
+	}
+	if !strings.Contains(renamed.Document, "carol@example.com") {
+		t.Errorf("Document = %q, want the renamed key's members unchanged", renamed.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": renamed.Document,
+		"section":  "groups",
+		"op":       "remove",
+		"key":      "group:owners",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, "group:owners") {
+		t.Errorf("Document = %q, want group:owners removed", removed.Document)
+	}
+	if !strings.Contains(removed.Document, "group:admins") {
+		t.Errorf("Document = %q, want group:admins unchanged", removed.Document)
+	}
+}
+
+func TestPolicySectionsEditReplacesAMapEntryValueByKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{"groups": {"group:admins": ["alice@example.com"]}}`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "groups",
+		"op":       "replace",
+		"key":      "group:admins",
+		"entry":    []string{"alice@example.com", "bob@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireSectionsEdit
+	decodePolicy(t, payload, &got)
+	if !strings.Contains(got.Document, "bob@example.com") {
+		t.Errorf("Document = %q, want the new member added", got.Document)
+	}
+}
+
+// The postures section is map-shaped, per features/13-visual-policy-advanced.md
+// FR-vadv-10. Issue #345 records the defect: the route wrote an array, the key reached
+// the document never, and the sections route then refused the result.
+func TestPolicySectionsEditAddsAPostureAsAMapEntryAndReadsItBack(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	req, err := json.Marshal(map[string]interface{}{
+		"document": "{}",
+		"section":  "postures",
+		"op":       "add",
+		"key":      "posture:test",
+		"entry":    []string{"node:os == 'macos'"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var added wireSectionsEdit
+	decodePolicy(t, payload, &added)
+	if !strings.Contains(added.Document, "posture:test") {
+		t.Errorf("Document = %q, want it to hold the posture name", added.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{"document": added.Document})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("sections status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var sections wireSections
+	decodePolicy(t, payload, &sections)
+	got := sections.Postures["posture:test"]
+	if len(got) != 1 || got[0] != "node:os == 'macos'" {
+		t.Errorf("Postures = %#v, want the key %q with one expression", sections.Postures, "posture:test")
+	}
+}
+
+func TestPolicySectionsEditReplacesRenamesAndRemovesAPostureByKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "postures": {
+    "posture:latestMac": ["node:os == 'macos'"],
+  },
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "postures",
+		"op":       "replace",
+		"key":      "posture:latestMac",
+		"entry":    []string{"node:os == 'macos'", "node:os == 'linux'"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("replace status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var replaced wireSectionsEdit
+	decodePolicy(t, payload, &replaced)
+	if !strings.Contains(replaced.Document, "node:os == 'linux'") {
+		t.Errorf("Document = %q, want the new expression", replaced.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": replaced.Document,
+		"section":  "postures",
+		"op":       "rename",
+		"key":      "posture:latestMac",
+		"new_key":  "posture:currentMac",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("rename status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var renamed wireSectionsEdit
+	decodePolicy(t, payload, &renamed)
+	if strings.Contains(renamed.Document, "posture:latestMac") || !strings.Contains(renamed.Document, "posture:currentMac") {
+		t.Errorf("Document = %q, want posture:latestMac renamed to posture:currentMac", renamed.Document)
+	}
+
+	// The console sends a remove with the key alone. Issue #345 records the refusal
+	// "index is required for op \"remove\"" that the array-shaped branch returned.
+	req, err = json.Marshal(map[string]interface{}{
+		"document": renamed.Document,
+		"section":  "postures",
+		"op":       "remove",
+		"key":      "posture:currentMac",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("remove status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, "posture:currentMac") {
+		t.Errorf("Document = %q, want posture:currentMac removed", removed.Document)
+	}
+}
+
+func TestPolicySectionsEditAddsReplacesAndRemovesAnAutoApproverRouteByCIDR(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "autoApprovers.routes",
+		"op":       "add",
+		"key":      "10.0.1.0/24",
+		"entry":    []string{"tag:router"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var added wireSectionsEdit
+	decodePolicy(t, payload, &added)
+	if !strings.Contains(added.Document, "10.0.1.0/24") {
+		t.Errorf("Document = %q, want the new route added", added.Document)
+	}
+	if !strings.Contains(added.Document, "10.0.0.0/24") {
+		t.Errorf("Document = %q, want the existing route unchanged", added.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": added.Document,
+		"section":  "autoApprovers.routes",
+		"op":       "replace",
+		"key":      "10.0.1.0/24",
+		"entry":    []string{"tag:router", "tag:backup"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var replaced wireSectionsEdit
+	decodePolicy(t, payload, &replaced)
+	if !strings.Contains(replaced.Document, "tag:backup") {
+		t.Errorf("Document = %q, want tag:backup added to the route", replaced.Document)
+	}
+
+	req, err = json.Marshal(map[string]interface{}{
+		"document": replaced.Document,
+		"section":  "autoApprovers.routes",
+		"op":       "remove",
+		"key":      "10.0.0.0/24",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var removed wireSectionsEdit
+	decodePolicy(t, payload, &removed)
+	if strings.Contains(removed.Document, "10.0.0.0/24") {
+		t.Errorf("Document = %q, want 10.0.0.0/24 removed", removed.Document)
+	}
+	if !strings.Contains(removed.Document, "10.0.1.0/24") {
+		t.Errorf("Document = %q, want 10.0.1.0/24 unchanged", removed.Document)
+	}
+}
+
+func TestPolicySectionsEditReplacesTheWholeAutoApproverExitNodeList(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	document := `{"autoApprovers": {"exitNode": ["tag:exit"]}}`
+	req, err := json.Marshal(map[string]interface{}{
+		"document": document,
+		"section":  "autoApprovers.exitNode",
+		"op":       "replace",
+		"entry":    []string{"tag:exit", "tag:backup-exit"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit", string(req))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireSectionsEdit
+	decodePolicy(t, payload, &got)
+	if !strings.Contains(got.Document, "tag:backup-exit") {
+		t.Errorf("Document = %q, want the new exit node approver added", got.Document)
+	}
+}
+
+func TestPolicySectionsEditRejectsAnAutoApproverRouteAddWithNoKey(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit",
+		`{"document":"{}","section":"autoApprovers.routes","op":"add","entry":["tag:router"]}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+}
+
+func TestPolicySectionsEditRejectsAnAutoApproverExitNodeAddOp(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit",
+		`{"document":"{}","section":"autoApprovers.exitNode","op":"add","entry":["tag:exit"]}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+}
+
+func TestPolicySectionsEditRejectsABadOpBeforeAnyChange(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit",
+		`{"document":"{\"acls\":[]}","section":"acls","op":"bogus"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+}
+
+func TestPolicySectionsEditRejectsAReplaceWithNoIndex(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit",
+		`{"document":"{\"acls\":[]}","section":"acls","op":"replace","entry":{}}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+}
+
+func TestPolicySectionsEditRejectsAnAddWithNoEntry(t *testing.T) {
+	fixture := startPolicyServer(t, "http://127.0.0.1:1", []config.Tailnet{{ID: "alpha"}}, nil)
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/sections/edit",
+		`{"document":"{\"acls\":[]}","section":"acls","op":"add"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusBadRequest, payload)
+	}
+}
+
 // --- PUT /api/policy/{id} ---
 
 func TestPutOnePolicySendsIfMatchOnATailscaleWrite(t *testing.T) {
@@ -468,6 +1138,27 @@ func TestPutOnePolicyRefusesADocumentThatValidateRejected(t *testing.T) {
 	}
 }
 
+// The write route validates before it writes, therefore a warning that reads as a
+// rejection blocks the write as well as Push. This test covers the whole path of
+// FR-vadv-18: the control server accepts a document that holds a warning.
+func TestPutOnePolicyWritesADocumentThatHoldsAWarning(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	tailscale.mu.Lock()
+	tailscale.validateResult = `{"message":"warning(s) found","data":[{"user":"group:unknown@example.com","warnings":["group is not syncing from SCIM and will be ignored by rules in the policy file"]}]}`
+	tailscale.mu.Unlock()
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	code, payload := callAccess(t, fixture.client, http.MethodPut, "/api/policy/alpha", `{"document":"{\"acls\":[]}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	if !tailscale.sent("POST /tailnet/-/acl") {
+		t.Error("the daemon wrote no document, and the control server accepts one that holds a warning")
+	}
+}
+
 func TestPutOnePolicyRefusesAHeadscaleDocumentThatCheckRejected(t *testing.T) {
 	headscale := newFakeHeadscale(t, "{}")
 	headscale.mu.Lock()
@@ -535,6 +1226,56 @@ func TestPutOnePolicyReturnsHTTP409WhenTheHeadscaleControlServerRunsTheFilePolic
 	decodePolicy(t, payload, &got)
 	if !strings.Contains(got.Error, `policy.mode: "database"`) {
 		t.Errorf("the message %q does not state the reason", got.Error)
+	}
+}
+
+func TestPutOnePolicyRecordsARejectionOnAValidateFailure(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	tailscale.mu.Lock()
+	tailscale.validateStatus = http.StatusUnauthorized
+	tailscale.mu.Unlock()
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	code, _ := callAccess(t, fixture.client, http.MethodPut, "/api/policy/alpha", `{"document":"{\"acls\":[]}"}`)
+	if code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", code, http.StatusBadGateway)
+	}
+
+	code, payload := callAccess(t, fixture.client, http.MethodGet, "/api/policy", "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wirePolicyList
+	decodePolicy(t, payload, &got)
+	if got.Tailnets[0].CredentialState != CredentialRejected {
+		t.Errorf("credential_state = %q, want %q; body %s", got.Tailnets[0].CredentialState, CredentialRejected, payload)
+	}
+}
+
+func TestPutOnePolicyRecordsARejectionOnAWriteFailure(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	tailscale.mu.Lock()
+	tailscale.writeStatus = http.StatusUnauthorized
+	tailscale.mu.Unlock()
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	code, _ := callAccess(t, fixture.client, http.MethodPut, "/api/policy/alpha", `{"document":"{\"acls\":[]}"}`)
+	if code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", code, http.StatusBadGateway)
+	}
+
+	code, payload := callAccess(t, fixture.client, http.MethodGet, "/api/policy", "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wirePolicyList
+	decodePolicy(t, payload, &got)
+	if got.Tailnets[0].CredentialState != CredentialRejected {
+		t.Errorf("credential_state = %q, want %q; body %s", got.Tailnets[0].CredentialState, CredentialRejected, payload)
 	}
 }
 
@@ -631,6 +1372,17 @@ func TestEveryPolicyRouteRefusesABadRequestBodyBeforeItActs(t *testing.T) {
 		{"the validate route rejects an empty document", http.MethodPost, "/api/policy/alpha/validate", `{"document":""}`},
 		{"the credentials route rejects a body that is not JSON", http.MethodPut, "/api/policy/alpha/credentials", "not json"},
 		{"the credentials route rejects an empty body", http.MethodPut, "/api/policy/alpha/credentials", `{}`},
+		{"the sections route rejects a body that is not JSON", http.MethodPost, "/api/policy/alpha/sections", "not json"},
+		{"the sections route rejects an empty document", http.MethodPost, "/api/policy/alpha/sections", `{"document":""}`},
+		{"the sections route rejects a document that does not parse", http.MethodPost, "/api/policy/alpha/sections", `{"document":"{"}`},
+		{"the sections edit route rejects a body that is not JSON", http.MethodPost, "/api/policy/alpha/sections/edit", "not json"},
+		{"the sections edit route rejects an empty document", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"","section":"acls","op":"add","entry":{}}`},
+		{"the sections edit route rejects an empty section", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"","op":"add","entry":{}}`},
+		{"the sections edit route rejects an unknown op", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"acls","op":"bogus"}`},
+		{"the sections edit route rejects a map add with no key", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"add","entry":[]}`},
+		{"the sections edit route rejects a map remove with no key", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"remove"}`},
+		{"the sections edit route rejects a map rename with no new_key", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"rename","key":"group:admins"}`},
+		{"the sections edit route rejects a map section with an unknown op", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"{}","section":"groups","op":"bogus"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -673,6 +1425,8 @@ func TestEveryPolicyRouteRejectsARequestBodyLargerThanOneMegabyte(t *testing.T) 
 		{"the write route", http.MethodPut, "/api/policy/alpha", `{"document":"` + document + `"}`},
 		{"the validate route", http.MethodPost, "/api/policy/alpha/validate", `{"document":"` + document + `"}`},
 		{"the credentials route", http.MethodPut, "/api/policy/alpha/credentials", `{"tailscale_oauth_client_id":"` + document + `"}`},
+		{"the sections route", http.MethodPost, "/api/policy/alpha/sections", `{"document":"` + document + `"}`},
+		{"the sections edit route", http.MethodPost, "/api/policy/alpha/sections/edit", `{"document":"` + document + `"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -699,6 +1453,8 @@ func TestEveryPolicyRouteRefusesATailnetIdentifierThatTheDaemonDoesNotAccept(t *
 		{http.MethodPut, "/api/policy/..%2F..%2Fetc%2Fshadow", `{"document":"{}"}`},
 		{http.MethodPost, "/api/policy/..%2F..%2Fetc%2Fshadow/validate", `{"document":"{}"}`},
 		{http.MethodPut, "/api/policy/..%2F..%2Fetc%2Fshadow/credentials", `{"tailscale_oauth_client_id":"x","tailscale_oauth_client_secret":"y"}`},
+		{http.MethodPost, "/api/policy/..%2F..%2Fetc%2Fshadow/sections", `{"document":"{}"}`},
+		{http.MethodPost, "/api/policy/..%2F..%2Fetc%2Fshadow/sections/edit", `{"document":"{}","section":"acls","op":"add","entry":{}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.target, func(t *testing.T) {

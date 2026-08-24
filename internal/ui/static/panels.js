@@ -243,19 +243,67 @@ export function activityRows(events) {
 }
 
 /**
+ * policyCredentialNote returns the markup of one note line naming every tailnet that
+ * holds no usable policy credential, and an empty string when every declared tailnet
+ * holds one or the poll reports no policy entry yet.
+ *
+ * entries is the field policy of the merged poll body, from GET /api/policy. Local
+ * reachability and upstream policy are two independent systems (see
+ * docs/specs/features/08-upstream-policy.md), so this note names a policy fact and it
+ * writes no event into the log. See issue #287.
+ */
+function policyCredentialNote(entries) {
+  const ids = (entries || [])
+    .filter((entry) => entry.credential_state !== "usable")
+    .map((entry) => entry.id);
+  if (ids.length === 0) {
+    return "";
+  }
+  const sentence = ids.length === 1
+    ? `The tailnet ${ids[0]} needs a policy credential. Open the Policy tab for the reason.`
+    : `These tailnets need a policy credential: ${ids.join(", ")}. Open the Policy tab for the reason.`;
+  return alert("crit", [sentence]);
+}
+
+/**
+ * ACTIVITY_ROW_LIMIT is the count of event rows that the activity view draws.
+ *
+ * The daemon keeps the newest 1000 events in memory. The view drew every one of them. A
+ * capture of the page reached 44681 pixels, which is 30 viewports. See issue #355.
+ *
+ * The view draws a count of the log. It holds no control that draws the rest. Such a
+ * control needs state that survives the poll, because activity.js draws the whole section
+ * again on every tick.
+ */
+export const ACTIVITY_ROW_LIMIT = 100;
+
+/**
  * activityMarkup returns the whole activity view as markup.
  * rows comes from activityRows. A time, a kind, and a tailnet identifier are machine
- * values, and a message is the sentence that the daemon wrote.
+ * values, and a message is the sentence that the daemon wrote. policyEntries is the field
+ * policy of the merged poll body, and it adds one note line above the event list when a
+ * declared tailnet holds no usable credential.
+ *
+ * The view draws the newest ACTIVITY_ROW_LIMIT rows. When the log holds more, the view
+ * states the count of the log. See issue #355.
  */
-export function activityMarkup(rows) {
+export function activityMarkup(rows, policyEntries = []) {
+  const note = policyCredentialNote(policyEntries);
+
   if (rows.length === 0) {
     return (
+      note +
       '<section class="card empty"><span class="label">Empty</span>' +
       "<p>The daemon reports no event. An event arrives when the reconciler creates a namespace, connects a tailnet, or writes the access rules.</p></section>"
     );
   }
 
-  const list = rows
+  const drawn = rows.slice(0, ACTIVITY_ROW_LIMIT);
+  const cap = drawn.length < rows.length
+    ? `<p class="note">The view draws the newest ${drawn.length} events of ${rows.length}.</p>`
+    : "";
+
+  const list = drawn
     .map(
       (row) =>
         '<div class="ev">' +
@@ -269,7 +317,9 @@ export function activityMarkup(rows) {
     .join("");
 
   return (
+    note +
     '<section class="card"><span class="label">Events</span>' +
+    cap +
     `<div class="events">${list}</div>` +
     '<p class="note">The daemon holds the newest events in memory. It records one event for every mutating request on the console listener.</p>' +
     "</section>"

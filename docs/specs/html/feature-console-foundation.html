@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale v1.0 — Feature: Console foundation</title>
+<style>
+:root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
+        --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#14141b; --fg:#e8e8ee; --muted:#9a9aa8; --line:#2c2c38; --accent:#8ea6ff;
+          --card:#1c1c26; --warn-bg:#2a2318; --warn-line:#a87c2a; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:16px/1.6 system-ui,-apple-system,sans-serif; }
+.layout { display:flex; min-height:100vh; }
+aside.site { width:17rem; flex:none; border-right:1px solid var(--line);
+             padding:1.2rem 1rem 3rem; position:sticky; top:0; height:100vh;
+             overflow-y:auto; background:var(--card); }
+aside.site h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+                color:var(--muted); margin:1.2rem 0 .3rem; border:none; padding:0; }
+aside.site ul { list-style:none; margin:0; padding:0; }
+aside.site li { margin:.15rem 0; }
+aside.site a { text-decoration:none; color:var(--fg); font-size:.92rem;
+               display:block; padding:.15rem .5rem; border-radius:6px; }
+aside.site a:hover { background:var(--bg); }
+aside.site a.current { background:var(--accent); color:#fff; }
+aside.site a.sub { padding-left:1.3rem; font-size:.84rem; color:var(--muted); }
+aside.site .brand { font-weight:700; font-size:1.05rem; }
+main { max-width:60rem; margin:0 auto; padding:2rem 1.5rem 6rem; min-width:0; flex:1; }
+h1,h2,h3,h4 { line-height:1.25; }
+h1 { font-size:2rem; margin:.2rem 0; }
+h2 { border-bottom:1px solid var(--line); padding-bottom:.3rem; margin-top:2.5rem; }
+a { color:var(--accent); }
+code { background:var(--card); padding:.1em .35em; border-radius:4px; font-size:.9em; }
+pre.code { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; overflow-x:auto; }
+pre.code code { background:none; padding:0; }
+.table-wrap { overflow-x:auto; }
+table { border-collapse:collapse; margin:1rem 0; min-width:50%; }
+th,td { border:1px solid var(--line); padding:.4rem .7rem; text-align:left; }
+th { background:var(--card); }
+blockquote { border-left:3px solid var(--accent); margin:1rem 0; padding:.2rem 1rem;
+             color:var(--muted); }
+.meta { color:var(--muted); margin-bottom:2rem; }
+.badge { display:inline-block; padding:.1rem .6rem; border-radius:999px;
+         border:1px solid var(--accent); color:var(--accent); font-size:.85rem; }
+.diagram { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; margin:1rem 0; overflow-x:auto; }
+.diagram pre.mermaid { margin:0; }
+.diagram.raw::before { content:"diagram source (assets/mermaid.min.js not vendored)";
+                       display:block; color:var(--muted); font-size:.8rem;
+                       margin-bottom:.5rem; }
+.callout-h, .callout-h ~ p, .callout-h ~ ul { background:var(--warn-bg); }
+.callout-h { border-left:4px solid var(--warn-line); padding:.3rem .8rem; }
+.mockup { margin:1.5rem 0; }
+.mockup iframe { width:100%; height:32rem; border:1px solid var(--line);
+                 border-radius:8px; background:#fff; }
+nav.pager { display:flex; justify-content:space-between; margin-top:3rem;
+            border-top:1px solid var(--line); padding-top:1rem; }
+@media (max-width: 900px) {
+  .layout { display:block; }
+  aside.site { width:auto; height:auto; position:static; border-right:none;
+               border-bottom:1px solid var(--line); }
+}
+h1[id]:hover .rv-add, h2[id]:hover .rv-add, h3[id]:hover .rv-add,
+h4[id]:hover .rv-add { opacity:1; }
+.rv-add { opacity:0; margin-left:.5rem; font-size:.75rem; cursor:pointer;
+          border:1px solid var(--accent); color:var(--accent); background:none;
+          border-radius:6px; padding:0 .45rem; vertical-align:middle;
+          transition:opacity .15s; }
+.rv-comment { border:1px solid var(--warn-line); border-left-width:4px;
+              background:var(--warn-bg); border-radius:8px; padding:.6rem .9rem;
+              margin:.8rem 0; font-size:.92rem; }
+.rv-comment.rv-resolved { opacity:.6; border-left-color:var(--line); }
+.rv-comment .rv-head { display:flex; gap:.6rem; align-items:center;
+                       color:var(--muted); font-size:.8rem; margin-bottom:.3rem; }
+.rv-comment .rv-head button { font-size:.75rem; cursor:pointer; background:none;
+                              border:1px solid var(--line); border-radius:6px;
+                              color:var(--muted); padding:0 .4rem; }
+.rv-comment .rv-body { white-space:pre-wrap; }
+.rv-editor textarea { width:100%; min-height:5rem; background:var(--bg);
+                      color:var(--fg); border:1px solid var(--line);
+                      border-radius:6px; padding:.5rem; font:inherit; }
+.rv-editor .rv-actions { margin-top:.4rem; display:flex; gap:.5rem; }
+.rv-editor button { cursor:pointer; border-radius:6px; padding:.2rem .8rem;
+                    border:1px solid var(--accent); background:var(--accent);
+                    color:#fff; }
+.rv-editor button.rv-cancel { background:none; color:var(--accent); }
+#rv-toggle { position:fixed; right:1rem; bottom:1rem; z-index:60;
+             background:var(--accent); color:#fff; border:none; cursor:pointer;
+             border-radius:999px; padding:.5rem 1rem; font-size:.85rem;
+             box-shadow:0 2px 10px rgba(0,0,0,.2); }
+#rv-drawer { position:fixed; top:0; right:0; bottom:0; width:21rem; z-index:55;
+             background:var(--card); border-left:1px solid var(--line);
+             display:flex; flex-direction:column; transform:translateX(100%);
+             transition:transform .2s ease; box-shadow:-4px 0 16px rgba(0,0,0,.12); }
+body.rv-open #rv-drawer { transform:none; }
+body.rv-open .layout { padding-right:21rem; }
+#rv-drawer header { padding:.8rem 1rem .5rem; border-bottom:1px solid var(--line); }
+#rv-drawer header .rv-count { color:var(--muted); font-size:.8rem; }
+#rv-drawer .rv-compose { padding:.8rem 1rem; border-bottom:1px solid var(--line); }
+#rv-drawer .rv-compose label { display:block; font-size:.75rem;
+                               color:var(--muted); margin-bottom:.25rem; }
+#rv-drawer .rv-compose select { width:100%; margin-bottom:.4rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.3rem; font:inherit; font-size:.85rem; }
+#rv-drawer .rv-compose textarea { width:100%; min-height:5.5rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.5rem; font:inherit; font-size:.9rem; }
+#rv-drawer .rv-compose .rv-live { font-size:.72rem; color:var(--muted); }
+#rv-drawer .rv-list { flex:1; overflow-y:auto; padding:.6rem 1rem; }
+#rv-drawer .rv-item { border:1px solid var(--line); border-left:3px solid
+             var(--warn-line); border-radius:8px; padding:.45rem .6rem;
+             margin-bottom:.6rem; font-size:.82rem; cursor:pointer; }
+#rv-drawer .rv-item.rv-resolved { opacity:.55; border-left-color:var(--line); }
+#rv-drawer .rv-item .rv-where { color:var(--accent); font-size:.72rem; }
+#rv-drawer .rv-item .rv-meta { color:var(--muted); font-size:.72rem;
+                               display:flex; gap:.5rem; align-items:center; }
+#rv-drawer .rv-item .rv-meta button { font-size:.7rem; cursor:pointer;
+             background:none; border:1px solid var(--line); border-radius:5px;
+             color:var(--muted); padding:0 .35rem; }
+#rv-drawer .rv-item .rv-text { white-space:pre-wrap; margin:.15rem 0; }
+#rv-drawer footer { padding:.6rem 1rem; border-top:1px solid var(--line);
+                    display:flex; gap:.5rem; flex-wrap:wrap; }
+#rv-drawer footer button, #rv-drawer .rv-compose button {
+  cursor:pointer; border:1px solid var(--accent); background:none;
+  color:var(--accent); border-radius:6px; padding:.2rem .7rem; font-size:.8rem; }
+#rv-drawer .rv-compose button.rv-primary { background:var(--accent); color:#fff; }
+#rv-drawer .rv-otherpages { color:var(--muted); font-size:.75rem;
+                            margin:.4rem 0 0; }
+@media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
+</style>
+</head>
+<body data-page="feature-console-foundation" data-rvkey="hydrascale-v1">
+<div class="layout">
+<aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
+<h2>Spec</h2><ul>
+<li><a href="../spec.html">Overview &amp; index</a></li>
+</ul>
+<h2>Features</h2><ul>
+<li><a href="feature-foundation.html">Foundation</a></li>
+<li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
+<li><a href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-fixes.html">Security fixes</a></li>
+<li><a href="feature-dns-integrity.html">DNS integrity</a></li>
+<li><a href="feature-reachability-model.html">Local reachability model</a></li>
+<li><a class="current" href="feature-console-foundation.html">Console foundation</a></li>
+<li><a href="feature-console-access-editor.html">Console access editor</a></li>
+<li><a href="feature-upstream-policy.html">Upstream policy control</a></li>
+<li><a href="feature-docs-and-release.html">Documentation, terminal interface restyle, and the release</a></li>
+<li><a href="feature-agent-skills.html">Agent skills for the operator, and the two command defects they expose</a></li>
+<li><a href="feature-policy-document-model.html">Policy document model</a></li>
+<li><a href="feature-visual-acl-editor.html">Visual ACL editor</a></li>
+<li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
+</ul></aside>
+<main>
+<h1>Feature: Console foundation</h1>
+<p class="meta">Epic 6: Console foundation &nbsp; <span class="badge">issued</span></p>
+<h3 id="console-foundation-purpose">Purpose</h3>
+<p>The daemon serves a console. The console replaces the desktop client. It shows the live state of every tailnet, it shows the topology, and it lets the operator add, remove, connect, and disconnect a tailnet.</p>
+<p>The console is a static single-page application that <code>go:embed</code> places in the daemon binary. It has no build step and no framework. <code>spec.md</code> states why.</p>
+<p>This feature set delivers the shell, the data layer, and four views: overview, namespace detail, DNS, and activity, plus settings. <code>features/07-console-access-editor.md</code> adds the access view.</p>
+<h3 id="console-foundation-user-stories">User stories</h3>
+<ul>
+<li>As the operator, I want to open a browser on the host and see every tailnet, so that I
+</li>
+</ul>
+<p>do not read YAML to learn the state.</p>
+<ul>
+<li>As the operator, I want the topology as one picture, so that I see which tailnet exists
+</li>
+</ul>
+<p>and how many peers each has.</p>
+<ul>
+<li>As the operator, I want to add a tailnet without editing a file, so that setup is one
+</li>
+</ul>
+<p>flow.</p>
+<ul>
+<li>As the operator, I want to see what the daemon did and when, so that I can debug a
+</li>
+</ul>
+<p>failure.</p>
+<ul>
+<li>As the operator, I want the console to work on a host with no internet route, so that
+</li>
+</ul>
+<p>an isolated host is still manageable.</p>
+<h3 id="console-foundation-functional-requirements">Functional requirements</h3>
+<h4 id="console-foundation-serving">Serving</h4>
+<ul>
+<li><strong>FR-console-1</strong> — The daemon serves the console over HTTP on the address in
+</li>
+</ul>
+<p><code>console.bind_address</code>, which defaults to <code>127.0.0.1:9443</code>.</p>
+<ul>
+<li><strong>FR-console-2</strong> — The daemon refuses to start when <code>console.bind_address</code> is not a
+</li>
+</ul>
+<p>loopback address, and it logs the reason.</p>
+<ul>
+<li><strong>FR-console-3</strong> — <code>console.enabled</code> defaults to <code>true</code> and <code>false</code> disables the
+</li>
+</ul>
+<p>listener.</p>
+<ul>
+<li><strong>FR-console-4</strong> — The daemon serves the JSON API on the console listener and on the
+</li>
+</ul>
+<p>control socket.</p>
+<ul>
+<li><strong>FR-console-5</strong> — <code>go:embed</code> places <code>internal/ui/static</code> in the binary. The daemon
+</li>
+</ul>
+<p>reads no console file from disk.</p>
+<ul>
+<li><strong>FR-console-6</strong> — The console requests no resource from a host other than its own
+</li>
+</ul>
+<p>origin.</p>
+<ul>
+<li><strong>FR-console-7</strong> — The daemon sets the header
+</li>
+</ul>
+<p><code>Content-Security-Policy: default-src 'self'; img-src 'self' data:</code> on every console response.</p>
+<h4 id="console-foundation-console-request-controls">Console request controls</h4>
+<ul>
+<li><strong>FR-console-8</strong> — Every mutating route requires the request header
+</li>
+</ul>
+<p><code>X-Hydrascale-Console: 1</code>, and it returns HTTP 403 without it.</p>
+<ul>
+<li><strong>FR-console-9</strong> — A route returns HTTP 403 when the request has an <code>Origin</code> header
+</li>
+</ul>
+<p>whose value is not the console origin.</p>
+<ul>
+<li><strong>FR-console-10</strong> — The daemon records an event for every mutating request that it
+</li>
+</ul>
+<p>serves on the console listener.</p>
+<ul>
+<li><strong>FR-console-11</strong> — The daemon logs the console listener address at start, with the
+</li>
+</ul>
+<p>statement that the console has no authentication.</p>
+<h4 id="console-foundation-the-shell">The shell</h4>
+<ul>
+<li><strong>FR-console-12</strong> — The console has a left navigation with the entries overview,
+</li>
+</ul>
+<p>namespaces, access, policy, activity, and settings.</p>
+<ul>
+<li><strong>FR-console-13</strong> — The navigation shows the logo and the daemon version.
+</li>
+<li><strong>FR-console-14</strong> — The console shows one heading per view and no more than one
+</li>
+</ul>
+<p>heading of the largest size.</p>
+<ul>
+<li><strong>FR-console-15</strong> — The console polls <code>GET /api/status</code> every 5 seconds and the
+</li>
+</ul>
+<p>interval is a setting.</p>
+<ul>
+<li><strong>FR-console-16</strong> — When a poll fails, the console keeps the last state, marks it
+</li>
+</ul>
+<p>stale, and shows the time of the last success.</p>
+<ul>
+<li><strong>FR-console-17</strong> — The console never shows invented data. An empty view states what
+</li>
+</ul>
+<p>would fill it.</p>
+<h4 id="console-foundation-the-overview">The overview</h4>
+<ul>
+<li><strong>FR-console-18</strong> — The overview shows the count of tailnets, the count of peers, the
+</li>
+</ul>
+<p>reconciler state, and the time since the last reconcile.</p>
+<ul>
+<li><strong>FR-console-19</strong> — The overview shows a topology of every tailnet, the host, and the
+</li>
+</ul>
+<p>internet.</p>
+<ul>
+<li><strong>FR-console-20</strong> — The topology draws an allowed path as a dotted curve.
+</li>
+<li><strong>FR-console-21</strong> — The topology draws no denied path.
+</li>
+<li><strong>FR-console-22</strong> — The topology draws no arrowhead, no node icon, no edge label, and
+</li>
+</ul>
+<p>no minimum map.</p>
+<ul>
+<li><strong>FR-console-23</strong> — When the operator selects a node, the topology draws that node's
+</li>
+</ul>
+<p>paths in the accent colour and it mutes every other path.</p>
+<ul>
+<li><strong>FR-console-24</strong> — The topology has a text equivalent that a screen reader reads,
+</li>
+</ul>
+<p>which lists each allowed path as a sentence.</p>
+<h4 id="console-foundation-namespace-detail">Namespace detail</h4>
+<ul>
+<li><strong>FR-console-25</strong> — The namespace view lists every tailnet with its state, its peer
+</li>
+</ul>
+<p>count, and its address.</p>
+<ul>
+<li><strong>FR-console-26</strong> — Selecting a tailnet opens a panel with the peers, the MagicDNS
+</li>
+</ul>
+<p>name, the control server, the host access state, and the recent events.</p>
+<ul>
+<li><strong>FR-console-27</strong> — The panel closes when the selection clears.
+</li>
+<li><strong>FR-console-28</strong> — The operator can connect and disconnect a tailnet from the panel.
+</li>
+<li><strong>FR-console-29</strong> — The operator can remove a tailnet from the panel, through a dialog
+</li>
+</ul>
+<p>that names every command the removal runs.</p>
+<ul>
+<li><strong>FR-console-30</strong> — The removal dialog states that the node stays authorized on the
+</li>
+</ul>
+<p>control server.</p>
+<h4 id="console-foundation-add-a-tailnet">Add a tailnet</h4>
+<ul>
+<li><strong>FR-console-31</strong> — The console has an add flow with the fields identifier, auth key,
+</li>
+</ul>
+<p>control server URL, exit node, and host access.</p>
+<ul>
+<li><strong>FR-console-32</strong> — The add flow validates the identifier against the same rule that
+</li>
+</ul>
+<p>the daemon uses, before it sends the request.</p>
+<ul>
+<li><strong>FR-console-33</strong> — The add flow never displays an auth key after the operator submits
+</li>
+</ul>
+<p>it.</p>
+<h4 id="console-foundation-dns-and-activity-and-settings">DNS and activity and settings</h4>
+<ul>
+<li><strong>FR-console-34</strong> — The DNS view shows the resolver mode, the bind address, the
+</li>
+</ul>
+<p>upstream servers, and the protected state of every namespace.</p>
+<ul>
+<li><strong>FR-console-35</strong> — The DNS view shows a warning when the host <code>resolv.conf</code> file
+</li>
+</ul>
+<p>changed.</p>
+<ul>
+<li><strong>FR-console-36</strong> — The activity view lists events, newest first, with the time, the
+</li>
+</ul>
+<p>kind, the tailnet, and the message.</p>
+<ul>
+<li><strong>FR-console-37</strong> — The settings view shows the configuration path, the socket path,
+</li>
+</ul>
+<p>the console address, the poll interval, and the version.</p>
+<ul>
+<li><strong>FR-console-38</strong> — The settings view states that the console has no authentication
+</li>
+</ul>
+<p>and that any local account can reach it.</p>
+<h4 id="console-foundation-brand">Brand</h4>
+<ul>
+<li><strong>FR-console-39</strong> — The console loads the brand tokens from
+</li>
+</ul>
+<p><code>internal/ui/static/brand/tokens/</code>.</p>
+<ul>
+<li><strong>FR-console-40</strong> — The console uses the accent colour for one thing per view: the
+</li>
+</ul>
+<p>affirmative action, or the current selection, or an allowed path.</p>
+<ul>
+<li><strong>FR-console-41</strong> — The console shows a state as a coloured dot and a lowercase word.
+</li>
+<li><strong>FR-console-42</strong> — The console renders every machine value in the mono typeface.
+</li>
+<li><strong>FR-console-43</strong> — The console honours <code>prefers-reduced-motion</code>.
+</li>
+<li><strong>FR-console-44</strong> — The console contains no emoji.
+</li>
+<li><strong>FR-console-45</strong> — The console loads <code>Space Grotesk</code> and <code>Space Mono</code> from
+</li>
+</ul>
+<p><code>internal/ui/static/brand/fonts/</code>.</p>
+<ul>
+<li><strong>FR-console-46</strong> — <code>internal/ui/static/brand/tokens/fonts.css</code> holds one <code>@font-face</code>
+</li>
+</ul>
+<p>rule per font file, and each rule names a path under the console origin.</p>
+<ul>
+<li><strong>FR-console-47</strong> — <code>internal/ui/static/brand/fonts/OFL.txt</code> holds the SIL Open Font
+</li>
+</ul>
+<p>License text.</p>
+<h4 id="console-foundation-the-typefaces">The typefaces</h4>
+<p>The operator decided on 2026-08-05: "Self-host the font files under <code>internal/ui/static/brand/fonts/</code>, with <code>OFL.txt</code>. Epic 6 work, not in the current backlog."</p>
+<p>Issue #90 records the decision and issue #59 removed the Google Fonts rule that the source held. <code>CLAUDE.md</code> states that the console makes no request to another host, so a rule that names Google Fonts is not an option. Two other options were rejected: a system-font stack as the final state, and a request to a font host.</p>
+<p>Epic 6 does this work:</p>
+<ol>
+<li>Add the <code>Space Grotesk</code> font files and the <code>Space Mono</code> font files under
+</li>
+</ol>
+<p><code>internal/ui/static/brand/fonts/</code>.</p>
+<ol>
+<li>Add <code>internal/ui/static/brand/fonts/OFL.txt</code>. The SIL Open Font License requires the
+</li>
+</ol>
+<p>licence text beside the font files.</p>
+<ol>
+<li>Write the <code>@font-face</code> rules in <code>internal/ui/static/brand/tokens/fonts.css</code>. Each rule
+</li>
+</ol>
+<p>loads a file from the daemon.</p>
+<ol>
+<li>Remove the <code>TODO(#90)</code> line from <code>internal/ui/static/brand/tokens/fonts.css</code>.
+</li>
+</ol>
+<p>Two constraints hold before a font file enters the repository:</p>
+<ul>
+<li>The repository is public. The operator confirms the source of each font file and the
+</li>
+</ul>
+<p>licence text before Epic 6 commits it. Read the licence text from the font project itself.</p>
+<ul>
+<li><code>go:embed</code> places every file in <code>internal/ui/static</code> in the daemon binary, so each font
+</li>
+</ul>
+<p>file adds to the binary size. Keep the file count and the byte count low, and state the added bytes in the pull request.</p>
+<p>The size rule of <code>scripts/check-hygiene.sh</code> does not block a font file. The script sets <code>max_bytes=2097152</code> and <code>brand_prefix='internal/ui/static/brand/'</code>, and it skips a tracked file whose path starts with that prefix:</p>
+<pre class="code"><code>	case "$file" in
+	"$brand_prefix"*) continue ;;
+	esac</code></pre>
+<p>Until Epic 6 lands, the console renders <code>system-ui</code> for <code>--sans</code> and <code>ui-monospace</code> for <code>--mono</code>, which <code>internal/ui/static/brand/tokens/typography.css</code> names as the fallback families. The console is on brand for colour, spacing, radius, elevation, and motion. The console is not on brand for typography.</p>
+<h3 id="console-foundation-user-flows">User flows</h3>
+<h4 id="console-foundation-the-operator-opens-the-console">The operator opens the console</h4>
+<ol>
+<li>The operator runs <code>hydrascale serve</code> or starts the systemd service.
+</li>
+<li>The daemon logs the console address and the no-authentication statement.
+</li>
+<li>The operator opens <code>http://127.0.0.1:9443</code> in a browser.
+</li>
+<li>The console requests <code>GET /api/status</code>.
+</li>
+<li>The console draws the overview.
+</li>
+</ol>
+<h4 id="console-foundation-the-operator-reaches-a-remote-host">The operator reaches a remote host</h4>
+<ol>
+<li>The operator runs <code>ssh -L 9443:127.0.0.1:9443 user@host</code>.
+</li>
+<li>The operator opens <code>http://127.0.0.1:9443</code> on the local machine.
+</li>
+<li>The console works as it does on the host.
+</li>
+</ol>
+<h4 id="console-foundation-the-operator-removes-a-tailnet">The operator removes a tailnet</h4>
+<ol>
+<li>The operator selects a tailnet in the namespace view.
+</li>
+<li>The operator selects <strong>Remove</strong>.
+</li>
+<li>The dialog lists <code>tailscale logout</code>, the namespace, the veth device, the iptables
+</li>
+</ol>
+<p>rules, the rule count, and the state directory.</p>
+<ol>
+<li>The dialog states that the node stays authorized on the control server.
+</li>
+<li>The operator confirms.
+</li>
+<li>The console sends <code>POST /api/tailnet/remove</code>.
+</li>
+<li>The reconciler removes the tailnet and the console updates on the next poll.
+</li>
+</ol>
+<h3 id="console-foundation-screens-states">Screens &amp; states</h3>
+<h4 id="console-foundation-overview-mockups-01-overview-html">Overview — <code>mockups/01-overview.html</code></h4>
+<div class="table-wrap"><table>
+<tr><th>Region</th><th>Content</th></tr>
+<tr><td>Statistics row</td><td>Tailnet count, peer count, reconciler state, time since the last reconcile.</td></tr>
+<tr><td>Topology</td><td>Nodes for each tailnet, the host, and the internet. Dotted curves for allowed paths.</td></tr>
+<tr><td>Recent activity</td><td>The five newest events.</td></tr>
+</table></div>
+<div class="table-wrap"><table>
+<tr><th>State</th><th>What it shows</th></tr>
+<tr><td>Empty</td><td>No tailnet is configured. The view states that and shows the add action.</td></tr>
+<tr><td>Loading</td><td>The first poll has not returned. The view shows the shell and a quiet placeholder row.</td></tr>
+<tr><td>Populated</td><td>The statistics, the topology, and the activity.</td></tr>
+<tr><td>Stale</td><td>The last known state, a stale marker, and the time of the last success.</td></tr>
+<tr><td>Error</td><td>The daemon is unreachable. The view names the socket path and the console address.</td></tr>
+</table></div>
+<h4 id="console-foundation-namespace-detail-mockups-02-namespace-detail-html">Namespace detail — <code>mockups/02-namespace-detail.html</code></h4>
+<div class="table-wrap"><table>
+<tr><th>Region</th><th>Content</th></tr>
+<tr><td>List</td><td>One row per tailnet: state dot, identifier, peer count, address.</td></tr>
+<tr><td>Panel</td><td>Peers, MagicDNS name, control server, host access, recent events, actions.</td></tr>
+</table></div>
+<div class="table-wrap"><table>
+<tr><th>State</th><th>What it shows</th></tr>
+<tr><td>Empty</td><td>No tailnet. The add action.</td></tr>
+<tr><td>Selected</td><td>The panel, open on the right.</td></tr>
+<tr><td>Not authenticated</td><td>The row shows a warning dot and the panel shows the login URL.</td></tr>
+<tr><td>Error</td><td>The row shows a critical dot and the panel shows the last error.</td></tr>
+<tr><td>Removing</td><td>The row is muted and the actions are disabled until the poll confirms.</td></tr>
+</table></div>
+<h4 id="console-foundation-dns-and-settings-mockups-05-dns-and-settings-html">DNS and settings — <code>mockups/05-dns-and-settings.html</code></h4>
+<div class="table-wrap"><table>
+<tr><th>Region</th><th>Content</th></tr>
+<tr><td>Resolver</td><td>Mode, bind address, upstream servers.</td></tr>
+<tr><td>Namespaces</td><td>One row per namespace with the protected state.</td></tr>
+<tr><td>Host file</td><td>The checksum, the last change time, and the warning when it changed.</td></tr>
+<tr><td>Settings</td><td>Configuration path, socket path, console address, poll interval, version, and the no-authentication statement.</td></tr>
+</table></div>
+<h3 id="console-foundation-behaviour-rules">Behaviour rules</h3>
+<ul>
+<li>The console stages nothing except an access edit. Every other action applies at once,
+</li>
+</ul>
+<p>because it is a single named action rather than a set of edits.</p>
+<ul>
+<li>The console does not confirm a non-destructive action.
+</li>
+<li>The console shows one toast per destructive action and none per click.
+</li>
+<li>The console draws no animation that the operator did not trigger.
+</li>
+<li>A machine value is never in the sans typeface. A sentence is never in the mono
+</li>
+</ul>
+<p>typeface.</p>
+<ul>
+<li>The topology places tailnet nodes on the left and the host and the internet on the
+</li>
+</ul>
+<p>right, as the flow overview in the brand reference does.</p>
+<h3 id="console-foundation-data-touched">Data touched</h3>
+<div class="table-wrap"><table>
+<tr><th>Entity</th><th>Change</th></tr>
+<tr><td>Configuration</td><td>New <code>console</code> block with <code>enabled</code> and <code>bind_address</code>.</td></tr>
+<tr><td>Event</td><td>New kind <code>console.request</code> for a mutating console request.</td></tr>
+</table></div>
+<h3 id="console-foundation-interfaces">Interfaces</h3>
+<p>The console uses the existing routes, plus:</p>
+<div class="table-wrap"><table>
+<tr><th>Method and path</th><th>Purpose</th></tr>
+<tr><td><code>GET /api/dns</code></td><td>The DNS state. <code>features/04-dns-integrity.md</code> defines it.</td></tr>
+<tr><td><code>GET /api/access</code></td><td>The rule set and the node list, which the topology draws.</td></tr>
+</table></div>
+<p>The console is served at <code>/</code>. Every JSON route stays under <code>/api/</code>.</p>
+<h3 id="console-foundation-edge-cases-failures">Edge cases &amp; failures</h3>
+<div class="table-wrap"><table>
+<tr><th>Case</th><th>Behaviour</th></tr>
+<tr><td>The port is in use.</td><td>The daemon fails to start and it names the port and the configuration key.</td></tr>
+<tr><td>The operator sets <code>console.bind_address: 0.0.0.0:9443</code>.</td><td>The daemon refuses to start and it states that the console must bind a loopback address.</td></tr>
+<tr><td>A browser extension injects a request.</td><td>The <code>X-Hydrascale-Console</code> header requirement and the <code>Origin</code> check reject a cross-origin request. Neither stops a local process.</td></tr>
+<tr><td>The daemon has no tailnet.</td><td>Every view shows a designed empty state rather than a blank region.</td></tr>
+<tr><td>A tailnet has 200 peers.</td><td>The panel lists them in a scrolling region and it states the count.</td></tr>
+<tr><td>The browser has no <code>color-mix</code> support.</td><td>The tokens use <code>color-mix</code> for two values. The console defines a fallback value before each <code>color-mix</code> declaration.</td></tr>
+<tr><td>The poll fails for 60 seconds.</td><td>The console keeps the last state, marks it stale, and offers a manual retry.</td></tr>
+</table></div>
+<h3 id="console-foundation-acceptance-criteria">Acceptance criteria</h3>
+<ul>
+<li>[ ] <code>go build ./...</code> produces one binary that serves the console with no external file.
+</li>
+<li>[ ] The daemon refuses to start with <code>console.bind_address: 0.0.0.0:9443</code>.
+</li>
+<li>[ ] The console loads at <code>http://127.0.0.1:9443</code> and shows the overview.
+</li>
+<li>[ ] The browser network log shows no request to a host other than the console origin.
+</li>
+<li>[ ] <code>POST /api/tailnet/remove</code> without <code>X-Hydrascale-Console: 1</code> returns HTTP 403.
+</li>
+<li>[ ] A request with <code>Origin: http://evil.example</code> returns HTTP 403.
+</li>
+<li>[ ] The topology draws a dotted curve for each allowed path and no line for a denied
+</li>
+</ul>
+<p>path.</p>
+<ul>
+<li>[ ] Selecting a node mutes every path that the node does not own.
+</li>
+<li>[ ] A screen reader reads the topology text equivalent as a list of allowed paths.
+</li>
+<li>[ ] Every control reaches focus by keyboard and shows a visible focus ring.
+</li>
+<li>[ ] The removal dialog names <code>tailscale logout</code>, the namespace, the veth device, and
+</li>
+</ul>
+<p>the state directory.</p>
+<ul>
+<li>[ ] The add flow rejects the identifier <code>My Net</code> before it sends a request.
+</li>
+<li>[ ] With the daemon stopped, the console shows the last known state marked stale.
+</li>
+<li>[ ] With no tailnet configured, every view shows a written empty state.
+</li>
+<li>[ ] The console JavaScript tests run under <code>go test ./internal/ui/...</code>.
+</li>
+<li>[ ] The browser network log shows a request for each font file, and every request goes
+</li>
+</ul>
+<p>to the console origin.</p>
+<ul>
+<li>[ ] The heading of the overview renders in <code>Space Grotesk</code>, and a machine value renders
+</li>
+</ul>
+<p>in <code>Space Mono</code>.</p>
+<ul>
+<li>[ ] <code>internal/ui/static/brand/fonts/OFL.txt</code> is present.
+</li>
+<li>[ ] <code>internal/ui/static/brand/tokens/fonts.css</code> holds no <code>TODO</code> marker.
+</li>
+</ul>
+<h3 id="console-foundation-out-of-scope">Out of scope</h3>
+<ul>
+<li>The access editor. <code>features/07-console-access-editor.md</code> owns it.
+</li>
+<li>The upstream policy views. <code>features/08-upstream-policy.md</code> owns them.
+</li>
+<li>Authentication of any kind.
+</li>
+<li>A light theme. The brand is a dark operator console and <code>tokens/colors.css</code> sets
+</li>
+</ul>
+<p><code>color-scheme: dark</code>.</p>
+<ul>
+<li>Serving the console over the control socket.
+</li>
+</ul>
+<h3 id="console-foundation-open-questions" class="callout-h">Open questions</h3>
+<p>None.</p><h2>Mockups</h2><p>Mockups convey intent — the rough shape a user will see. An implementer may diverge where framework conventions, components, accessibility, or a better idea serve the feature's requirements; the FRs and acceptance criteria are the contract, not the pixels.</p><div class="mockup"><iframe src="../mockups/01-overview.html" loading="lazy"></iframe><p><a href="../mockups/01-overview.html" target="_blank">Open ../mockups/01-overview.html in new tab</a></p></div><div class="mockup"><iframe src="../mockups/02-namespace-detail.html" loading="lazy"></iframe><p><a href="../mockups/02-namespace-detail.html" target="_blank">Open ../mockups/02-namespace-detail.html in new tab</a></p></div><div class="mockup"><iframe src="../mockups/05-dns-and-settings.html" loading="lazy"></iframe><p><a href="../mockups/05-dns-and-settings.html" target="_blank">Open ../mockups/05-dns-and-settings.html in new tab</a></p></div><nav class="pager">
+<a href="feature-reachability-model.html">&larr; Feature: Local reachability model</a>
+<a href="feature-console-access-editor.html">Feature: Console access editor &rarr;</a>
+</nav>
+</main>
+</div>
+<script>document.querySelectorAll('.diagram').forEach(function(d){d.classList.add('raw')});</script>
+<script type="application/json" id="rv-embedded">[]</script>
+<script>
+(function(){
+  'use strict';
+  var PAGE = document.body.getAttribute('data-page');
+  // storage key carries the spec's slug: file:// pages can share one
+  // localStorage pool, and two specs must never share a comment store
+  var RVKEY = 'spec-review:' + (document.body.getAttribute('data-rvkey') || 'spec');
+  var EMBED = [];
+  var embedEl = document.getElementById('rv-embedded');
+  if (embedEl) { try { EMBED = JSON.parse(embedEl.textContent); } catch(e){} }
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(RVKEY)) || {comments:[], deleted:[]}; } catch(e){ return {comments:[], deleted:[]}; } }
+  function saveLocal(s){ try { localStorage.setItem(RVKEY, JSON.stringify(s)); } catch(e){} }
+  function cid(c){ return c.page + '|' + c.section + '|' + (c.date||'') + '|' + c.body.slice(0,24); }
+  function allComments(){
+    var s = loadLocal(), map = {};
+    EMBED.forEach(function(c){ map[cid(c)] = c; });
+    s.comments.forEach(function(c){ map[cid(c)] = c; });
+    s.deleted.forEach(function(id){ delete map[id]; });
+    return Object.keys(map).map(function(k){ return map[k]; });
+  }
+  function upsert(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    s.comments.push(c);
+    s.deleted = s.deleted.filter(function(x){ return x !== id; });
+    saveLocal(s); refresh();
+  }
+  function remove(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    if (EMBED.some(function(x){ return cid(x) === id; })) s.deleted.push(id);
+    saveLocal(s); refresh();
+  }
+  function today(){ return new Date().toISOString().slice(0,10); }
+  function exportMd(){
+    var lines = ['# Review comments', '',
+      '<!-- Exported from the spec review layer. Save this file as',
+      '     docs/specs/review-comments.md and re-run render-spec.py to embed',
+      '     every comment under its section for the next review round. -->', ''];
+    allComments().sort(function(a,b){
+      return (a.page+a.section).localeCompare(b.page+b.section);
+    }).forEach(function(c){
+      lines.push('## [' + c.page + '] ' + (c.section||''));
+      lines.push('status: ' + (c.status||'open'));
+      lines.push('date: ' + (c.date||today()));
+      lines.push(c.body); lines.push('');
+    });
+    var blob = new Blob([lines.join('\n')], {type:'text/markdown'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-comments.md';
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function importMd(file){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var text = String(reader.result);
+      var blocks = text.split(/^## /m).slice(1);
+      blocks.forEach(function(b){
+        var head = b.match(/^\[([^\]]+)\]\s*(\S*)/);
+        if (!head) return;
+        var status = (b.match(/^status:\s*(\S+)/m)||[])[1] || 'open';
+        var date = (b.match(/^date:\s*(\S+)/m)||[])[1] || today();
+        var body = b.replace(/^\[[^\]]*\]\s*\S*\s*\n/, '')
+                    .replace(/^status:.*\n?/m,'').replace(/^date:.*\n?/m,'').trim();
+        if (body) upsert({page:head[1], section:head[2]||'', status:status, date:date, body:body});
+      });
+      refresh();
+    };
+    reader.readAsText(file);
+  }
+  function commentBox(c){
+    var div = document.createElement('div');
+    div.className = 'rv-comment' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var head = document.createElement('div'); head.className = 'rv-head';
+    head.textContent = '💬 ' + (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(){ remove(c); c = Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'}); upsert(c); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(){ if (confirm('Delete this comment?')) remove(c); };
+    head.appendChild(tog); head.appendChild(del);
+    var body = document.createElement('div'); body.className = 'rv-body';
+    body.textContent = c.body;
+    div.appendChild(head); div.appendChild(body);
+    return div;
+  }
+  function editor(section, after){
+    var wrap = document.createElement('div');
+    wrap.className = 'rv-comment rv-editor';
+    var ta = document.createElement('textarea');
+    ta.placeholder = 'Comment on this section…';
+    var actions = document.createElement('div'); actions.className = 'rv-actions';
+    var save = document.createElement('button'); save.textContent = 'Save';
+    save.onclick = function(){
+      if (ta.value.trim()) upsert({page:PAGE, section:section, status:'open', date:today(), body:ta.value.trim()});
+      wrap.remove();
+    };
+    var cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+    cancel.className = 'rv-cancel'; cancel.onclick = function(){ wrap.remove(); };
+    actions.appendChild(save); actions.appendChild(cancel);
+    wrap.appendChild(ta); wrap.appendChild(actions);
+    after.insertAdjacentElement('afterend', wrap);
+    ta.focus();
+  }
+  // --- headings, inline buttons ---
+  var mainH1 = document.querySelector('main h1');
+  if (mainH1 && !mainH1.id) { mainH1.id = 'page-title'; }
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll('main h1[id], main h2[id], main h3[id], main h4[id]'));
+  headings.forEach(function(h){
+    var b = document.createElement('button');
+    b.className = 'rv-add'; b.textContent = '💬 comment'; b.title = 'Comment on this section';
+    b.onclick = function(){ editor(h.id, h); };
+    h.appendChild(b);
+  });
+  function headingTitle(h){
+    var t = h.childNodes[0] ? h.childNodes[0].textContent : h.textContent;
+    return t.trim();
+  }
+  function titleFor(section){
+    var el = section && document.getElementById(section);
+    return el ? headingTitle(el) : (section || '(page)');
+  }
+
+  // --- drawer ---
+  var drawer = document.createElement('div');
+  drawer.id = 'rv-drawer';
+  drawer.innerHTML =
+    '<header><strong>Review</strong> <span class="rv-count"></span></header>' +
+    '<div class="rv-compose">' +
+    '<div class="rv-live">Commenting on the section in view:</div>' +
+    '<label for="rv-sec"></label><select id="rv-sec"></select>' +
+    '<textarea id="rv-text" placeholder="Type as you read… (Ctrl+Enter saves)"></textarea>' +
+    '<div style="margin-top:.4rem; display:flex; gap:.5rem;">' +
+    '<button class="rv-primary" id="rv-save">Save comment</button>' +
+    '<button id="rv-clear">Clear</button></div></div>' +
+    '<div class="rv-list"></div>' +
+    '<footer><button id="rv-export">Export .md</button>' +
+    '<button id="rv-import">Import</button>' +
+    '<span class="rv-otherpages"></span></footer>';
+  document.body.appendChild(drawer);
+  var toggle = document.createElement('button');
+  toggle.id = 'rv-toggle';
+  toggle.onclick = function(){
+    document.body.classList.toggle('rv-open');
+    try { localStorage.setItem(RVKEY + ':open', document.body.classList.contains('rv-open') ? '1' : ''); } catch(e){}
+  };
+  document.body.appendChild(toggle);
+  try { if (localStorage.getItem(RVKEY + ':open')) document.body.classList.add('rv-open'); } catch(e){}
+
+  var sel = drawer.querySelector('#rv-sec');
+  headings.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h.id; opt.textContent = headingTitle(h);
+    sel.appendChild(opt);
+  });
+  var followScroll = true;
+  sel.onchange = function(){ followScroll = false; };
+
+  // scroll spy: pick the last heading above the upper third of the viewport
+  function currentSection(){
+    var line = window.innerHeight * 0.33, best = headings[0];
+    for (var i = 0; i < headings.length; i++) {
+      if (headings[i].getBoundingClientRect().top <= line) best = headings[i];
+    }
+    return best ? best.id : '';
+  }
+  window.addEventListener('scroll', function(){
+    if (!followScroll) return;
+    var s = currentSection();
+    if (s && sel.value !== s) sel.value = s;
+  }, {passive:true});
+  // typing pins the target section so a stray scroll can't retarget the comment
+  drawer.querySelector('#rv-text').addEventListener('input', function(){
+    if (this.value.trim()) followScroll = false;
+    else followScroll = true;
+  });
+
+  function saveFromDrawer(){
+    var ta = drawer.querySelector('#rv-text');
+    if (!ta.value.trim()) return;
+    upsert({page:PAGE, section:sel.value, status:'open', date:today(), body:ta.value.trim()});
+    ta.value = ''; followScroll = true;
+  }
+  drawer.querySelector('#rv-save').onclick = saveFromDrawer;
+  drawer.querySelector('#rv-text').addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveFromDrawer();
+  });
+  drawer.querySelector('#rv-clear').onclick = function(){
+    drawer.querySelector('#rv-text').value = ''; followScroll = true;
+  };
+  drawer.querySelector('#rv-export').onclick = exportMd;
+  var fileIn = document.createElement('input');
+  fileIn.type = 'file'; fileIn.accept = '.md,text/markdown'; fileIn.style.display = 'none';
+  fileIn.onchange = function(){ if (fileIn.files[0]) importMd(fileIn.files[0]); };
+  drawer.appendChild(fileIn);
+  drawer.querySelector('#rv-import').onclick = function(){ fileIn.click(); };
+
+  function drawerItem(c){
+    var div = document.createElement('div');
+    div.className = 'rv-item' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var where = document.createElement('div'); where.className = 'rv-where';
+    where.textContent = titleFor(c.section);
+    var text = document.createElement('div'); text.className = 'rv-text';
+    text.textContent = c.body;
+    var meta = document.createElement('div'); meta.className = 'rv-meta';
+    meta.textContent = (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(e){ e.stopPropagation(); remove(c);
+      upsert(Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'})); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(e){ e.stopPropagation();
+      if (confirm('Delete this comment?')) remove(c); };
+    meta.appendChild(tog); meta.appendChild(del);
+    div.appendChild(where); div.appendChild(text); div.appendChild(meta);
+    div.onclick = function(){
+      var el = c.section && document.getElementById(c.section);
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+    return div;
+  }
+
+  function refresh(){
+    document.querySelectorAll('.rv-comment:not(.rv-editor)').forEach(function(el){ el.remove(); });
+    var all = allComments();
+    var mine = all.filter(function(c){ return c.page === PAGE; });
+    mine.forEach(function(c){
+      var target = c.section && document.getElementById(c.section);
+      var anchor = target || mainH1 || document.body.querySelector('main') || document.body;
+      anchor.insertAdjacentElement('afterend', commentBox(c));
+    });
+    var open = all.filter(function(c){ return c.status !== 'resolved'; }).length;
+    toggle.textContent = '💬 Review (' + open + ')';
+    drawer.querySelector('.rv-count').textContent =
+      open + ' open / ' + all.length + ' total';
+    var list = drawer.querySelector('.rv-list');
+    list.innerHTML = '';
+    mine.slice().reverse().forEach(function(c){ list.appendChild(drawerItem(c)); });
+    var others = {};
+    all.forEach(function(c){ if (c.page !== PAGE) others[c.page] = (others[c.page]||0) + 1; });
+    var otherKeys = Object.keys(others);
+    drawer.querySelector('.rv-otherpages').textContent = otherKeys.length
+      ? 'Other pages: ' + otherKeys.map(function(k){ return k + ' (' + others[k] + ')'; }).join(', ')
+      : '';
+  }
+  refresh();
+  var s0 = currentSection();
+  if (s0) sel.value = s0;
+})();
+</script>
+</body>
+</html>

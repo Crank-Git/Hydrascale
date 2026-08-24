@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale v1.0 — Feature: Security audit</title>
+<style>
+:root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
+        --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#14141b; --fg:#e8e8ee; --muted:#9a9aa8; --line:#2c2c38; --accent:#8ea6ff;
+          --card:#1c1c26; --warn-bg:#2a2318; --warn-line:#a87c2a; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:16px/1.6 system-ui,-apple-system,sans-serif; }
+.layout { display:flex; min-height:100vh; }
+aside.site { width:17rem; flex:none; border-right:1px solid var(--line);
+             padding:1.2rem 1rem 3rem; position:sticky; top:0; height:100vh;
+             overflow-y:auto; background:var(--card); }
+aside.site h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+                color:var(--muted); margin:1.2rem 0 .3rem; border:none; padding:0; }
+aside.site ul { list-style:none; margin:0; padding:0; }
+aside.site li { margin:.15rem 0; }
+aside.site a { text-decoration:none; color:var(--fg); font-size:.92rem;
+               display:block; padding:.15rem .5rem; border-radius:6px; }
+aside.site a:hover { background:var(--bg); }
+aside.site a.current { background:var(--accent); color:#fff; }
+aside.site a.sub { padding-left:1.3rem; font-size:.84rem; color:var(--muted); }
+aside.site .brand { font-weight:700; font-size:1.05rem; }
+main { max-width:60rem; margin:0 auto; padding:2rem 1.5rem 6rem; min-width:0; flex:1; }
+h1,h2,h3,h4 { line-height:1.25; }
+h1 { font-size:2rem; margin:.2rem 0; }
+h2 { border-bottom:1px solid var(--line); padding-bottom:.3rem; margin-top:2.5rem; }
+a { color:var(--accent); }
+code { background:var(--card); padding:.1em .35em; border-radius:4px; font-size:.9em; }
+pre.code { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; overflow-x:auto; }
+pre.code code { background:none; padding:0; }
+.table-wrap { overflow-x:auto; }
+table { border-collapse:collapse; margin:1rem 0; min-width:50%; }
+th,td { border:1px solid var(--line); padding:.4rem .7rem; text-align:left; }
+th { background:var(--card); }
+blockquote { border-left:3px solid var(--accent); margin:1rem 0; padding:.2rem 1rem;
+             color:var(--muted); }
+.meta { color:var(--muted); margin-bottom:2rem; }
+.badge { display:inline-block; padding:.1rem .6rem; border-radius:999px;
+         border:1px solid var(--accent); color:var(--accent); font-size:.85rem; }
+.diagram { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; margin:1rem 0; overflow-x:auto; }
+.diagram pre.mermaid { margin:0; }
+.diagram.raw::before { content:"diagram source (assets/mermaid.min.js not vendored)";
+                       display:block; color:var(--muted); font-size:.8rem;
+                       margin-bottom:.5rem; }
+.callout-h, .callout-h ~ p, .callout-h ~ ul { background:var(--warn-bg); }
+.callout-h { border-left:4px solid var(--warn-line); padding:.3rem .8rem; }
+.mockup { margin:1.5rem 0; }
+.mockup iframe { width:100%; height:32rem; border:1px solid var(--line);
+                 border-radius:8px; background:#fff; }
+nav.pager { display:flex; justify-content:space-between; margin-top:3rem;
+            border-top:1px solid var(--line); padding-top:1rem; }
+@media (max-width: 900px) {
+  .layout { display:block; }
+  aside.site { width:auto; height:auto; position:static; border-right:none;
+               border-bottom:1px solid var(--line); }
+}
+h1[id]:hover .rv-add, h2[id]:hover .rv-add, h3[id]:hover .rv-add,
+h4[id]:hover .rv-add { opacity:1; }
+.rv-add { opacity:0; margin-left:.5rem; font-size:.75rem; cursor:pointer;
+          border:1px solid var(--accent); color:var(--accent); background:none;
+          border-radius:6px; padding:0 .45rem; vertical-align:middle;
+          transition:opacity .15s; }
+.rv-comment { border:1px solid var(--warn-line); border-left-width:4px;
+              background:var(--warn-bg); border-radius:8px; padding:.6rem .9rem;
+              margin:.8rem 0; font-size:.92rem; }
+.rv-comment.rv-resolved { opacity:.6; border-left-color:var(--line); }
+.rv-comment .rv-head { display:flex; gap:.6rem; align-items:center;
+                       color:var(--muted); font-size:.8rem; margin-bottom:.3rem; }
+.rv-comment .rv-head button { font-size:.75rem; cursor:pointer; background:none;
+                              border:1px solid var(--line); border-radius:6px;
+                              color:var(--muted); padding:0 .4rem; }
+.rv-comment .rv-body { white-space:pre-wrap; }
+.rv-editor textarea { width:100%; min-height:5rem; background:var(--bg);
+                      color:var(--fg); border:1px solid var(--line);
+                      border-radius:6px; padding:.5rem; font:inherit; }
+.rv-editor .rv-actions { margin-top:.4rem; display:flex; gap:.5rem; }
+.rv-editor button { cursor:pointer; border-radius:6px; padding:.2rem .8rem;
+                    border:1px solid var(--accent); background:var(--accent);
+                    color:#fff; }
+.rv-editor button.rv-cancel { background:none; color:var(--accent); }
+#rv-toggle { position:fixed; right:1rem; bottom:1rem; z-index:60;
+             background:var(--accent); color:#fff; border:none; cursor:pointer;
+             border-radius:999px; padding:.5rem 1rem; font-size:.85rem;
+             box-shadow:0 2px 10px rgba(0,0,0,.2); }
+#rv-drawer { position:fixed; top:0; right:0; bottom:0; width:21rem; z-index:55;
+             background:var(--card); border-left:1px solid var(--line);
+             display:flex; flex-direction:column; transform:translateX(100%);
+             transition:transform .2s ease; box-shadow:-4px 0 16px rgba(0,0,0,.12); }
+body.rv-open #rv-drawer { transform:none; }
+body.rv-open .layout { padding-right:21rem; }
+#rv-drawer header { padding:.8rem 1rem .5rem; border-bottom:1px solid var(--line); }
+#rv-drawer header .rv-count { color:var(--muted); font-size:.8rem; }
+#rv-drawer .rv-compose { padding:.8rem 1rem; border-bottom:1px solid var(--line); }
+#rv-drawer .rv-compose label { display:block; font-size:.75rem;
+                               color:var(--muted); margin-bottom:.25rem; }
+#rv-drawer .rv-compose select { width:100%; margin-bottom:.4rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.3rem; font:inherit; font-size:.85rem; }
+#rv-drawer .rv-compose textarea { width:100%; min-height:5.5rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.5rem; font:inherit; font-size:.9rem; }
+#rv-drawer .rv-compose .rv-live { font-size:.72rem; color:var(--muted); }
+#rv-drawer .rv-list { flex:1; overflow-y:auto; padding:.6rem 1rem; }
+#rv-drawer .rv-item { border:1px solid var(--line); border-left:3px solid
+             var(--warn-line); border-radius:8px; padding:.45rem .6rem;
+             margin-bottom:.6rem; font-size:.82rem; cursor:pointer; }
+#rv-drawer .rv-item.rv-resolved { opacity:.55; border-left-color:var(--line); }
+#rv-drawer .rv-item .rv-where { color:var(--accent); font-size:.72rem; }
+#rv-drawer .rv-item .rv-meta { color:var(--muted); font-size:.72rem;
+                               display:flex; gap:.5rem; align-items:center; }
+#rv-drawer .rv-item .rv-meta button { font-size:.7rem; cursor:pointer;
+             background:none; border:1px solid var(--line); border-radius:5px;
+             color:var(--muted); padding:0 .35rem; }
+#rv-drawer .rv-item .rv-text { white-space:pre-wrap; margin:.15rem 0; }
+#rv-drawer footer { padding:.6rem 1rem; border-top:1px solid var(--line);
+                    display:flex; gap:.5rem; flex-wrap:wrap; }
+#rv-drawer footer button, #rv-drawer .rv-compose button {
+  cursor:pointer; border:1px solid var(--accent); background:none;
+  color:var(--accent); border-radius:6px; padding:.2rem .7rem; font-size:.8rem; }
+#rv-drawer .rv-compose button.rv-primary { background:var(--accent); color:#fff; }
+#rv-drawer .rv-otherpages { color:var(--muted); font-size:.75rem;
+                            margin:.4rem 0 0; }
+@media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
+</style>
+</head>
+<body data-page="feature-security-audit" data-rvkey="hydrascale-v1">
+<div class="layout">
+<aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
+<h2>Spec</h2><ul>
+<li><a href="../spec.html">Overview &amp; index</a></li>
+</ul>
+<h2>Features</h2><ul>
+<li><a href="feature-foundation.html">Foundation</a></li>
+<li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
+<li><a class="current" href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-fixes.html">Security fixes</a></li>
+<li><a href="feature-dns-integrity.html">DNS integrity</a></li>
+<li><a href="feature-reachability-model.html">Local reachability model</a></li>
+<li><a href="feature-console-foundation.html">Console foundation</a></li>
+<li><a href="feature-console-access-editor.html">Console access editor</a></li>
+<li><a href="feature-upstream-policy.html">Upstream policy control</a></li>
+<li><a href="feature-docs-and-release.html">Documentation, terminal interface restyle, and the release</a></li>
+<li><a href="feature-agent-skills.html">Agent skills for the operator, and the two command defects they expose</a></li>
+<li><a href="feature-policy-document-model.html">Policy document model</a></li>
+<li><a href="feature-visual-acl-editor.html">Visual ACL editor</a></li>
+<li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
+</ul></aside>
+<main>
+<h1>Feature: Security audit</h1>
+<p class="meta">Epic 2: Security audit &nbsp; <span class="badge">built</span></p>
+<h3 id="security-audit-purpose">Purpose</h3>
+<p>The operator believes the daemon has several small authorization defects. The planning survey found four candidates. A guess is not a plan. This feature set produces a written list of findings, so that Epic 3 fixes facts.</p>
+<p>The audit reads code. It does not change code. It ends with the operator choosing which findings Epic 3 fixes.</p>
+<h3 id="security-audit-what-the-survey-already-found">What the survey already found</h3>
+<p>These four are inputs to the audit, not its output. The audit confirms each one and assigns a severity.</p>
+<div class="table-wrap"><table>
+<tr><th>Candidate</th><th>Evidence</th><th>Why it matters</th></tr>
+<tr><td>The host <code>FORWARD</code> chain accepts every packet from a namespace.</td><td><code>internal/namespaces/ns.go:263</code> inserts <code>iptables -I FORWARD 1 -i &lt;hostVeth&gt; -j ACCEPT</code>. There is no destination match and no output interface match.</td><td>A process in one namespace reaches another namespace and the host network. The rule sits above an operator firewall rule because it is inserted at position 1.</td></tr>
+<tr><td>Teardown is best effort.</td><td><code>internal/namespaces/ns.go:297</code> ignores the result of every delete.</td><td>A removed namespace can leave an <code>ACCEPT</code> rule and a <code>MASQUERADE</code> rule on the host.</td></tr>
+<tr><td>The overlay mount failure is silent.</td><td><code>cmd/hydrascale/nsdaemon.go:56</code> prints to standard error and continues.</td><td>The host <code>/etc/resolv.conf</code> file loses its protection and nothing reports it.</td></tr>
+<tr><td>The control API has no authentication.</td><td><code>internal/api/server.go</code> registers eight routes and none checks an identity.</td><td>Membership of <code>socket_group</code> is equivalent to root, and the documentation does not say so.</td></tr>
+</table></div>
+<h3 id="security-audit-user-stories">User stories</h3>
+<ul>
+<li>As the operator, I want a written list of what is wrong, so that I fix the real
+</li>
+</ul>
+<p>defects rather than the ones I remember.</p>
+<ul>
+<li>As the operator, I want each finding to have a <code>file:line</code> reference, so that a fix is
+</li>
+</ul>
+<p>unambiguous.</p>
+<ul>
+<li>As the operator, I want to choose which findings get fixed in this release, so that the
+</li>
+</ul>
+<p>release ships.</p>
+<h3 id="security-audit-functional-requirements">Functional requirements</h3>
+<ul>
+<li><strong>FR-audit-1</strong> — The audit produces <code>docs/security-audit.md</code>.
+</li>
+<li><strong>FR-audit-2</strong> — Each finding has an identifier of the form <code>SA-&lt;n&gt;</code>.
+</li>
+<li><strong>FR-audit-3</strong> — Each finding has a severity of <code>high</code>, <code>medium</code>, or <code>low</code>.
+</li>
+<li><strong>FR-audit-4</strong> — Each finding has at least one <code>file:line</code> reference.
+</li>
+<li><strong>FR-audit-5</strong> — Each finding states the condition under which it causes harm.
+</li>
+<li><strong>FR-audit-6</strong> — Each finding states whether the audit reproduced it on the test host.
+</li>
+<li><strong>FR-audit-7</strong> — The audit covers every route that <code>internal/api/server.go</code> registers.
+</li>
+<li><strong>FR-audit-8</strong> — The audit covers every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
+</li>
+<li><strong>FR-audit-9</strong> — The audit covers every file mode and every socket mode that the daemon
+</li>
+</ul>
+<p>sets.</p>
+<ul>
+<li><strong>FR-audit-10</strong> — The audit covers every path that the daemon builds from configuration
+</li>
+</ul>
+<p>input or from request input.</p>
+<ul>
+<li><strong>FR-audit-11</strong> — The audit covers the teardown path of every resource that the daemon
+</li>
+</ul>
+<p>creates.</p>
+<ul>
+<li><strong>FR-audit-12</strong> — The audit records the console threat model as a finding, so that the
+</li>
+</ul>
+<p>accepted risk is written down.</p>
+<ul>
+<li><strong>FR-audit-13</strong> — The audit records whether an IPv6 gap exists in the firewall rules.
+</li>
+<li><strong>FR-audit-14</strong> — The audit states, for each finding, whether Epic 3 fixes it.
+</li>
+</ul>
+<h3 id="security-audit-user-flows">User flows</h3>
+<h4 id="security-audit-the-audit-runs">The audit runs</h4>
+<ol>
+<li>The engineer lists every control API route and its handler.
+</li>
+<li>The engineer reads each handler and records what it validates.
+</li>
+<li>The engineer lists every <code>os/exec</code> call and records where each argument comes from.
+</li>
+<li>The engineer lists every <code>os.Chmod</code>, <code>os.Chown</code>, <code>os.WriteFile</code>, and <code>syscall.Umask</code>
+</li>
+</ol>
+<p>call and records the resulting mode.</p>
+<ol>
+<li>The engineer lists every resource that setup creates and checks that teardown removes
+</li>
+</ol>
+<p>it.</p>
+<ol>
+<li>The engineer reproduces each candidate finding on the test host where reproduction is
+</li>
+</ol>
+<p>possible.</p>
+<ol>
+<li>The engineer writes <code>docs/security-audit.md</code>.
+</li>
+<li>The operator reads the file and marks each finding as accepted or deferred.
+</li>
+</ol>
+<h4 id="security-audit-the-reachability-finding-is-reproduced">The reachability finding is reproduced</h4>
+<ol>
+<li>The engineer starts the daemon on the test host with two tailnets.
+</li>
+<li>The engineer records the veth address of each namespace from <code>ip addr</code>.
+</li>
+<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; ping -c1 &lt;veth address of b&gt;</code>.
+</li>
+<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; nc -vz &lt;a host on the host local network&gt; 22</code>.
+</li>
+<li>The engineer records the result of each command verbatim in the finding.
+</li>
+</ol>
+<h3 id="security-audit-screens-states">Screens &amp; states</h3>
+<p>This feature set has no screen.</p>
+<h3 id="security-audit-behaviour-rules">Behaviour rules</h3>
+<ul>
+<li>The audit reads code and runs read-only commands. It changes no source file other than
+</li>
+</ul>
+<p><code>docs/security-audit.md</code>.</p>
+<ul>
+<li>A finding that the audit cannot reproduce says so. It does not claim a reproduction it
+</li>
+</ul>
+<p>did not perform.</p>
+<ul>
+<li>The audit quotes command output verbatim. It does not paraphrase evidence.
+</li>
+<li>The audit does not rank a finding by how easy the fix is. Severity describes harm.
+</li>
+</ul>
+<h3 id="security-audit-data-touched">Data touched</h3>
+<p>No entity changes. The audit adds one document.</p>
+<h3 id="security-audit-interfaces">Interfaces</h3>
+<p>The audit inspects these routes, which <code>internal/api/server.go:47-59</code> registers:</p>
+<div class="table-wrap"><table>
+<tr><th>Method and path</th><th>Handler</th><th>Mutating</th></tr>
+<tr><td><code>/api/status</code></td><td><code>handleStatus</code></td><td>no</td></tr>
+<tr><td><code>/api/events</code></td><td><code>handleEvents</code></td><td>no</td></tr>
+<tr><td><code>/api/reconcile</code></td><td><code>handleReconcile</code></td><td>yes</td></tr>
+<tr><td><code>/api/tailnet/add</code></td><td><code>handleTailnetAdd</code></td><td>yes</td></tr>
+<tr><td><code>/api/tailnet/remove</code></td><td><code>handleTailnetRemove</code></td><td>yes</td></tr>
+<tr><td><code>/api/tailnet/connect</code></td><td><code>handleTailnetConnect</code></td><td>yes</td></tr>
+<tr><td><code>/api/tailnet/disconnect</code></td><td><code>handleTailnetDisconnect</code></td><td>yes</td></tr>
+<tr><td><code>/api/config/dns</code></td><td><code>handleConfigDNS</code></td><td>yes</td></tr>
+<tr><td><code>/api/config</code></td><td><code>handleConfig</code></td><td>yes</td></tr>
+<tr><td><code>GET /api/tailnet/{id}/detail</code></td><td><code>handleTailnetDetail</code></td><td>no</td></tr>
+</table></div>
+<h3 id="security-audit-edge-cases-failures">Edge cases &amp; failures</h3>
+<div class="table-wrap"><table>
+<tr><th>Case</th><th>Behaviour</th></tr>
+<tr><td>A candidate finding does not reproduce.</td><td>The finding records the attempt, the command, and the output, and it lowers its severity to reflect the uncertainty.</td></tr>
+<tr><td>The audit finds a defect that is not a security defect.</td><td>The audit records it in a separate <code>Other defects</code> section. Epic 3 does not have to fix it.</td></tr>
+<tr><td>The audit finds a high-severity defect that needs a large change.</td><td>The audit records it. The operator decides whether Epic 3 fixes it or whether it becomes its own epic.</td></tr>
+</table></div>
+<h3 id="security-audit-acceptance-criteria">Acceptance criteria</h3>
+<ul>
+<li>[ ] <code>docs/security-audit.md</code> exists and is tracked.
+</li>
+<li>[ ] Every finding has an identifier, a severity, and a <code>file:line</code> reference.
+</li>
+<li>[ ] The audit lists all ten control API routes and states what each validates.
+</li>
+<li>[ ] The audit lists every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
+</li>
+<li>[ ] The audit states, for the reachability finding, the exact commands it ran on the
+</li>
+</ul>
+<p>test host and their output.</p>
+<ul>
+<li>[ ] The audit records the console threat model as a finding.
+</li>
+<li>[ ] The audit states whether an IPv6 firewall gap exists.
+</li>
+<li>[ ] The operator has marked every finding as accepted or deferred.
+</li>
+</ul>
+<h3 id="security-audit-out-of-scope">Out of scope</h3>
+<ul>
+<li>Any code fix. Epic 3 fixes.
+</li>
+<li>A dependency vulnerability scan. The project has six direct dependencies and a
+</li>
+</ul>
+<p>vendored tree; <code>govulncheck</code> belongs in Epic 3 as a continuous integration step rather than in a manual audit.</p>
+<ul>
+<li>A review of the Tailscale client itself.
+</li>
+</ul>
+<h3 id="security-audit-open-questions" class="callout-h">Open questions</h3>
+<p>None.</p><nav class="pager">
+<a href="feature-desktop-client-removal.html">&larr; Feature: Desktop client removal and repository hygiene</a>
+<a href="feature-security-fixes.html">Feature: Security fixes &rarr;</a>
+</nav>
+</main>
+</div>
+<script>document.querySelectorAll('.diagram').forEach(function(d){d.classList.add('raw')});</script>
+<script type="application/json" id="rv-embedded">[]</script>
+<script>
+(function(){
+  'use strict';
+  var PAGE = document.body.getAttribute('data-page');
+  // storage key carries the spec's slug: file:// pages can share one
+  // localStorage pool, and two specs must never share a comment store
+  var RVKEY = 'spec-review:' + (document.body.getAttribute('data-rvkey') || 'spec');
+  var EMBED = [];
+  var embedEl = document.getElementById('rv-embedded');
+  if (embedEl) { try { EMBED = JSON.parse(embedEl.textContent); } catch(e){} }
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(RVKEY)) || {comments:[], deleted:[]}; } catch(e){ return {comments:[], deleted:[]}; } }
+  function saveLocal(s){ try { localStorage.setItem(RVKEY, JSON.stringify(s)); } catch(e){} }
+  function cid(c){ return c.page + '|' + c.section + '|' + (c.date||'') + '|' + c.body.slice(0,24); }
+  function allComments(){
+    var s = loadLocal(), map = {};
+    EMBED.forEach(function(c){ map[cid(c)] = c; });
+    s.comments.forEach(function(c){ map[cid(c)] = c; });
+    s.deleted.forEach(function(id){ delete map[id]; });
+    return Object.keys(map).map(function(k){ return map[k]; });
+  }
+  function upsert(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    s.comments.push(c);
+    s.deleted = s.deleted.filter(function(x){ return x !== id; });
+    saveLocal(s); refresh();
+  }
+  function remove(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    if (EMBED.some(function(x){ return cid(x) === id; })) s.deleted.push(id);
+    saveLocal(s); refresh();
+  }
+  function today(){ return new Date().toISOString().slice(0,10); }
+  function exportMd(){
+    var lines = ['# Review comments', '',
+      '<!-- Exported from the spec review layer. Save this file as',
+      '     docs/specs/review-comments.md and re-run render-spec.py to embed',
+      '     every comment under its section for the next review round. -->', ''];
+    allComments().sort(function(a,b){
+      return (a.page+a.section).localeCompare(b.page+b.section);
+    }).forEach(function(c){
+      lines.push('## [' + c.page + '] ' + (c.section||''));
+      lines.push('status: ' + (c.status||'open'));
+      lines.push('date: ' + (c.date||today()));
+      lines.push(c.body); lines.push('');
+    });
+    var blob = new Blob([lines.join('\n')], {type:'text/markdown'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-comments.md';
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function importMd(file){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var text = String(reader.result);
+      var blocks = text.split(/^## /m).slice(1);
+      blocks.forEach(function(b){
+        var head = b.match(/^\[([^\]]+)\]\s*(\S*)/);
+        if (!head) return;
+        var status = (b.match(/^status:\s*(\S+)/m)||[])[1] || 'open';
+        var date = (b.match(/^date:\s*(\S+)/m)||[])[1] || today();
+        var body = b.replace(/^\[[^\]]*\]\s*\S*\s*\n/, '')
+                    .replace(/^status:.*\n?/m,'').replace(/^date:.*\n?/m,'').trim();
+        if (body) upsert({page:head[1], section:head[2]||'', status:status, date:date, body:body});
+      });
+      refresh();
+    };
+    reader.readAsText(file);
+  }
+  function commentBox(c){
+    var div = document.createElement('div');
+    div.className = 'rv-comment' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var head = document.createElement('div'); head.className = 'rv-head';
+    head.textContent = '💬 ' + (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(){ remove(c); c = Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'}); upsert(c); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(){ if (confirm('Delete this comment?')) remove(c); };
+    head.appendChild(tog); head.appendChild(del);
+    var body = document.createElement('div'); body.className = 'rv-body';
+    body.textContent = c.body;
+    div.appendChild(head); div.appendChild(body);
+    return div;
+  }
+  function editor(section, after){
+    var wrap = document.createElement('div');
+    wrap.className = 'rv-comment rv-editor';
+    var ta = document.createElement('textarea');
+    ta.placeholder = 'Comment on this section…';
+    var actions = document.createElement('div'); actions.className = 'rv-actions';
+    var save = document.createElement('button'); save.textContent = 'Save';
+    save.onclick = function(){
+      if (ta.value.trim()) upsert({page:PAGE, section:section, status:'open', date:today(), body:ta.value.trim()});
+      wrap.remove();
+    };
+    var cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+    cancel.className = 'rv-cancel'; cancel.onclick = function(){ wrap.remove(); };
+    actions.appendChild(save); actions.appendChild(cancel);
+    wrap.appendChild(ta); wrap.appendChild(actions);
+    after.insertAdjacentElement('afterend', wrap);
+    ta.focus();
+  }
+  // --- headings, inline buttons ---
+  var mainH1 = document.querySelector('main h1');
+  if (mainH1 && !mainH1.id) { mainH1.id = 'page-title'; }
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll('main h1[id], main h2[id], main h3[id], main h4[id]'));
+  headings.forEach(function(h){
+    var b = document.createElement('button');
+    b.className = 'rv-add'; b.textContent = '💬 comment'; b.title = 'Comment on this section';
+    b.onclick = function(){ editor(h.id, h); };
+    h.appendChild(b);
+  });
+  function headingTitle(h){
+    var t = h.childNodes[0] ? h.childNodes[0].textContent : h.textContent;
+    return t.trim();
+  }
+  function titleFor(section){
+    var el = section && document.getElementById(section);
+    return el ? headingTitle(el) : (section || '(page)');
+  }
+
+  // --- drawer ---
+  var drawer = document.createElement('div');
+  drawer.id = 'rv-drawer';
+  drawer.innerHTML =
+    '<header><strong>Review</strong> <span class="rv-count"></span></header>' +
+    '<div class="rv-compose">' +
+    '<div class="rv-live">Commenting on the section in view:</div>' +
+    '<label for="rv-sec"></label><select id="rv-sec"></select>' +
+    '<textarea id="rv-text" placeholder="Type as you read… (Ctrl+Enter saves)"></textarea>' +
+    '<div style="margin-top:.4rem; display:flex; gap:.5rem;">' +
+    '<button class="rv-primary" id="rv-save">Save comment</button>' +
+    '<button id="rv-clear">Clear</button></div></div>' +
+    '<div class="rv-list"></div>' +
+    '<footer><button id="rv-export">Export .md</button>' +
+    '<button id="rv-import">Import</button>' +
+    '<span class="rv-otherpages"></span></footer>';
+  document.body.appendChild(drawer);
+  var toggle = document.createElement('button');
+  toggle.id = 'rv-toggle';
+  toggle.onclick = function(){
+    document.body.classList.toggle('rv-open');
+    try { localStorage.setItem(RVKEY + ':open', document.body.classList.contains('rv-open') ? '1' : ''); } catch(e){}
+  };
+  document.body.appendChild(toggle);
+  try { if (localStorage.getItem(RVKEY + ':open')) document.body.classList.add('rv-open'); } catch(e){}
+
+  var sel = drawer.querySelector('#rv-sec');
+  headings.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h.id; opt.textContent = headingTitle(h);
+    sel.appendChild(opt);
+  });
+  var followScroll = true;
+  sel.onchange = function(){ followScroll = false; };
+
+  // scroll spy: pick the last heading above the upper third of the viewport
+  function currentSection(){
+    var line = window.innerHeight * 0.33, best = headings[0];
+    for (var i = 0; i < headings.length; i++) {
+      if (headings[i].getBoundingClientRect().top <= line) best = headings[i];
+    }
+    return best ? best.id : '';
+  }
+  window.addEventListener('scroll', function(){
+    if (!followScroll) return;
+    var s = currentSection();
+    if (s && sel.value !== s) sel.value = s;
+  }, {passive:true});
+  // typing pins the target section so a stray scroll can't retarget the comment
+  drawer.querySelector('#rv-text').addEventListener('input', function(){
+    if (this.value.trim()) followScroll = false;
+    else followScroll = true;
+  });
+
+  function saveFromDrawer(){
+    var ta = drawer.querySelector('#rv-text');
+    if (!ta.value.trim()) return;
+    upsert({page:PAGE, section:sel.value, status:'open', date:today(), body:ta.value.trim()});
+    ta.value = ''; followScroll = true;
+  }
+  drawer.querySelector('#rv-save').onclick = saveFromDrawer;
+  drawer.querySelector('#rv-text').addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveFromDrawer();
+  });
+  drawer.querySelector('#rv-clear').onclick = function(){
+    drawer.querySelector('#rv-text').value = ''; followScroll = true;
+  };
+  drawer.querySelector('#rv-export').onclick = exportMd;
+  var fileIn = document.createElement('input');
+  fileIn.type = 'file'; fileIn.accept = '.md,text/markdown'; fileIn.style.display = 'none';
+  fileIn.onchange = function(){ if (fileIn.files[0]) importMd(fileIn.files[0]); };
+  drawer.appendChild(fileIn);
+  drawer.querySelector('#rv-import').onclick = function(){ fileIn.click(); };
+
+  function drawerItem(c){
+    var div = document.createElement('div');
+    div.className = 'rv-item' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var where = document.createElement('div'); where.className = 'rv-where';
+    where.textContent = titleFor(c.section);
+    var text = document.createElement('div'); text.className = 'rv-text';
+    text.textContent = c.body;
+    var meta = document.createElement('div'); meta.className = 'rv-meta';
+    meta.textContent = (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(e){ e.stopPropagation(); remove(c);
+      upsert(Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'})); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(e){ e.stopPropagation();
+      if (confirm('Delete this comment?')) remove(c); };
+    meta.appendChild(tog); meta.appendChild(del);
+    div.appendChild(where); div.appendChild(text); div.appendChild(meta);
+    div.onclick = function(){
+      var el = c.section && document.getElementById(c.section);
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+    return div;
+  }
+
+  function refresh(){
+    document.querySelectorAll('.rv-comment:not(.rv-editor)').forEach(function(el){ el.remove(); });
+    var all = allComments();
+    var mine = all.filter(function(c){ return c.page === PAGE; });
+    mine.forEach(function(c){
+      var target = c.section && document.getElementById(c.section);
+      var anchor = target || mainH1 || document.body.querySelector('main') || document.body;
+      anchor.insertAdjacentElement('afterend', commentBox(c));
+    });
+    var open = all.filter(function(c){ return c.status !== 'resolved'; }).length;
+    toggle.textContent = '💬 Review (' + open + ')';
+    drawer.querySelector('.rv-count').textContent =
+      open + ' open / ' + all.length + ' total';
+    var list = drawer.querySelector('.rv-list');
+    list.innerHTML = '';
+    mine.slice().reverse().forEach(function(c){ list.appendChild(drawerItem(c)); });
+    var others = {};
+    all.forEach(function(c){ if (c.page !== PAGE) others[c.page] = (others[c.page]||0) + 1; });
+    var otherKeys = Object.keys(others);
+    drawer.querySelector('.rv-otherpages').textContent = otherKeys.length
+      ? 'Other pages: ' + otherKeys.map(function(k){ return k + ' (' + others[k] + ')'; }).join(', ')
+      : '';
+  }
+  refresh();
+  var s0 = currentSection();
+  if (s0) sel.value = s0;
+})();
+</script>
+</body>
+</html>
