@@ -1643,17 +1643,15 @@ function aclPortsOf(entry) {
  * the raw wildcard reaches no field of the console.
  */
 function grantPortsOf(entry) {
-  const ip = (entry && entry.ip) || [];
-  if (ip.includes("*")) {
+  if (grantIpAllowsEveryPort(entry)) {
     return [];
   }
-  return ip.map((one) => String(one).replace(":", "/"));
+  return ((entry && entry.ip) || []).map((one) => String(one).replace(":", "/"));
 }
 
-/** grantAllPortsWildcard reports whether one grants entry's ip field is the wildcard alone. */
-function grantAllPortsWildcard(entry) {
-  const ip = (entry && entry.ip) || [];
-  return ip.length === 1 && ip[0] === "*";
+/** grantIpAllowsEveryPort reports whether one grants entry's ip field holds the wildcard. */
+function grantIpAllowsEveryPort(entry) {
+  return ((entry && entry.ip) || []).includes("*");
 }
 
 /**
@@ -1712,7 +1710,7 @@ export function ruleEntryWithPorts(row, ports) {
   if (row.section === "grants") {
     const next = { ...row.entry };
     if (ports.length === 0) {
-      if (!grantAllPortsWildcard(row.entry)) {
+      if (!grantIpAllowsEveryPort(row.entry)) {
         delete next.ip;
       }
     } else {
