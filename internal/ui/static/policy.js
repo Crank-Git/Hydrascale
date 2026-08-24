@@ -943,6 +943,11 @@ function autoApproverExitNodeMarkup(approvers) {
  * CIDR and one row for the exit node, per FR-vadv-6. The operator adds a route CIDR
  * with an empty approver list, then adds an approver to it through the row, per
  * FR-vadv-7.
+ *
+ * The empty state reads the count of autoApproversCount, so the sentence and the count
+ * of the section nav agree. The exit node row is a control, not an entry: it stays on
+ * view when the section holds no entry, the same as the add control of a sibling
+ * section.
  */
 function autoApproversSectionMarkup(sections) {
   const autoApprovers = (sections && sections.autoApprovers) || {};
@@ -951,9 +956,11 @@ function autoApproversSectionMarkup(sections) {
   const routeRows = Object.entries(routes)
     .map(([cidr, approvers]) => autoApproverRouteMarkup(cidr, approvers))
     .join("");
+  const empty =
+    autoApproversCount(autoApprovers) === 0 ? `<p class="note">This section holds no entry.</p>` : "";
   const addFields = `<input type="text" class="field mono" data-add-cidr placeholder="CIDR" aria-label="New route CIDR">`;
   return (
-    `<div class="setlist" data-section="autoApprovers">${routeRows}${autoApproverExitNodeMarkup(exitNode)}` +
+    `<div class="setlist" data-section="autoApprovers">${routeRows}${autoApproverExitNodeMarkup(exitNode)}${empty}` +
     `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-route">Add a route</button></div>` +
     `</div>`
   );
