@@ -2430,10 +2430,15 @@ export function createPolicyState(options = {}) {
      * request while the first one runs.
      * The operator edits the text while the request runs, therefore loadSections reads
      * the text again when the answer arrives. A text that changed applies neither the
-     * sections nor the error of the stale answer, and loadSections sends one more
-     * request for the text that the entry holds now. An edit that arrives while a read
-     * runs therefore reaches the sections, rather than leaving the section nav on the
-     * state of the document before that edit.
+     * sections nor the error of the stale answer.
+     * A second call of loadSections that carries a text the running request does not
+     * cover makes the running request send one more request, for the text that the entry
+     * holds now. editSection makes that second call after it stages an edit, therefore an
+     * edit that the operator stages while a read runs reaches the sections, rather than
+     * leaving the section nav on the state of the document before that edit.
+     * A keystroke of the Text editor makes no such call, because the console starts no
+     * request of its own; the operator reaches the sections again through the Visual
+     * control.
      */
     async loadSections(id) {
       const entry = entryOf(id);
@@ -2737,11 +2742,11 @@ export function createPolicyState(options = {}) {
 const FIELD_SELECTOR = "input, select";
 
 /**
- * viewKey states one drawing of the policy view in one string.
+ * viewKey states one draw of the policy view in one string.
  *
- * The two markup strings read the state alone, therefore two draws of one state state one
- * key. draw compares the key of the tick to the key of the drawing that the section holds,
- * and it builds no element when the two are equal.
+ * The two markup strings read the state alone, therefore two draws of one state produce
+ * one key. draw compares the key of the tick to the key of the draw that the section
+ * holds, and it builds no element when the two are equal.
  */
 export function viewKey(listMarkup, editorMarkup) {
   return `${listMarkup}\n${editorMarkup}`;
@@ -2752,7 +2757,7 @@ export function viewKey(listMarkup, editorMarkup) {
  * field and the caret that the operator holds.
  *
  * The memory keys a field by its marker and by its position among the fields that carry
- * that marker, because a section draws one marker per row. A draw of one state states the
+ * that marker, because a section draws one marker per row. A draw of one state draws the
  * same fields in the same order, therefore the key of a field is the same across that
  * draw. forget drops every value, and every action that changes the state calls it.
  */
@@ -2788,8 +2793,17 @@ export function createInputMemory() {
   };
 }
 
-/** fieldMarker states what one field of the Visual editor is, out of the attributes that
- *  the markup already carries. Two rows of one section carry one marker. */
+/**
+ * fieldMarker states what one field of the Visual editor is, out of the attributes that
+ * the markup already carries. Two rows of one section carry one marker.
+ *
+ * The marker names no entry, therefore applyInputMemory tells two rows apart by the
+ * position of the field alone. namedSetEntries sorts the entries, so an add, a rename, or
+ * a removal moves a row to another position. Every one of those actions runs through
+ * runAction, which calls forget before the answer arrives, therefore the memory holds no
+ * key of the old order. An action that changes the entry list and calls no forget breaks
+ * that, and the memory then returns the text of one entry into the row of another.
+ */
 function fieldMarker(node) {
   const act = node.getAttribute("data-act");
   if (act) {
@@ -2800,13 +2814,16 @@ function fieldMarker(node) {
 }
 
 /**
- * applyInputMemory binds every field of one drawing to the memory, and it returns the text
+ * applyInputMemory binds every field of one draw to the memory, and it returns the text
  * and the caret that the memory holds.
  *
- * container holds the fields of the drawing that the view built. The memory takes the text
- * on an input, on a key, and on a focus of the operator, therefore it holds text that no
- * request carries yet. The restore itself moves the focus, therefore it takes nothing while
- * it runs.
+ * container holds the fields of the draw that the view built. The memory takes the text of
+ * a field on three events of the operator:
+ * - an input,
+ * - a key,
+ * - a focus.
+ * The memory therefore holds text that no request carries yet. The restore itself moves
+ * the focus, therefore it takes nothing while it runs.
  */
 export function applyInputMemory(container, memory) {
   const ordinals = new Map();
@@ -2869,10 +2886,10 @@ let caret = null;
 // the field again drops that text unless the memory returns it.
 const inputs = createInputMemory();
 
-// painted is the key of the drawing that the section holds now. A poll draws on a timer,
-// and the drawing reads the state alone, therefore a tick that changes no state states the
-// same key. The view builds no element on such a tick, so it moves no field under the
-// pointer of the operator and it drops no click.
+// painted is the key of the draw that the section holds now. A poll draws on a timer, and
+// the draw reads the state alone, therefore a tick that changes no state produces the same
+// key. The view builds no element on such a tick, so it moves no field under the pointer
+// of the operator and it drops no click.
 let painted = null;
 
 /** forget drops the position and the text that the operator held. An action that changes
