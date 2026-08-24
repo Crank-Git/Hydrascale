@@ -896,9 +896,10 @@ Epics 11 to 13 were filed on 2026-08-23, after the `/spec-update` round that add
 | visual-policy-advanced | FR-vadv-10, 11 | #324 |
 | visual-policy-advanced | FR-vadv-12 to 14 | #325 |
 | visual-policy-advanced | FR-vadv-15 to 17 | #353 |
+| visual-policy-advanced | FR-vadv-18, 19 | #389 |
 
-Every one of the 242 requirements in these ten features is cited by at least one issue.
-Every one of the 47 requirements across `policy-document-model`, `visual-acl-editor`,
+Every one of the 244 requirements in these ten features is cited by at least one issue.
+Every one of the 49 requirements across `policy-document-model`, `visual-acl-editor`,
 and `visual-policy-advanced` is cited by exactly one issue.
 
 **FR-access-2 is covered and reversed.** The requirement states that the daemon appends the

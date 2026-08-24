@@ -266,6 +266,12 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p>Headscale tailnet.</p>
+<ul>
+<li><strong>FR-vadv-18</strong> — A warning of the control server keeps Push available.
+</li>
+<li><strong>FR-vadv-19</strong> — The result region names a warning of the control server as a warning.
+</li>
+</ul>
 <h3 id="visual-policy-advanced-user-flows">User flows</h3>
 <h4 id="visual-policy-advanced-the-operator-adds-an-ssh-rule-and-runs-the-tests">The operator adds an SSH rule and runs the tests</h4>
 <div class="diagram"><pre class="mermaid">flowchart TD
@@ -349,6 +355,7 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>Staged</td><td>The staged rows marked, in the manner of <code>features/12-visual-acl-editor.md</code>.</td></tr>
 <tr><td>Unsupported (Postures on Headscale)</td><td>Every entry read-only, the reason stated, Push disabled while the key remains.</td></tr>
 <tr><td>Tests run</td><td>Each row marked <code>pass</code> or <code>fail</code>.</td></tr>
+<tr><td>Warning</td><td>The result region marks a warning and states the answer of the control server. Push stays available.</td></tr>
 </table></div>
 <h3 id="visual-policy-advanced-behaviour-rules">Behaviour rules</h3>
 <ul>
@@ -368,6 +375,16 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p>(FR-vadv-16). Status 200 with the message <code>test(s) failed</code> names a failed assertion. A status outside the 2xx range names a document error.</p>
+<ul>
+<li>A warning keeps Push available (FR-vadv-18). Status 200 with the message
+</li>
+</ul>
+<p><code>warning(s) found</code> names a valid document. The write route accepts that document.</p>
+<ul>
+<li>The result region marks a warning with the warning colour, and it states the answer of
+</li>
+</ul>
+<p>the control server word for word (FR-vadv-19).</p>
 <ul>
 <li>A Headscale control server answers the check route with an empty body. That answer holds
 </li>
