@@ -628,6 +628,9 @@ func (s *Server) validate(ctx context.Context, target policyTarget, document str
 	if target.kind == KindHeadscale {
 		// The Headscale check route answers with an empty body and status 200 when it
 		// accepts the document, therefore the error is the whole result.
+		// CheckPolicyResponse holds no field, per .claude/rules/external-apis.md, so this
+		// path separates a failed assertion from a document error never. It leaves
+		// TestsFailed false, and the console states the message of the control server.
 		if err := s.headscaleClient(target).Check(ctx, document); err != nil {
 			if errors.Is(err, policy.ErrHeadscaleNoPolicyRoute) {
 				return PolicyValidateResponse{}, err
@@ -641,7 +644,7 @@ func (s *Server) validate(ctx context.Context, target policyTarget, document str
 	if err != nil {
 		return PolicyValidateResponse{}, err
 	}
-	return PolicyValidateResponse{Passed: result.Passed, Result: result.Body}, nil
+	return PolicyValidateResponse{Passed: result.Passed, Result: result.Body, TestsFailed: result.TestsFailed}, nil
 }
 
 // policyTarget holds the facts that one policy route needs about one tailnet.

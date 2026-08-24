@@ -709,6 +709,44 @@ test("a validate failure states each error with its line number", async () => {
   assert.match(markup, /unknown group &quot;group:ops&quot;/);
 });
 
+test("a failed test states that the control server takes no such document", async () => {
+  const body = '{"message":"test(s) failed","data":[{"user":"test2@example.com","errors":["address \\"100.64.0.2:443\\": want: Drop, got: Accept"]}]}';
+  const state = loaded(async () => ({ passed: false, tests_failed: true, result: body }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+
+  const result = resultModel(model);
+  assert.equal(result.word, "test failed");
+  assert.match(result.sentence, /accepts no document whose test fails/);
+});
+
+test("a document error states the rejection rather than a failed test", async () => {
+  const body = '{"message":"line 3: unknown field \\"acl\\""}';
+  const state = loaded(async () => ({ passed: false, result: body }));
+
+  await state.validate("jbones");
+
+  const result = resultModel(entryOf(state, "jbones"));
+  assert.equal(result.word, "validate failed");
+  assert.match(result.sentence, /rejected the document/);
+});
+
+test("a validate that passes after a failed test clears the failed test", async () => {
+  let answer = { passed: false, tests_failed: true, result: '{"message":"test(s) failed"}' };
+  const state = loaded(async () => answer);
+
+  await state.validate("jbones");
+  answer = { passed: true, result: "" };
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.testsFailed, false);
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+});
+
 test("a validate error that names a line and a character reads the line number", () => {
   const errors = validateErrors('{"message":"parse error: policy.hujson:7:3: unexpected token"}');
 
@@ -2006,7 +2044,7 @@ test("runTests sends the staged document to POST /api/policy/{id}/validate and h
   assert.deepEqual(toggle.testsAnswer, { passed: false, result: '{"message":"test(s) failed","data":[]}' });
 });
 
-test("running tests changes no field that Push reads, so a failing test row does not disable Push, per FR-vadv-14", async () => {
+test("a run of the tests changes no field that Push reads, per FR-vadv-14", async () => {
   let calls = 0;
   const state = loaded(async (route) => {
     if (route === policyValidateRoute("jbones")) {

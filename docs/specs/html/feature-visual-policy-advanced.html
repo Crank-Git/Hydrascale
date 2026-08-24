@@ -253,10 +253,20 @@ body.rv-open .layout { padding-right:21rem; }
 </ul>
 <p>validate route (the same route <code>features/08-upstream-policy.md</code> FR-policy-14 already calls), reads the assertion results the response carries, and marks each row <code>pass</code> or <code>fail</code>.</p>
 <ul>
-<li><strong>FR-vadv-14</strong> — A failing test does not block Push. It is information, not a gate;
+<li><strong>FR-vadv-14</strong> — A failing test disables Push, and the result region states the reason:
 </li>
 </ul>
-<p>the operator decides.</p>
+<p>the control server accepts no document whose test fails. The rule follows FR-vadv-11, where the console disables Push for a write that the control server refuses.</p>
+<ul>
+<li><strong>FR-vadv-15</strong> — The result region states a failed test apart from a document error.
+</li>
+</ul>
+<p>The Tailscale validate route answers with status 200 and the message <code>test(s) failed</code> for a failed assertion, and it refuses a malformed document with status 400.</p>
+<ul>
+<li><strong>FR-vadv-16</strong> — A Headscale control server answers the check route with an empty body,
+</li>
+</ul>
+<p>therefore the console states the message of the control server alone for that tailnet.</p>
 <h3 id="visual-policy-advanced-user-flows">User flows</h3>
 <h4 id="visual-policy-advanced-the-operator-adds-an-ssh-rule-and-runs-the-tests">The operator adds an SSH rule and runs the tests</h4>
 <div class="diagram"><pre class="mermaid">flowchart TD
@@ -267,7 +277,7 @@ body.rv-open .layout { padding-right:21rem; }
   E --&gt; F["POST validate with the staged document\nFR-vadv-13"]
   F --&gt; G{"Every assertion passes?"}
   G --&gt;|yes| H["Every row marks pass\nPush stays available"]
-  G --&gt;|no| I["Failing rows mark fail\nPush stays available, FR-vadv-14"]</pre></div>
+  G --&gt;|no| I["Failing rows mark fail\nPush stays disabled, FR-vadv-14"]</pre></div>
 <ol>
 <li>The operator opens the SSH access section of the Policy view.
 </li>
@@ -285,9 +295,17 @@ body.rv-open .layout { padding-right:21rem; }
 </ol>
 <p>reads the assertion results.</p>
 <ol>
-<li>Every row marks <code>pass</code> or <code>fail</code>. A failing row does not block Push.
+<li>Every row marks <code>pass</code> or <code>fail</code>.
+</li>
+<li>If a row marks <code>fail</code>, Push stays disabled. The result region states that the control
 </li>
 </ol>
+<p>server accepts no document whose test fails, per FR-vadv-14.</p>
+<ol>
+<li>The operator corrects the rule or removes the assertion, and Push re-enables after a
+</li>
+</ol>
+<p>validate that passes.</p>
 <h4 id="visual-policy-advanced-a-headscale-tailnet-s-document-holds-a-posture">A Headscale tailnet's document holds a posture</h4>
 <div class="diagram"><pre class="mermaid">flowchart TD
   A[Operator opens Postures] --&gt; B{"Control server supports postures?"}
@@ -339,10 +357,15 @@ body.rv-open .layout { padding-right:21rem; }
 </ul>
 <p>what the document holds, even when the console will not let them change it here.</p>
 <ul>
-<li>A failing test never blocks Push (FR-vadv-14) — <code>features/08-upstream-policy.md</code>'s
+<li>A failing test disables Push (FR-vadv-14). The Tailscale write route refuses a document
 </li>
 </ul>
-<p>edge case "The operator pushes a policy that locks this host out" already states that the daemon does not second-guess the operator, and a failing assertion is the same kind of informed choice.</p>
+<p>whose test fails, which the OpenAPI schema of operationId <code>setPolicyFile</code> states, so a Push here reaches a refusal every time. The console states the reason instead, in the manner of FR-vadv-11.</p>
+<ul>
+<li>This rule limits the edge case "The operator pushes a policy that locks this host out"
+</li>
+</ul>
+<p>of <code>features/08-upstream-policy.md</code>. The daemon second-guesses the operator never, and the control server holds this one gate ahead of the daemon.</p>
 <h3 id="visual-policy-advanced-data-touched">Data touched</h3>
 <p>The same policy document that <code>features/08-upstream-policy.md</code> and <code>features/12-visual-acl-editor.md</code> read and write. No new entity, no new daemon route.</p>
 <h3 id="visual-policy-advanced-interfaces">Interfaces</h3>

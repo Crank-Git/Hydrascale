@@ -48,8 +48,9 @@ type wirePolicy struct {
 }
 
 type wireValidate struct {
-	Passed bool   `json:"passed"`
-	Result string `json:"result"`
+	Passed      bool   `json:"passed"`
+	Result      string `json:"result"`
+	TestsFailed bool   `json:"tests_failed"`
 }
 
 type wireError struct {
@@ -430,6 +431,46 @@ func TestValidateReturnsTheResultOfTheControlServer(t *testing.T) {
 	}
 	if !strings.Contains(got.Result, "line 3") {
 		t.Errorf("result = %q, want the answer of the control server verbatim", got.Result)
+	}
+}
+
+func TestValidateReportsAFailedTestApartFromADocumentError(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	tailscale.mu.Lock()
+	tailscale.validateResult = `{"message":"test(s) failed","data":[{"user":"user1@example.com","errors":["address \"2.2.2.2:22\": want: Drop, got: Accept"]}]}`
+	tailscale.mu.Unlock()
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/validate", `{"document":"{}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireValidate
+	decodePolicy(t, payload, &got)
+	if got.Passed {
+		t.Error("passed = true, want false")
+	}
+	if !got.TestsFailed {
+		t.Errorf("tests_failed = false, want true; body %s", payload)
+	}
+
+	tailscale.mu.Lock()
+	tailscale.validateResult = `{"message":"line 3: unknown field \"acl\""}`
+	tailscale.mu.Unlock()
+
+	code, payload = callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/validate", `{"document":"{}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	// The field carries omitempty, therefore a false value reaches the client as an absent
+	// key. A second decode into the same value would hold the previous true.
+	rejected := wireValidate{}
+	decodePolicy(t, payload, &rejected)
+	if rejected.TestsFailed {
+		t.Errorf("tests_failed = true, and the control server rejected the document; body %s", payload)
 	}
 }
 

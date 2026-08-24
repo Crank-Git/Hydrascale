@@ -123,9 +123,14 @@ type PolicyValidateRequest struct {
 // PolicyValidateResponse is the JSON response for POST /api/policy/{id}/validate.
 // Result holds the answer of the control server verbatim, because the console shows each
 // error with its line number. See FR-policy-26.
+// TestsFailed is true when an assertion of the tests section failed, and false when the
+// control server refused the document itself. The console states a different reason for
+// each, per FR-vadv-14. A Headscale control server answers with an empty body, therefore
+// the Headscale path leaves this field false.
 type PolicyValidateResponse struct {
-	Passed bool   `json:"passed"`
-	Result string `json:"result,omitempty"`
+	Passed      bool   `json:"passed"`
+	Result      string `json:"result,omitempty"`
+	TestsFailed bool   `json:"tests_failed,omitempty"`
 }
 
 // PolicyCredentialsRequest is the request body of PUT /api/policy/{id}/credentials.

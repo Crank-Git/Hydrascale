@@ -80,8 +80,14 @@ and what a test asserts. This feature set draws those five, on the same document
   validate route (the same route `features/08-upstream-policy.md` FR-policy-14 already
   calls), reads the assertion results the response carries, and marks each row `pass` or
   `fail`.
-- **FR-vadv-14** — A failing test does not block Push. It is information, not a gate;
-  the operator decides.
+- **FR-vadv-14** — A failing test disables Push, and the result region states the reason:
+  the control server accepts no document whose test fails. The rule follows FR-vadv-11,
+  where the console disables Push for a write that the control server refuses.
+- **FR-vadv-15** — The result region states a failed test apart from a document error.
+  The Tailscale validate route answers with status 200 and the message `test(s) failed`
+  for a failed assertion, and it refuses a malformed document with status 400.
+- **FR-vadv-16** — A Headscale control server answers the check route with an empty body,
+  therefore the console states the message of the control server alone for that tailnet.
 
 ## User flows
 
@@ -96,7 +102,7 @@ flowchart TD
   E --> F["POST validate with the staged document\nFR-vadv-13"]
   F --> G{"Every assertion passes?"}
   G -->|yes| H["Every row marks pass\nPush stays available"]
-  G -->|no| I["Failing rows mark fail\nPush stays available, FR-vadv-14"]
+  G -->|no| I["Failing rows mark fail\nPush stays disabled, FR-vadv-14"]
 ```
 
 1. The operator opens the SSH access section of the Policy view.
@@ -106,7 +112,11 @@ flowchart TD
 4. The operator opens Tests and selects Run.
 5. The console sends the staged document to the control server's validate route and
    reads the assertion results.
-6. Every row marks `pass` or `fail`. A failing row does not block Push.
+6. Every row marks `pass` or `fail`.
+7. If a row marks `fail`, Push stays disabled. The result region states that the control
+   server accepts no document whose test fails, per FR-vadv-14.
+8. The operator corrects the rule or removes the assertion, and Push re-enables after a
+   validate that passes.
 
 ### A Headscale tailnet's document holds a posture
 
@@ -153,10 +163,13 @@ flowchart TD
 - Every section stages; Push writes. No section applies an edit automatically.
 - A read-only section (FR-vadv-11) never hides its entries. The operator always sees
   what the document holds, even when the console will not let them change it here.
-- A failing test never blocks Push (FR-vadv-14) — `features/08-upstream-policy.md`'s
-  edge case "The operator pushes a policy that locks this host out" already states that
-  the daemon does not second-guess the operator, and a failing assertion is the same
-  kind of informed choice.
+- A failing test disables Push (FR-vadv-14). The Tailscale write route refuses a document
+  whose test fails, which the OpenAPI schema of operationId `setPolicyFile` states, so a
+  Push here reaches a refusal every time. The console states the reason instead, in the
+  manner of FR-vadv-11.
+- This rule limits the edge case "The operator pushes a policy that locks this host out"
+  of `features/08-upstream-policy.md`. The daemon second-guesses the operator never, and
+  the control server holds this one gate ahead of the daemon.
 
 ## Data touched
 
