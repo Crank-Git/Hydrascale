@@ -391,6 +391,43 @@ func TestTheValidateResultMarksNoFailedTestForAWarning(t *testing.T) {
 	}
 }
 
+func TestTheValidateResultPassesADocumentThatHoldsAWarning(t *testing.T) {
+	f := newFakeControlServer(t)
+	f.validateBody = `{"message":"warning(s) found","data":[{"user":"group:unknown@example.com","warnings":["group is not syncing from SCIM and will be ignored by rules in the policy file"]}]}`
+	client := newTestClient(f)
+
+	result, err := client.ValidatePolicy(context.Background(), testDocument)
+	if err != nil {
+		t.Fatalf("ValidatePolicy returned an error: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("the result is not passed, and the control server accepts a write of this document")
+	}
+	if !result.Warning {
+		t.Errorf("the result marks no warning, and the control server stated warning(s) found")
+	}
+	if result.Body != f.validateBody {
+		t.Errorf("the result body is %q, want %q", result.Body, f.validateBody)
+	}
+}
+
+func TestTheValidateResultMarksNoWarningForADocumentError(t *testing.T) {
+	f := newFakeControlServer(t)
+	f.validateBody = `{"message":"line 3: unknown field \"acl\""}`
+	client := newTestClient(f)
+
+	result, err := client.ValidatePolicy(context.Background(), testDocument)
+	if err != nil {
+		t.Fatalf("ValidatePolicy returned an error: %v", err)
+	}
+	if result.Warning {
+		t.Errorf("the result marks a warning, and the control server rejected the document")
+	}
+	if result.Passed {
+		t.Errorf("the result is passed, and the control server rejected the document")
+	}
+}
+
 func TestTheClientSendsNoRequestWhenTheCredentialIsAbsent(t *testing.T) {
 	f := newFakeControlServer(t)
 	client := NewTailscaleClient(f.server.URL, testTailnet, func() (secrets.Tailnet, error) {

@@ -51,6 +51,7 @@ type wireValidate struct {
 	Passed      bool   `json:"passed"`
 	Result      string `json:"result"`
 	TestsFailed bool   `json:"tests_failed"`
+	Warning     bool   `json:"warning"`
 }
 
 type wireError struct {
@@ -471,6 +472,37 @@ func TestValidateReportsAFailedTestApartFromADocumentError(t *testing.T) {
 	decodePolicy(t, payload, &rejected)
 	if rejected.TestsFailed {
 		t.Errorf("tests_failed = true, and the control server rejected the document; body %s", payload)
+	}
+}
+
+func TestValidateReportsAWarningAsAnAcceptedDocument(t *testing.T) {
+	tailscale := newFakeTailscale(t, "{}", `W/"1"`)
+	fixture := startPolicyServer(t, tailscale.server.URL,
+		[]config.Tailnet{{ID: "alpha"}},
+		map[string]secrets.Tailnet{"alpha": tailscaleCredential()})
+
+	warning := `{"message":"warning(s) found","data":[{"user":"group:unknown@example.com","warnings":["group is not syncing from SCIM and will be ignored by rules in the policy file"]}]}`
+	tailscale.mu.Lock()
+	tailscale.validateResult = warning
+	tailscale.mu.Unlock()
+
+	code, payload := callAccess(t, fixture.client, http.MethodPost, "/api/policy/alpha/validate", `{"document":"{}"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+	var got wireValidate
+	decodePolicy(t, payload, &got)
+	if !got.Passed {
+		t.Errorf("passed = false, and the control server accepts a write of this document; body %s", payload)
+	}
+	if !got.Warning {
+		t.Errorf("warning = false, and the control server stated warning(s) found; body %s", payload)
+	}
+	if got.TestsFailed {
+		t.Errorf("tests_failed = true, and no test of this document failed; body %s", payload)
+	}
+	if got.Result != warning {
+		t.Errorf("result = %q, want the answer of the control server verbatim", got.Result)
 	}
 }
 

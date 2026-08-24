@@ -86,6 +86,8 @@ and what a test asserts. This feature set draws those five, on the same document
 - **FR-vadv-16** — The result region states a failed test apart from a document error.
 - **FR-vadv-17** — The result region states the message of the control server for a
   Headscale tailnet.
+- **FR-vadv-18** — A warning of the control server keeps Push available, and the result
+  region names the answer as a warning.
 
 ## User flows
 
@@ -156,6 +158,7 @@ flowchart TD
 | Staged | The staged rows marked, in the manner of `features/12-visual-acl-editor.md`. |
 | Unsupported (Postures on Headscale) | Every entry read-only, the reason stated, Push disabled while the key remains. |
 | Tests run | Each row marked `pass` or `fail`. |
+| Warning | The result region marks a warning, states the answer of the control server, and keeps Push available. |
 
 ## Behaviour rules
 
@@ -169,6 +172,9 @@ flowchart TD
 - The console reads the status of the validate answer to separate the two conditions
   (FR-vadv-16). Status 200 with the message `test(s) failed` names a failed assertion.
   A status outside the 2xx range names a document error.
+- A warning keeps Push available (FR-vadv-18). Status 200 with the message
+  `warning(s) found` names a valid document. The write route accepts that document,
+  therefore the console offers Push and it states the warning as a warning.
 - A Headscale control server answers the check route with an empty body. That answer holds
   no signal that separates the two conditions (FR-vadv-17). That tailnet keeps the message
   of the control server alone.

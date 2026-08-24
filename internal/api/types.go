@@ -127,10 +127,15 @@ type PolicyValidateRequest struct {
 // control server refused the document itself. The console states a different reason for
 // each, per FR-vadv-16. A Headscale control server answers with an empty body, therefore
 // the Headscale path leaves this field false.
+// Warning is true when the control server accepted the document and it stated a warning.
+// Passed is also true then, and the console keeps Push available, per FR-vadv-18. The
+// Headscale check route states no warning, therefore the Headscale path leaves this
+// field false.
 type PolicyValidateResponse struct {
 	Passed      bool   `json:"passed"`
 	Result      string `json:"result,omitempty"`
 	TestsFailed bool   `json:"tests_failed,omitempty"`
+	Warning     bool   `json:"warning,omitempty"`
 }
 
 // PolicyCredentialsRequest is the request body of PUT /api/policy/{id}/credentials.
