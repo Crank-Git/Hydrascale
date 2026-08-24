@@ -107,7 +107,7 @@ function entryOf(state, id) {
 // sectionsBody is one answer of POST /api/policy/{id}/sections, as internal/api/types.go
 // declares it.
 function sectionsBody(overrides = {}) {
-  return {
+  const body = {
     groups: { "group:admins": ["alice@example.com"] },
     hosts: {},
     tagOwners: {},
@@ -123,6 +123,28 @@ function sectionsBody(overrides = {}) {
     opaque_keys: [],
     ...overrides,
   };
+  // The server names every section key that the document holds, per FR-vadv-11. This
+  // helper derives that list from the sections it answers, because a section that holds
+  // an entry certainly holds its key. A test that needs an empty key present, or an
+  // absent key, passes section_keys itself.
+  if (!overrides.section_keys) {
+    body.section_keys = SECTION_NAMES.filter((name) => sectionHoldsEntry(body[name]));
+  }
+  return body;
+}
+
+/** SECTION_NAMES lists every top-level key that FR-model-2 resolves into a section. */
+const SECTION_NAMES = [
+  "groups", "hosts", "tagOwners", "ipsets", "acls", "grants",
+  "ssh", "autoApprovers", "nodeAttrs", "postures", "tests", "sshTests",
+];
+
+/** sectionHoldsEntry states whether one section of a sectionsBody answer holds an entry. */
+function sectionHoldsEntry(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return Boolean(value) && Object.keys(value).length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1792,6 +1814,51 @@ test("push disables while a Headscale document holds a postures key, per FR-vadv
   const model = entryOf(state, "homelab");
   assert.equal(model.stage, "validated");
   assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+});
+
+test("push disables while a Headscale document holds an empty postures key, per FR-vadv-11", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("homelab")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: {}, section_keys: ["postures"] });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", kind: "headscale" }));
+
+  await state.validate("homelab");
+  await state.loadSections("homelab");
+
+  const model = entryOf(state, "homelab");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+});
+
+test("the section nav counts an empty postures key as no entry, per FR-vadv-2", () => {
+  const markup = visualMarkup(sectionsBody({ postures: {}, section_keys: ["postures"] }));
+
+  assert.match(markup, /<span class="name">Postures<\/span><span class="mono">0<\/span>/);
+});
+
+test("push re-enables when a Headscale document holds no postures key", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("homelab")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: {}, section_keys: ["groups", "acls"] });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", kind: "headscale" }));
+
+  await state.validate("homelab");
+  await state.loadSections("homelab");
+
+  const model = entryOf(state, "homelab");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
 });
 
 test("push stays enabled when a Tailscale document holds a postures key", async () => {
