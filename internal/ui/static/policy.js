@@ -110,6 +110,31 @@ export const NAMED_SET_SECTIONS = [
 const REFERENCE_CHECKED_SECTIONS = new Set(["groups", "tagOwners"]);
 
 /**
+ * HEADSCALE_UNSUPPORTED_SECTIONS lists the named-set section key that a Headscale
+ * control server does not support, per FR-vacl-19 and `docs/ref/policy.md` at Headscale
+ * tag v0.29.3. Postures is also unsupported on Headscale, but FR-vacl-17 keeps it off
+ * this screen entirely, so no editor exists there to replace.
+ */
+const HEADSCALE_UNSUPPORTED_SECTIONS = new Set(["ipsets"]);
+
+/**
+ * unsupportedSectionMarkup returns the reason that this tailnet's control server does
+ * not support one section, per FR-vacl-19. It replaces the section's editor, in the
+ * manner of the mockup's `unsup` region. The visual editor changes nothing in that
+ * section, and it never removes it; Text stays the way to read or change it.
+ */
+function unsupportedSectionMarkup(label) {
+  return (
+    `<div class="unsup">` +
+    `<span class="dot warn"></span>` +
+    `<p class="note">This tailnet uses a Headscale control server, which does not ` +
+    `support ${esc(label)}. Use Text to read or change this section. The visual editor ` +
+    `makes no change to it.</p>` +
+    `</div>`
+  );
+}
+
+/**
  * namedSetEntries returns one [key, value] pair per entry of a named-set section, in
  * sorted order, so that the list draws in the same order on every render.
  */
@@ -597,8 +622,12 @@ function diffbarMarkup(summary) {
  * reach the screen once, per FR-vacl-18, so the operator knows to use Text for them.
  * The staged summary draws above the section nav, per FR-vacl-14 and the mockup's
  * diffbar region.
+ *
+ * kind is the tailnet's control server kind. A Headscale control server does not
+ * support IP sets, so the IP sets section shows the reason in place of its editor
+ * instead of the entry list, per FR-vacl-19.
  */
-export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSections = null) {
+export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSections = null, kind = "") {
   if (!sections) {
     return `<div class="pol-visual"></div>`;
   }
@@ -623,7 +652,7 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
   const activeNav = nav || "rules";
   const body = activeNav === "rules"
     ? matrixMarkup(matrixModel(sections)) + ruleListMarkup(ruleRows(sections, baseSections))
-    : namedSetSectionMarkup(sections, activeNav, pendingRemoval);
+    : namedSetSectionMarkup(sections, activeNav, pendingRemoval, kind);
   return `<div class="pol-visual">${diffbar}${items}${opaque}${body}</div>`;
 }
 
@@ -643,8 +672,11 @@ function namedSetNavRowMarkup(key, label, count, nav) {
  * FR-vacl-4 and FR-vacl-5. Every entry offers Rename and Remove; a list-shaped section
  * (every one but Hosts) also offers a member to add and a member to remove.
  */
-function namedSetSectionMarkup(sections, section, pendingRemoval) {
+function namedSetSectionMarkup(sections, section, pendingRemoval, kind) {
   const config = NAMED_SET_SECTIONS.find((one) => one.key === section);
+  if (kind === "headscale" && HEADSCALE_UNSUPPORTED_SECTIONS.has(section)) {
+    return unsupportedSectionMarkup(config.label);
+  }
   const entries = namedSetEntries(sections, section);
   const rows = entries
     .map(([key, value]) => namedSetEntryMarkup(section, key, value, config.scalar, pendingRemoval))
@@ -1433,7 +1465,7 @@ export function editorMarkup(model, toggle = null) {
   const readOnly = model.readOnly ? " readonly" : "";
   const showVisual = toggle && toggle.view === "visual";
   const body = showVisual
-    ? visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections)
+    ? visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections, model.kind)
     : `<div class="pol-ed">` +
       `<div class="pol-bar"><span class="pol-name mono">${esc(model.id)} &middot; policy.hujson</span>${chip}</div>` +
       `<div class="pol-code">${gutterMarkup(model.lines)}` +
