@@ -688,6 +688,240 @@ func TestReplacingAMissingMapKeyReturnsAnError(t *testing.T) {
 	}
 }
 
+func TestAddingTheFirstAutoApproverRouteCreatesTheSectionKey(t *testing.T) {
+	text := "{\n}\n"
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddAutoApproverRoute("10.0.0.0/24", []string{"tag:router"}); err != nil {
+		t.Fatalf("AddAutoApproverRoute: %v", err)
+	}
+	want := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestAddingAnAutoApproverRouteKeepsExistingRoutesByteForByte(t *testing.T) {
+	text := `{
+  "autoApprovers": {
+    "routes": {
+      // the office router
+      "10.0.0.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddAutoApproverRoute("10.0.1.0/24", []string{"tag:router"}); err != nil {
+		t.Fatalf("AddAutoApproverRoute: %v", err)
+	}
+	want := `{
+  "autoApprovers": {
+    "routes": {
+      // the office router
+      "10.0.0.0/24": ["tag:router"],
+      "10.0.1.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestAddingAnAutoApproverRouteWithADuplicateCIDRReturnsAnError(t *testing.T) {
+	doc, err := Parse(`{"autoApprovers": {"routes": {"10.0.0.0/24": ["tag:router"]}}}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddAutoApproverRoute("10.0.0.0/24", []string{"tag:other"}); err == nil {
+		t.Fatal("AddAutoApproverRoute: got no error for a CIDR the section already holds")
+	}
+}
+
+func TestReplacingAnAutoApproverRouteChangesOnlyItsValue(t *testing.T) {
+	text := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+      "10.0.1.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceAutoApproverRoute("10.0.1.0/24", []string{"tag:router", "tag:backup"}); err != nil {
+		t.Fatalf("ReplaceAutoApproverRoute: %v", err)
+	}
+	want := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+      "10.0.1.0/24": ["tag:router","tag:backup"],
+    },
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestReplacingAnAbsentAutoApproverRouteReturnsAnError(t *testing.T) {
+	doc, err := Parse(`{"autoApprovers": {"routes": {"10.0.0.0/24": ["tag:router"]}}}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceAutoApproverRoute("10.0.1.0/24", []string{"tag:router"}); err == nil {
+		t.Fatal("ReplaceAutoApproverRoute: got no error for a CIDR the section does not hold")
+	}
+}
+
+func TestRemoveAutoApproverRouteKeepsOtherRoutes(t *testing.T) {
+	text := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+      "10.0.1.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.RemoveAutoApproverRoute("10.0.0.0/24"); err != nil {
+		t.Fatalf("RemoveAutoApproverRoute: %v", err)
+	}
+	want := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.1.0/24": ["tag:router"],
+    },
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestRemovingAnAbsentAutoApproverRouteReturnsAnError(t *testing.T) {
+	doc, err := Parse(`{"autoApprovers": {"routes": {"10.0.0.0/24": ["tag:router"]}}}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.RemoveAutoApproverRoute("10.0.1.0/24"); err == nil {
+		t.Fatal("RemoveAutoApproverRoute: got no error for a CIDR the section does not hold")
+	}
+}
+
+func TestAutoApproverRouteEditsOnAMissingSectionReturnAnError(t *testing.T) {
+	doc, err := Parse("{}")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceAutoApproverRoute("10.0.0.0/24", []string{"tag:router"}); err == nil {
+		t.Fatal("ReplaceAutoApproverRoute: got no error for a document with no autoApprovers section")
+	}
+	if err := doc.RemoveAutoApproverRoute("10.0.0.0/24"); err == nil {
+		t.Fatal("RemoveAutoApproverRoute: got no error for a document with no autoApprovers section")
+	}
+}
+
+func TestSetAutoApproverExitNodeCreatesTheSectionIfAbsent(t *testing.T) {
+	text := "{\n}\n"
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.SetAutoApproverExitNode([]string{"tag:exit"}); err != nil {
+		t.Fatalf("SetAutoApproverExitNode: %v", err)
+	}
+	want := `{
+  "autoApprovers": {
+    "exitNode": ["tag:exit"],
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestSetAutoApproverExitNodeReplacesTheWholeList(t *testing.T) {
+	text := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+    },
+    "exitNode": ["tag:exit"],
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.SetAutoApproverExitNode([]string{"tag:exit", "tag:backup-exit"}); err != nil {
+		t.Fatalf("SetAutoApproverExitNode: %v", err)
+	}
+	want := `{
+  "autoApprovers": {
+    "routes": {
+      "10.0.0.0/24": ["tag:router"],
+    },
+    "exitNode": ["tag:exit","tag:backup-exit"],
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestSetAutoApproverExitNodeClearsTheListWhenGivenNone(t *testing.T) {
+	text := `{
+  "autoApprovers": {
+    "exitNode": ["tag:exit"],
+  },
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.SetAutoApproverExitNode([]string{}); err != nil {
+		t.Fatalf("SetAutoApproverExitNode: %v", err)
+	}
+	want := `{
+  "autoApprovers": {
+    "exitNode": [],
+  },
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
 func TestAnUnmodelledKeyRoundTripsUnchangedThroughAnEditAndSerialize(t *testing.T) {
 	text := `{
   "randomizeClientPort": true,

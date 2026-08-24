@@ -165,11 +165,30 @@ The same policy document that `features/08-upstream-policy.md` and
 
 ## Interfaces
 
-None new. Test results come from `POST /api/policy/{id}/validate`, the existing route
-`features/08-upstream-policy.md` FR-policy-14 defines; the control server's validate
-answer carries the assertion results for `tests`/`sshTests`, per Tailscale's ACL syntax
-reference (`https://tailscale.com/kb/1337/acl-syntax`, retrieved 2026-08-23) and
-Headscale's `CheckPolicy` route (`docs/ref/policy.md` at tag `v0.29.3`).
+No new route. Test results come from `POST /api/policy/{id}/validate`, the existing
+route `features/08-upstream-policy.md` FR-policy-14 defines; the control server's
+validate answer carries the assertion results for `tests`/`sshTests`, per Tailscale's
+ACL syntax reference (`https://tailscale.com/kb/1337/acl-syntax`, retrieved
+2026-08-23) and Headscale's `CheckPolicy` route (`docs/ref/policy.md` at tag
+`v0.29.3`).
+
+**New addressing scheme on the existing route (2026-08-23).**
+`features/12-visual-acl-editor.md`'s `POST /api/policy/{id}/sections/edit` addresses
+an entry of a top-level array by `index`, and an entry of a top-level map by `key`.
+`autoApprovers` holds no top-level array or map: it is a top-level object that holds a
+map (`routes`) and a single field (`exitNode`), per the `autoApprovers` shape
+confirmed against Tailscale's ACL syntax reference. `sections/edit` therefore takes
+two more `section` values for this one object:
+
+| `section` value | Addressing | `op` values |
+|---|---|---|
+| `autoApprovers.routes` | `key` names the route's CIDR; `entry` carries the approver list. | `add`, `replace`, `remove` |
+| `autoApprovers.exitNode` | No `key`: the exit node is one field, not a keyed collection. `entry` carries the whole approver list. | `replace` alone; an empty `entry` list clears it |
+
+Adding the first route, or setting the exit node on a document that holds no
+`autoApprovers` section yet, creates the section, matching
+`features/11-policy-document-model.md` FR-model-7's rule that adding the first entry
+creates the section key, extended one level deeper for this nested object.
 
 ## Edge cases & failures
 

@@ -28,7 +28,9 @@ import {
   matrixMarkup,
   matrixModel,
   namedSetEntries,
+  nodeAttrsEntryWithField,
   parseRulePorts,
+  parseSSHCheckPeriod,
   policyDocumentRoute,
   policyListMarkup,
   policyRows,
@@ -1377,6 +1379,592 @@ test("a section with no entry states that it holds none", () => {
 test("the section nav escapes a hostile group name and member", () => {
   const markup = visualMarkup(sectionsBody({ groups: { '"><script>': ['"><script>'] } }), "groups");
   assert.ok(!markup.includes("<script>"));
+});
+
+// ---------------------------------------------------------------------------
+// The section nav: SSH access, Auto-approvers, Node attributes, Postures, Tests
+// (#321, FR-vadv-1, FR-vadv-2)
+// ---------------------------------------------------------------------------
+
+test("the section nav lists the five Epic 13 sections with their entry counts", () => {
+  const markup = visualMarkup(
+    sectionsBody({
+      ssh: [{ action: "accept", src: ["a"], dst: ["b"], users: ["root"] }],
+      autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] }, exitNode: ["tag:exit"] },
+      nodeAttrs: [{ target: ["tag:server"], attr: ["funnel"] }],
+      postures: { "posture:latest": ["node:os in ['linux']"] },
+      tests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+      sshTests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+    }),
+  );
+
+  assert.match(markup, /<span class="name">SSH access<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Auto-approvers<\/span><span class="mono">2<\/span>/);
+  assert.match(markup, /<span class="name">Node attributes<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Postures<\/span><span class="mono">1<\/span>/);
+  assert.match(markup, /<span class="name">Tests<\/span><span class="mono">2<\/span>/);
+});
+
+test("the SSH access section shows one row per ssh entry with its source, destination, users, and action", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "accept", src: ["group:eng"], dst: ["tag:server"], users: ["autogroup:nonroot"] }],
+  });
+
+  const markup = visualMarkup(sections, "ssh");
+
+  assert.match(markup, /group:eng/);
+  assert.match(markup, /tag:server/);
+  assert.match(markup, /autogroup:nonroot/);
+  assert.match(markup, /value="accept"/);
+});
+
+test("a check action shows the check period, per FR-vadv-4", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "check", src: ["tag:laptop"], dst: ["tag:server"], users: ["root"], checkPeriod: "20h" }],
+  });
+
+  const markup = visualMarkup(sections, "ssh");
+
+  assert.match(markup, /ssh-checkperiod/);
+  assert.match(markup, /value="20h"/);
+});
+
+test("an accept action shows no check period field", () => {
+  const sections = sectionsBody({
+    ssh: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server"], users: ["root"] }],
+  });
+
+  const markup = visualMarkup(sections, "ssh");
+
+  assert.ok(!markup.includes("ssh-checkperiod"));
+});
+
+test("an SSH access section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ ssh: [] }), "ssh");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the SSH access section escapes a hostile source", () => {
+  const markup = visualMarkup(
+    sectionsBody({ ssh: [{ action: "accept", src: ['"><script>'], dst: ["b"], users: ["root"] }] }),
+    "ssh",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+// ---------------------------------------------------------------------------
+// Auto-approvers (#322, FR-vadv-6, FR-vadv-7)
+// ---------------------------------------------------------------------------
+
+test("the Auto-approvers section shows one row per route CIDR and one row for the exit node", () => {
+  const sections = sectionsBody({
+    autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] }, exitNode: ["group:eng"] },
+  });
+
+  const markup = visualMarkup(sections, "autoApprovers");
+
+  assert.match(markup, /10\.0\.0\.0\/8/);
+  assert.match(markup, /tag:router/);
+  assert.match(markup, /exit node/);
+  assert.match(markup, /group:eng/);
+});
+
+test("an Auto-approvers section with no route still draws the exit node row", () => {
+  const markup = visualMarkup(sectionsBody({ autoApprovers: {} }), "autoApprovers");
+  assert.match(markup, /exit node/);
+});
+
+test("the Auto-approvers section escapes a hostile CIDR and a hostile approver", () => {
+  const markup = visualMarkup(
+    sectionsBody({ autoApprovers: { routes: { '"><script>': ['"><script>'] } } }),
+    "autoApprovers",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("addAutoApproverRoute adds a route through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: { routes: { "10.0.0.0/8": [] } } });
+  });
+
+  await state.addAutoApproverRoute("jbones", "10.0.0.0/8", []);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "autoApprovers.routes",
+      op: "add",
+      key: "10.0.0.0/8",
+      entry: "[]",
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.autoApprovers.routes, { "10.0.0.0/8": [] });
+});
+
+test("replaceAutoApproverRoute stages an approver added to a route's list", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: { routes: { "10.0.0.0/8": ["tag:router"] } } });
+  });
+
+  await state.replaceAutoApproverRoute("jbones", "10.0.0.0/8", ["tag:router"]);
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "autoApprovers.routes",
+    op: "replace",
+    key: "10.0.0.0/8",
+    entry: '["tag:router"]',
+  });
+});
+
+test("removeAutoApproverRoute removes a route through sections/edit", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: {} });
+  });
+
+  await state.removeAutoApproverRoute("jbones", "10.0.0.0/8");
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "autoApprovers.routes",
+    op: "remove",
+    key: "10.0.0.0/8",
+  });
+});
+
+test("setAutoApproverExitNode replaces the whole exit node approver list, and carries no key", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ autoApprovers: { exitNode: ["group:eng"] } });
+  });
+
+  await state.setAutoApproverExitNode("jbones", ["group:eng"]);
+
+  assert.deepEqual(calls[0].body, {
+    document: '{\n  "grants": [],\n}',
+    section: "autoApprovers.exitNode",
+    op: "replace",
+    entry: '["group:eng"]',
+  });
+});
+
+test("parseSSHCheckPeriod accepts a duration in the control server's documented form", () => {
+  assert.deepEqual(parseSSHCheckPeriod("20h"), { value: "20h", error: "" });
+  assert.deepEqual(parseSSHCheckPeriod("1h30m"), { value: "1h30m", error: "" });
+  assert.deepEqual(parseSSHCheckPeriod(""), { value: "", error: "" });
+});
+
+test("parseSSHCheckPeriod rejects a bad form, naming the expected form", () => {
+  const result = parseSSHCheckPeriod("banana");
+  assert.equal(result.value, "");
+  assert.match(result.error, /duration/);
+  assert.match(result.error, /20h/);
+});
+
+test("stageListAdd adds an ssh entry through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const newEntry = { action: "accept", src: ["group:eng"], dst: ["tag:server"], users: ["root"] };
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ ssh: [newEntry] });
+  });
+
+  await state.stageListAdd("jbones", "ssh", newEntry);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "ssh",
+      op: "add",
+      entry: newEntry,
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.ssh, [newEntry]);
+});
+
+// ---------------------------------------------------------------------------
+// Node attributes (#323, FR-vadv-8, FR-vadv-9)
+// ---------------------------------------------------------------------------
+
+test("the node attributes section shows one row per nodeAttrs entry with its targets and attributes", () => {
+  const sections = sectionsBody({
+    nodeAttrs: [{ target: ["tag:server", "tag:db"], attr: ["funnel"] }],
+  });
+
+  const markup = visualMarkup(sections, "nodeAttrs");
+
+  assert.match(markup, /tag:server/);
+  assert.match(markup, /tag:db/);
+  assert.match(markup, /funnel/);
+});
+
+test("a target of asterisk shows the literal character, per FR-vadv-8's edge case", () => {
+  const sections = sectionsBody({
+    nodeAttrs: [{ target: ["*"], attr: ["funnel"] }],
+  });
+
+  const markup = visualMarkup(sections, "nodeAttrs");
+
+  assert.match(markup, /value="\*"/);
+});
+
+test("a node attributes section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ nodeAttrs: [] }), "nodeAttrs");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the node attributes section escapes a hostile target", () => {
+  const markup = visualMarkup(
+    sectionsBody({ nodeAttrs: [{ target: ['"><script>'], attr: ["funnel"] }] }),
+    "nodeAttrs",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("stageListAdd adds a nodeAttrs entry through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const newEntry = { target: ["tag:server"], attr: ["funnel"] };
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ nodeAttrs: [newEntry] });
+  });
+
+  await state.stageListAdd("jbones", "nodeAttrs", newEntry);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "nodeAttrs",
+      op: "add",
+      entry: newEntry,
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.nodeAttrs, [newEntry]);
+});
+
+test("nodeAttrsEntryWithField replaces one field of a nodeAttrs entry and keeps the other", () => {
+  const entry = { target: ["tag:server"], attr: ["funnel"] };
+  assert.deepEqual(nodeAttrsEntryWithField(entry, "attr", ["funnel", "webserver"]), {
+    target: ["tag:server"],
+    attr: ["funnel", "webserver"],
+  });
+  assert.deepEqual(nodeAttrsEntryWithField(entry, "target", ["*"]), {
+    target: ["*"],
+    attr: ["funnel"],
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Postures (#324, FR-vadv-10, FR-vadv-11)
+// ---------------------------------------------------------------------------
+
+test("the Postures section shows one row per entry with its name and its expression", () => {
+  const sections = sectionsBody({
+    postures: { "posture:latest": ["node:os == 'macos'", "node:tsVersion >= '1.40'"] },
+  });
+
+  const markup = visualMarkup(sections, "postures");
+
+  assert.match(markup, /posture:latest/);
+  assert.match(markup, /node:os == &#39;macos&#39; &amp;&amp; node:tsVersion &gt;= &#39;1\.40&#39;/);
+});
+
+test("a Postures section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ postures: {} }), "postures");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the Postures section escapes a hostile name and expression", () => {
+  const markup = visualMarkup(
+    sectionsBody({ postures: { '"><script>': ['"><script>'] } }),
+    "postures",
+  );
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("addSetEntry adds a posture through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } });
+  });
+
+  await state.addSetEntry("jbones", "postures", "posture:latest", ["node:os == 'linux'"]);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "postures",
+      op: "add",
+      key: "posture:latest",
+      entry: '["node:os == \'linux\'"]',
+    },
+  });
+  assert.equal(calls[1].route, policySectionsRoute("jbones"));
+  assert.deepEqual(toggleModel(state, "jbones").sections.postures, {
+    "posture:latest": ["node:os == 'linux'"],
+  });
+});
+
+test("a Headscale tailnet's Postures section shows every entry read-only and states the reason, per FR-vadv-11", () => {
+  const markup = visualMarkup(
+    sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } }),
+    "postures",
+    null,
+    null,
+    "headscale",
+  );
+
+  assert.match(markup, /does not support/);
+  assert.match(markup, /posture:latest/);
+  assert.match(markup, /node:os == &#39;linux&#39;/);
+  assert.ok(!markup.includes("data-add-key"));
+  assert.ok(!markup.includes("rename-posture"));
+});
+
+test("a Tailscale tailnet still edits Postures normally", () => {
+  const markup = visualMarkup(
+    sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } }),
+    "postures",
+    null,
+    null,
+    "tailscale",
+  );
+
+  assert.match(markup, /posture:latest/);
+  assert.match(markup, /data-add-key/);
+});
+
+test("push disables while a Headscale document holds a postures key, per FR-vadv-11", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("homelab")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("homelab", documentBody({ id: "homelab", kind: "headscale" }));
+
+  await state.validate("homelab");
+  await state.loadSections("homelab");
+
+  const model = entryOf(state, "homelab");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+});
+
+test("push stays enabled when a Tailscale document holds a postures key", async () => {
+  const state = createPolicyState({
+    request: async (route) => {
+      if (route === policyValidateRoute("jbones")) {
+        return { passed: true };
+      }
+      return sectionsBody({ postures: { "posture:latest": ["node:os == 'linux'"] } });
+    },
+  });
+  state.setList(listBody());
+  state.setDocument("jbones", documentBody());
+
+  await state.validate("jbones");
+  await state.loadSections("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+});
+
+// ---------------------------------------------------------------------------
+// Tests (#325, FR-vadv-12 to FR-vadv-14)
+// ---------------------------------------------------------------------------
+
+test("the Tests section shows one row per tests and sshTests entry with its source and expected result", () => {
+  const sections = sectionsBody({
+    tests: [{ src: "group:eng", accept: ["tag:server:22"] }],
+    sshTests: [{ src: "tag:laptop", dst: ["tag:server"], deny: ["root"] }],
+  });
+
+  const markup = visualMarkup(sections, "tests");
+
+  assert.match(markup, /group:eng/);
+  assert.match(markup, /accept tag:server:22/);
+  assert.match(markup, /tag:laptop/);
+  assert.match(markup, /deny root/);
+});
+
+test("an sshTests entry's expected result joins its accept, check, and deny user lists", () => {
+  const sections = sectionsBody({
+    sshTests: [{ src: "tag:laptop", dst: ["tag:server"], accept: ["dave"], check: ["admin"], deny: ["root"] }],
+  });
+
+  const markup = visualMarkup(sections, "tests");
+
+  assert.match(markup, /accept dave; check admin; deny root/);
+});
+
+test("a Tests section with no entry states that it holds none", () => {
+  const markup = visualMarkup(sectionsBody({ tests: [], sshTests: [] }), "tests");
+  assert.match(markup, /This section holds no entry/);
+});
+
+test("the Tests section escapes a hostile source", () => {
+  const markup = visualMarkup(sectionsBody({ tests: [{ src: '"><script>', accept: ["a:1"] }] }), "tests");
+  assert.ok(!markup.includes("<script>"));
+});
+
+test("the Tests section offers Run, Add, and Remove controls", () => {
+  const markup = visualMarkup(
+    sectionsBody({ tests: [{ src: "group:eng", accept: ["tag:server:22"] }] }),
+    "tests",
+  );
+  assert.match(markup, /data-act="run-tests"/);
+  assert.match(markup, /data-act="add-test"/);
+  assert.match(markup, /data-act="test-delete"/);
+});
+
+test("the Tests section marks a row pass or fail from the validate answer, per FR-vadv-13", () => {
+  const sections = sectionsBody({
+    tests: [
+      { src: "group:eng", accept: ["tag:server:22"] },
+      { src: "tag:server", accept: ["autogroup:internet:443"] },
+    ],
+  });
+  const answer = {
+    passed: false,
+    result: JSON.stringify({
+      message: "test(s) failed",
+      data: [{ user: "tag:server", errors: ['address "1.2.3.4:443": want: Drop, got: Accept'] }],
+    }),
+  };
+
+  const markup = visualMarkup(sections, "tests", null, null, "", { pending: false, answer });
+
+  assert.match(markup, /group:eng[\s\S]*dot ok[\s\S]*pass/);
+  assert.match(markup, /tag:server[\s\S]*want: Drop, got: Accept/);
+});
+
+test("the Tests section shows the validate error in place of the rows when the answer carries no assertion result", () => {
+  const sections = sectionsBody({ tests: [{ src: "group:eng", accept: ["tag:server:22"] }] });
+  const answer = { passed: false, result: "the Headscale control server rejected the document: invalid huJSON" };
+
+  const markup = visualMarkup(sections, "tests", null, null, "", { pending: false, answer });
+
+  assert.match(markup, /invalid huJSON/);
+  assert.ok(!markup.includes("group:eng"));
+});
+
+test("runTests sends the staged document to POST /api/policy/{id}/validate and holds the answer, per FR-vadv-13", async () => {
+  const calls = [];
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policyValidateRoute("jbones")) {
+      return { passed: false, result: '{"message":"test(s) failed","data":[]}' };
+    }
+    return sectionsBody();
+  });
+
+  await state.runTests("jbones");
+
+  assert.deepEqual(calls[0], {
+    route: policyValidateRoute("jbones"),
+    method: "POST",
+    body: { document: '{\n  "grants": [],\n}' },
+  });
+  const toggle = toggleModel(state, "jbones");
+  assert.equal(toggle.testsPending, false);
+  assert.deepEqual(toggle.testsAnswer, { passed: false, result: '{"message":"test(s) failed","data":[]}' });
+});
+
+test("running tests changes no field that Push reads, so a failing test row does not disable Push, per FR-vadv-14", async () => {
+  let calls = 0;
+  const state = loaded(async (route) => {
+    if (route === policyValidateRoute("jbones")) {
+      calls += 1;
+      if (calls === 1) {
+        return { passed: true };
+      }
+      return {
+        passed: false,
+        result: '{"message":"test(s) failed","data":[{"user":"tag:server","errors":["boom"]}]}',
+      };
+    }
+    return sectionsBody({ tests: [{ src: "tag:server", accept: ["autogroup:internet:443"] }] });
+  });
+
+  await state.validate("jbones");
+  assert.equal(entryOf(state, "jbones").stage, "validated");
+
+  await state.runTests("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.stage, "validated");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+  assert.equal(toggleModel(state, "jbones").testsAnswer.passed, false);
+});
+
+test("stageListAdd adds a tests entry through sections/edit, then re-reads sections", async () => {
+  const calls = [];
+  const newEntry = { src: "group:eng", accept: ["tag:server:22"] };
+  const state = loaded(async (route, method, body) => {
+    calls.push({ route, method, body });
+    if (route === policySectionsEditRoute("jbones")) {
+      return { document: "the edited text" };
+    }
+    return sectionsBody({ tests: [newEntry] });
+  });
+
+  await state.stageListAdd("jbones", "tests", newEntry);
+
+  assert.deepEqual(calls[0], {
+    route: policySectionsEditRoute("jbones"),
+    method: "POST",
+    body: {
+      document: '{\n  "grants": [],\n}',
+      section: "tests",
+      op: "add",
+      entry: newEntry,
+    },
+  });
+  assert.deepEqual(toggleModel(state, "jbones").sections.tests, [newEntry]);
 });
 
 test("referencingRules finds a group or a tag named in an acls or a grants src or dst", () => {

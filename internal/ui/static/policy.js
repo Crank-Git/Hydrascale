@@ -110,12 +110,13 @@ export const NAMED_SET_SECTIONS = [
 const REFERENCE_CHECKED_SECTIONS = new Set(["groups", "tagOwners"]);
 
 /**
- * HEADSCALE_UNSUPPORTED_SECTIONS lists the named-set section key that a Headscale
- * control server does not support, per FR-vacl-19 and `docs/ref/policy.md` at Headscale
- * tag v0.29.3. Postures is also unsupported on Headscale, but FR-vacl-17 keeps it off
- * this screen entirely, so no editor exists there to replace.
+ * HEADSCALE_UNSUPPORTED_SECTIONS lists the section key that a Headscale control server
+ * does not support, per FR-vacl-19 and FR-vadv-11, confirmed against
+ * `docs/ref/policy.md` at Headscale tag v0.29.3. ipsets hides its entries behind the
+ * reason; postures keeps its entries visible and read-only beside the reason, per
+ * FR-vadv-11's rule that a read-only section never hides an entry.
  */
-const HEADSCALE_UNSUPPORTED_SECTIONS = new Set(["ipsets"]);
+const HEADSCALE_UNSUPPORTED_SECTIONS = new Set(["ipsets", "postures"]);
 
 /**
  * unsupportedSectionMarkup returns the reason that this tailnet's control server does
@@ -366,6 +367,7 @@ export function editorModel(state, id) {
     etag: held.etag,
     detail: held.error,
     sentence: "",
+    sections: held.sections,
   };
 
   if (row && row.word === "no credential") {
@@ -415,6 +417,8 @@ export function toggleModel(state, id) {
     nav: entry.nav,
     pendingRemoval: entry.pendingRemoval,
     baseSections: entry.baseSections,
+    testsPending: entry.testsPending,
+    testsAnswer: entry.testsAnswer,
   };
 }
 
@@ -626,8 +630,12 @@ function diffbarMarkup(summary) {
  * kind is the tailnet's control server kind. A Headscale control server does not
  * support IP sets, so the IP sets section shows the reason in place of its editor
  * instead of the entry list, per FR-vacl-19.
+ *
+ * testsRun holds the state of the Tests section's Run action: {pending, answer}, where
+ * answer is the last POST /api/policy/{id}/validate answer, or null before a run. The
+ * Tests section reads it alone; no other section uses it. See FR-vadv-13.
  */
-export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSections = null, kind = "") {
+export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSections = null, kind = "", testsRun = null) {
   if (!sections) {
     return `<div class="pol-visual"></div>`;
   }
@@ -638,6 +646,11 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
     ["tagOwners", "Tag owners", count(sections.tagOwners)],
     ["ipsets", "IP sets", count(sections.ipsets)],
     ["rules", "Rules", count(sections.acls) + count(sections.grants)],
+    ["ssh", "SSH access", count(sections.ssh)],
+    ["autoApprovers", "Auto-approvers", autoApproversCount(sections.autoApprovers)],
+    ["nodeAttrs", "Node attributes", count(sections.nodeAttrs)],
+    ["postures", "Postures", count(sections.postures)],
+    ["tests", "Tests", count(sections.tests) + count(sections.sshTests)],
   ];
   const items = rows.map(([key, label, n]) => namedSetNavRowMarkup(key, label, n, nav)).join("");
   const opaque = sections.opaque_keys && sections.opaque_keys.length
@@ -648,12 +661,62 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
   // rule list together, the same as a nav explicitly set to "rules", so that pair stays
   // the view the operator reaches before any nav row is clicked. #316 owns the matrix
   // and #317 owns the rule list beneath it; #315 owns the four named-set entry lists
-  // that a click on Groups, Hosts, Tag owners, or IP sets swaps in instead.
+  // that a click on Groups, Hosts, Tag owners, or IP sets swaps in instead. SECTION_MARKUP
+  // dispatches the nine remaining sections, per the batch cross-check of #320: #321 builds
+  // ssh, and #322 to #325 each replace one placeholder with a built section.
   const activeNav = nav || "rules";
   const body = activeNav === "rules"
     ? matrixMarkup(matrixModel(sections)) + ruleListMarkup(ruleRows(sections, baseSections))
-    : namedSetSectionMarkup(sections, activeNav, pendingRemoval, kind);
+    : sectionBodyMarkup(activeNav, sections, pendingRemoval, kind, testsRun);
   return `<div class="pol-visual">${diffbar}${items}${opaque}${body}</div>`;
+}
+
+/** autoApproversCount returns the entry count of the autoApprovers section: one per
+ *  route CIDR plus one for the exit node approver list, per FR-vadv-2 and FR-vadv-6. */
+function autoApproversCount(autoApprovers) {
+  const routes = (autoApprovers && autoApprovers.routes) || {};
+  const exitNode = (autoApprovers && autoApprovers.exitNode) || [];
+  return Object.keys(routes).length + exitNode.length;
+}
+
+/**
+ * SECTION_MARKUP maps a section-nav key to the function that draws its body, covering
+ * every key but "rules", which visualMarkup draws directly. This is the shared choke
+ * point that the batch cross-check of #320 named: #321 builds ssh, and #322 to #325
+ * each replace one placeholder entry alone, without touching this map's shape.
+ */
+const SECTION_MARKUP = {
+  groups: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "groups", pendingRemoval, kind),
+  hosts: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "hosts", pendingRemoval, kind),
+  tagOwners: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "tagOwners", pendingRemoval, kind),
+  ipsets: (sections, pendingRemoval, kind) => namedSetSectionMarkup(sections, "ipsets", pendingRemoval, kind),
+  ssh: (sections) => sshSectionMarkup(sections),
+  autoApprovers: (sections) => autoApproversSectionMarkup(sections),
+  nodeAttrs: (sections) => nodeAttrsSectionMarkup(sections),
+  postures: (sections, pendingRemoval, kind) => posturesSectionMarkup(sections, kind),
+  tests: (sections, pendingRemoval, kind, testsRun) => testsSectionMarkup(sections, testsRun),
+};
+
+/** sectionBodyMarkup draws the body of one non-Rules section of the section nav,
+ *  through SECTION_MARKUP. It draws the placeholder for a nav value SECTION_MARKUP
+ *  holds no function for, so an unknown nav never crashes the view. */
+function sectionBodyMarkup(nav, sections, pendingRemoval, kind, testsRun) {
+  const draw = SECTION_MARKUP[nav] || placeholderSectionMarkup;
+  return draw(sections, pendingRemoval, kind, testsRun);
+}
+
+/**
+ * placeholderSectionMarkup states that a section this epic named in the section nav is
+ * not yet built, per the batch cross-check of #320. It changes nothing and it never
+ * crashes; Text stays the way to read or change the section until its issue lands.
+ */
+function placeholderSectionMarkup() {
+  return (
+    `<div class="unsup">` +
+    `<span class="dot warn"></span>` +
+    `<p class="note">This section is not yet built. Use Text to read or change it.</p>` +
+    `</div>`
+  );
 }
 
 /** namedSetNavRowMarkup returns one row of the section nav. Every row, Rules included,
@@ -738,6 +801,576 @@ function membersMarkup(key, members) {
     `<button type="button" class="btn" data-act="add-member">Add member</button>` +
     `</div>`
   );
+}
+
+// ---------------------------------------------------------------------------
+// SSH access (#321)
+// ---------------------------------------------------------------------------
+
+/** CHECK_PERIOD_PATTERN matches the duration grammar that Go's time.ParseDuration and
+ *  the control server both accept: one or more signed number-unit pairs, in the manner
+ *  of "20h" or "1h30m". Confirmed against the control server's ACL syntax reference,
+ *  per docs/specs/features/13-visual-policy-advanced.md's Interfaces section. */
+const CHECK_PERIOD_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+$/;
+
+/**
+ * parseSSHCheckPeriod validates the check period of an ssh entry, per FR-vadv-4. An
+ * empty value is valid, because an accept action carries no check period. A value that
+ * does not match the control server's duration grammar returns an error that names the
+ * expected form, and it stages nothing.
+ */
+export function parseSSHCheckPeriod(text) {
+  const value = (text || "").trim();
+  if (value === "") {
+    return { value: "", error: "" };
+  }
+  if (!CHECK_PERIOD_PATTERN.test(value)) {
+    return { value: "", error: "The check period must be a duration, in the form 20h." };
+  }
+  return { value, error: "" };
+}
+
+/** sshRowFields returns the comma-joined text of one ssh entry's list fields, so the
+ *  row markup and the add form build from one shape. */
+function sshRowFields(entry) {
+  return {
+    src: (entry.src || []).join(", "),
+    dst: (entry.dst || []).join(", "),
+    users: (entry.users || []).join(", "),
+    action: entry.action || "accept",
+    checkPeriod: entry.checkPeriod || "",
+  };
+}
+
+/** sshEntryWithField returns entry with field replaced by value. Setting action away
+ *  from "check" drops checkPeriod, because an accept action carries no check period. */
+export function sshEntryWithField(entry, field, value) {
+  const next = { ...entry, [field]: value };
+  if ((field === "action" && value !== "check") || (field === "checkPeriod" && value === "")) {
+    delete next.checkPeriod;
+  }
+  return next;
+}
+
+/**
+ * sshEntryMarkup returns one row of the SSH access section: its source, its
+ * destination, its user list, and its action, per FR-vadv-3. A check action also shows
+ * the check period, per FR-vadv-4.
+ */
+function sshEntryMarkup(entry, index) {
+  const fields = sshRowFields(entry);
+  const checkPeriod = fields.action === "check"
+    ? `<input type="text" class="field mono" data-act="ssh-checkperiod" value="${esc(fields.checkPeriod)}" placeholder="20h" aria-label="Check period">`
+    : "";
+  return (
+    `<div class="setentry" data-index="${index}">` +
+    `<div class="setentry-head">` +
+    `<input type="text" class="field mono" data-act="ssh-src" value="${esc(fields.src)}" aria-label="Source">` +
+    `<input type="text" class="field mono" data-act="ssh-dst" value="${esc(fields.dst)}" aria-label="Destination">` +
+    `<button type="button" class="btn" data-act="ssh-delete">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">` +
+    `<input type="text" class="field mono" data-act="ssh-users" value="${esc(fields.users)}" aria-label="Users">` +
+    `<select class="field mono" data-act="ssh-action" aria-label="Action">` +
+    `<option value="accept"${fields.action === "accept" ? " selected" : ""}>accept</option>` +
+    `<option value="check"${fields.action === "check" ? " selected" : ""}>check</option>` +
+    `</select>` +
+    checkPeriod +
+    `</div>` +
+    `<p class="note ns-error"></p>` +
+    `</div>`
+  );
+}
+
+/**
+ * sshSectionMarkup returns the SSH access section: one row per ssh entry, per
+ * FR-vadv-3 to FR-vadv-5.
+ */
+function sshSectionMarkup(sections) {
+  const entries = (sections && sections.ssh) || [];
+  const rows = entries.map((entry, index) => sshEntryMarkup(entry, index)).join("");
+  const empty = entries.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const addFields =
+    `<input type="text" class="field mono" data-add-src placeholder="source" aria-label="New rule source">` +
+    `<input type="text" class="field mono" data-add-dst placeholder="destination" aria-label="New rule destination">` +
+    `<input type="text" class="field mono" data-add-users placeholder="users" aria-label="New rule users">` +
+    `<select class="field mono" data-add-action aria-label="New rule action">` +
+    `<option value="accept">accept</option><option value="check">check</option>` +
+    `</select>`;
+  return (
+    `<div class="setlist" data-section="ssh">${rows}${empty}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-ssh">Add</button></div>` +
+    `</div>`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Auto-approvers (#322)
+// ---------------------------------------------------------------------------
+
+/** AUTO_APPROVER_EXIT_NODE_KEY names the exit node row's approver list to
+ *  membersMarkup, so the row shares markup and wiring with a route's approver list.
+ *  The exit node holds no CIDR key, per FR-vadv-6. */
+const AUTO_APPROVER_EXIT_NODE_KEY = "the exit node";
+
+/** autoApproverRouteMarkup returns one row of the auto-approvers section for one route,
+ *  per FR-vadv-6: the route's CIDR and its approver list. */
+function autoApproverRouteMarkup(cidr, approvers) {
+  return (
+    `<div class="setentry" data-cidr="${esc(cidr)}">` +
+    `<div class="setentry-head">` +
+    `<span class="field mono setentry-key">${esc(cidr)}</span>` +
+    `<button type="button" class="btn" data-act="remove-route">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">${membersMarkup(cidr, approvers)}</div>` +
+    `</div>`
+  );
+}
+
+/** autoApproverExitNodeMarkup returns the exit node row of the auto-approvers section,
+ *  per FR-vadv-6: the exit node's approver list. */
+function autoApproverExitNodeMarkup(approvers) {
+  return (
+    `<div class="setentry" data-exit-node>` +
+    `<div class="setentry-head"><span class="field mono setentry-key">exit node</span></div>` +
+    `<div class="setentry-value">${membersMarkup(AUTO_APPROVER_EXIT_NODE_KEY, approvers)}</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * autoApproversSectionMarkup returns the auto-approvers section: one row per route
+ * CIDR and one row for the exit node, per FR-vadv-6. The operator adds a route CIDR
+ * with an empty approver list, then adds an approver to it through the row, per
+ * FR-vadv-7.
+ */
+function autoApproversSectionMarkup(sections) {
+  const autoApprovers = (sections && sections.autoApprovers) || {};
+  const routes = autoApprovers.routes || {};
+  const exitNode = autoApprovers.exitNode || [];
+  const routeRows = Object.entries(routes)
+    .map(([cidr, approvers]) => autoApproverRouteMarkup(cidr, approvers))
+    .join("");
+  const addFields = `<input type="text" class="field mono" data-add-cidr placeholder="CIDR" aria-label="New route CIDR">`;
+  return (
+    `<div class="setlist" data-section="autoApprovers">${routeRows}${autoApproverExitNodeMarkup(exitNode)}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-route">Add a route</button></div>` +
+    `</div>`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Node attributes (#323)
+// ---------------------------------------------------------------------------
+
+/** nodeAttrsRowFields returns the comma-joined text of one nodeAttrs entry's target and
+ *  attribute lists, so the row markup and the add form build from one shape. A target of
+ *  "*" joins as the literal character, per FR-vadv-8's edge case. */
+function nodeAttrsRowFields(entry) {
+  return {
+    target: (entry.target || []).join(", "),
+    attr: (entry.attr || []).join(", "),
+  };
+}
+
+/** nodeAttrsEntryWithField returns entry with field replaced by value. */
+export function nodeAttrsEntryWithField(entry, field, value) {
+  return { ...entry, [field]: value };
+}
+
+/**
+ * nodeAttrsEntryMarkup returns one row of the node attributes section: its target list
+ * and its attribute list, per FR-vadv-8.
+ */
+function nodeAttrsEntryMarkup(entry, index) {
+  const fields = nodeAttrsRowFields(entry);
+  return (
+    `<div class="setentry" data-index="${index}">` +
+    `<div class="setentry-head">` +
+    `<input type="text" class="field mono" data-act="nodeattrs-target" value="${esc(fields.target)}" aria-label="Target">` +
+    `<button type="button" class="btn" data-act="nodeattrs-delete">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">` +
+    `<input type="text" class="field mono" data-act="nodeattrs-attr" value="${esc(fields.attr)}" aria-label="Attribute">` +
+    `</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * nodeAttrsSectionMarkup returns the node attributes section: one row per nodeAttrs
+ * entry, per FR-vadv-8 and FR-vadv-9.
+ */
+function nodeAttrsSectionMarkup(sections) {
+  const entries = (sections && sections.nodeAttrs) || [];
+  const rows = entries.map((entry, index) => nodeAttrsEntryMarkup(entry, index)).join("");
+  const empty = entries.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const addFields =
+    `<input type="text" class="field mono" data-add-target placeholder="target" aria-label="New entry target">` +
+    `<input type="text" class="field mono" data-add-attr placeholder="attribute" aria-label="New entry attribute">`;
+  return (
+    `<div class="setlist" data-section="nodeAttrs">${rows}${empty}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-nodeattrs">Add</button></div>` +
+    `</div>`
+  );
+}
+
+/**
+ * bindNodeAttrsList wires the add, edit, and remove controls of the node attributes
+ * section, per FR-vadv-9. Editing the target or the attribute list replaces the whole
+ * field on change, in the manner of bindSSHList's source field.
+ */
+function bindNodeAttrsList(holder, id, sections) {
+  const list = holder.querySelector('.setlist[data-section="nodeAttrs"]');
+  if (!list) {
+    return;
+  }
+  const entries = (sections && sections.nodeAttrs) || [];
+
+  const targetField = list.querySelector("[data-add-target]");
+  const attrField = list.querySelector("[data-add-attr]");
+  const addButton = list.querySelector('.setadd [data-act="add-nodeattrs"]');
+  if (addButton) {
+    addButton.addEventListener("click", () => {
+      const target = membersFromInput(targetField.value);
+      const attr = membersFromInput(attrField.value);
+      if (target.length === 0 || attr.length === 0) {
+        return;
+      }
+      runAction(state.stageListAdd(id, "nodeAttrs", { target, attr }));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry")) {
+    const index = Number(row.getAttribute("data-index"));
+    const entry = entries[index];
+    const replace = (field, value) =>
+      runAction(state.stageRuleReplace(id, "nodeAttrs", index, nodeAttrsEntryWithField(entry, field, value)));
+
+    const del = row.querySelector('[data-act="nodeattrs-delete"]');
+    if (del) {
+      del.addEventListener("click", () => runAction(state.stageRuleRemove(id, "nodeAttrs", index)));
+    }
+
+    const rowTarget = row.querySelector('[data-act="nodeattrs-target"]');
+    if (rowTarget) {
+      rowTarget.addEventListener("change", () => replace("target", membersFromInput(rowTarget.value)));
+    }
+    const rowAttr = row.querySelector('[data-act="nodeattrs-attr"]');
+    if (rowAttr) {
+      rowAttr.addEventListener("change", () => replace("attr", membersFromInput(rowAttr.value)));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Postures (#324)
+// ---------------------------------------------------------------------------
+
+/** postureExpression joins a posture's clause list into the single expression string
+ *  the mockup shows, per FR-vadv-10. */
+function postureExpression(clauses) {
+  return (clauses || []).join(" && ");
+}
+
+/** postureClauses splits an expression string back into its clause list on the "&&"
+ *  separator that postureExpression joins with, dropping every empty clause. */
+function postureClauses(text) {
+  return text
+    .split("&&")
+    .map((clause) => clause.trim())
+    .filter((clause) => clause !== "");
+}
+
+/**
+ * postureEntryMarkup returns one row of the Postures section: its name and its
+ * expression, per FR-vadv-10. readOnly drops the name field and the rename and remove
+ * controls, per FR-vadv-11: the entry stays visible, but this screen does not change it.
+ */
+function postureEntryMarkup(name, clauses, readOnly) {
+  const expression = esc(postureExpression(clauses));
+  if (readOnly) {
+    return (
+      `<div class="setentry" data-key="${esc(name)}">` +
+      `<div class="setentry-head"><span class="name mono">${esc(name)}</span></div>` +
+      `<div class="setentry-value"><span class="expr mono">${expression}</span></div>` +
+      `</div>`
+    );
+  }
+  return (
+    `<div class="setentry" data-key="${esc(name)}">` +
+    `<div class="setentry-head">` +
+    `<input type="text" class="field mono setentry-key" value="${esc(name)}" aria-label="Name">` +
+    `<button type="button" class="btn" data-act="rename-posture">Rename</button>` +
+    `<button type="button" class="btn" data-act="remove-posture">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value">` +
+    `<input type="text" class="field mono" data-act="posture-expr" value="${expression}" aria-label="Expression of ${esc(name)}">` +
+    `<button type="button" class="btn" data-act="save-posture">Save</button>` +
+    `</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * posturesSectionMarkup returns the Postures section: one row per postures entry, per
+ * FR-vadv-10. On a Headscale control server, HEADSCALE_UNSUPPORTED_SECTIONS marks the
+ * entries read-only and states the reason, per FR-vadv-11; unlike an unsupported
+ * named-set section, every entry stays visible.
+ */
+function posturesSectionMarkup(sections, kind) {
+  const entries = namedSetEntries(sections, "postures");
+  const readOnly = kind === "headscale" && HEADSCALE_UNSUPPORTED_SECTIONS.has("postures");
+  const rows = entries.map(([name, clauses]) => postureEntryMarkup(name, clauses, readOnly)).join("");
+  const empty = entries.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const reason = readOnly ? unsupportedSectionMarkup("Postures") : "";
+  const addRegion = readOnly
+    ? ""
+    : `<div class="setadd">` +
+      `<input type="text" class="field mono" data-add-key placeholder="name" aria-label="New posture name">` +
+      `<input type="text" class="field mono" data-add-value placeholder="expression" aria-label="New posture expression">` +
+      `<button type="button" class="btn" data-act="add-posture">Add</button>` +
+      `</div>`;
+  return `<div class="setlist" data-section="postures">${reason}${rows}${empty}${addRegion}</div>`;
+}
+
+/**
+ * bindPosturesList wires the add, rename, remove, and expression controls of the
+ * Postures section, per FR-vadv-10. A read-only render carries none of these controls,
+ * per FR-vadv-11, so it wires nothing.
+ */
+function bindPosturesList(holder, id) {
+  const list = holder.querySelector('.setlist[data-section="postures"]');
+  if (!list) {
+    return;
+  }
+
+  const nameField = list.querySelector("[data-add-key]");
+  const exprField = list.querySelector("[data-add-value]");
+  const addButton = list.querySelector('[data-act="add-posture"]');
+  if (addButton) {
+    addButton.addEventListener("click", () => {
+      const name = nameField.value.trim();
+      const expression = exprField.value.trim();
+      if (!name || expression === "") {
+        return;
+      }
+      runAction(state.addSetEntry(id, "postures", name, postureClauses(expression)));
+    });
+  }
+
+  for (const entry of list.querySelectorAll(".setentry")) {
+    const name = entry.getAttribute("data-key");
+
+    const keyField = entry.querySelector(".setentry-key");
+    const renameButton = entry.querySelector('[data-act="rename-posture"]');
+    if (renameButton && keyField) {
+      renameButton.addEventListener("click", () => {
+        const newName = keyField.value.trim();
+        if (!newName || newName === name) {
+          return;
+        }
+        runAction(state.renameSetEntry(id, "postures", name, newName));
+      });
+    }
+
+    const removeButton = entry.querySelector('[data-act="remove-posture"]');
+    if (removeButton) {
+      removeButton.addEventListener("click", () => runAction(state.removeSetEntry(id, "postures", name)));
+    }
+
+    const exprInput = entry.querySelector('[data-act="posture-expr"]');
+    const saveButton = entry.querySelector('[data-act="save-posture"]');
+    if (saveButton && exprInput) {
+      saveButton.addEventListener("click", () => {
+        runAction(state.replaceSetValue(id, "postures", name, postureClauses(exprInput.value)));
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tests (#325, FR-vadv-12 to FR-vadv-14)
+// ---------------------------------------------------------------------------
+
+/** RUNNING_TESTS_LABEL is the label of the Run action while the control server checks
+ *  the staged document's tests, per FR-vadv-13. */
+export const RUNNING_TESTS_LABEL = "The control server checks the tests";
+
+/** testAssertionRows returns one row per tests entry and one row per sshTests entry of
+ *  sections, per FR-vadv-12. Each row carries the section and the index that a Remove
+ *  click, and a match against a validate answer, needs. */
+function testAssertionRows(sections) {
+  const testsEntries = (sections && sections.tests) || [];
+  const sshEntries = (sections && sections.sshTests) || [];
+  return [
+    ...testsEntries.map((entry, index) => ({ section: "tests", index, entry })),
+    ...sshEntries.map((entry, index) => ({ section: "sshTests", index, entry })),
+  ];
+}
+
+/** testExpectedSummary returns the expected-result text of one tests or one sshTests
+ *  entry, joining its accept, check, and deny lists, per FR-vadv-12. A tests entry
+ *  carries accept and deny alone; an sshTests entry also carries check, per the
+ *  Interfaces section of docs/specs/features/13-visual-policy-advanced.md. */
+function testExpectedSummary(entry) {
+  const parts = [];
+  if (entry.accept && entry.accept.length) {
+    parts.push(`accept ${entry.accept.join(", ")}`);
+  }
+  if (entry.check && entry.check.length) {
+    parts.push(`check ${entry.check.join(", ")}`);
+  }
+  if (entry.deny && entry.deny.length) {
+    parts.push(`deny ${entry.deny.join(", ")}`);
+  }
+  return parts.join("; ");
+}
+
+/**
+ * testAssertionResults reads the assertion results that a validate answer carries, per
+ * FR-vadv-13.
+ *
+ * answer is {passed, result}, the value of POST /api/policy/{id}/validate. On a
+ * failure, the Tailscale control server's validate route answers with
+ * {"message": "...", "data": [{"user": "<src>", "errors": ["..."]}]}, confirmed against
+ * the OpenAPI schema of operationId validateAndTestPolicyFile, retrieved 2026-08-23.
+ * testAssertionResults keys its map on "user", which the row's src field matches.
+ *
+ * The result carries no such shape when a syntax error rejects the whole document, or
+ * when the control server is Headscale, whose check route answers with a plain message
+ * and no per-assertion detail. testAssertionResults then returns noData true, and the
+ * caller shows the message in place of the rows, per the edge case of FR-vadv-12.
+ */
+function testAssertionResults(answer) {
+  if (!answer) {
+    return { ran: false, bySource: new Map() };
+  }
+  if (answer.passed) {
+    return { ran: true, bySource: new Map() };
+  }
+  const trimmed = (answer.result || "").trim();
+  if (trimmed !== "") {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed.data)) {
+        const bySource = new Map();
+        for (const item of parsed.data) {
+          if (item && item.user && Array.isArray(item.errors) && item.errors.length > 0) {
+            bySource.set(item.user, item.errors.join("; "));
+          }
+        }
+        return { ran: true, bySource };
+      }
+    } catch {
+      // Falls through to noData: the result is not the structured shape this section
+      // reads, so the section shows it verbatim instead of guessing a row.
+    }
+  }
+  return { ran: true, noData: true, message: answer.result || "The control server reported no assertion result." };
+}
+
+/** testRowMarkup returns one row of the Tests section: its source, its expected result,
+ *  and, once the operator ran the tests, its actual result as a state dot and a word,
+ *  per FR-vadv-12 and .claude/rules/console-brand.md's rule for a state. */
+function testRowMarkup(row, results) {
+  const src = (row.entry && row.entry.src) || "";
+  let actual = "";
+  if (results.ran) {
+    const failure = results.bySource.get(src);
+    actual = failure
+      ? `<span class="dot crit"></span><span class="mono">${esc(failure)}</span>`
+      : `<span class="dot ok"></span><span>pass</span>`;
+  }
+  return (
+    `<div class="setentry" data-section="${esc(row.section)}" data-index="${row.index}">` +
+    `<div class="setentry-head">` +
+    `<span class="name mono">${esc(src)}</span>` +
+    `<button type="button" class="btn" data-act="test-delete">Remove</button>` +
+    `</div>` +
+    `<div class="setentry-value"><span class="mono">${esc(testExpectedSummary(row.entry))}</span>${actual}</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * testsSectionMarkup returns the Tests section: one row per tests and sshTests entry,
+ * per FR-vadv-12, a Run action that FR-vadv-13 sends to the validate route, and an Add
+ * action for a new tests entry.
+ *
+ * testsRun is {pending, answer}, or null before the operator ran the tests. When the
+ * answer carries no assertion result, this section shows that message in place of the
+ * rows, per FR-vadv-12's edge case, rather than guess which row failed.
+ */
+function testsSectionMarkup(sections, testsRun) {
+  const run = testsRun || { pending: false, answer: null };
+  const results = testAssertionResults(run.answer);
+  const runLabel = run.pending ? RUNNING_TESTS_LABEL : "Run";
+  const runButton = `<button type="button" class="btn sm" data-act="run-tests"${run.pending ? " disabled" : ""}>${esc(runLabel)}</button>`;
+
+  if (results.noData) {
+    return (
+      `<div class="setlist" data-section="tests">${runButton}` +
+      `<div class="unsup"><span class="dot crit"></span><p class="note">${esc(results.message)}</p></div>` +
+      `</div>`
+    );
+  }
+
+  const rows = testAssertionRows(sections);
+  const rowsMarkup = rows.map((row) => testRowMarkup(row, results)).join("");
+  const empty = rows.length === 0 ? `<p class="note">This section holds no entry.</p>` : "";
+  const addFields =
+    `<input type="text" class="field mono" data-add-src placeholder="source" aria-label="New test source">` +
+    `<select class="field mono" data-add-action aria-label="New test expected result">` +
+    `<option value="accept">accept</option><option value="deny">deny</option>` +
+    `</select>` +
+    `<input type="text" class="field mono" data-add-dst placeholder="destination" aria-label="New test destination">`;
+  return (
+    `<div class="setlist" data-section="tests">${runButton}${rowsMarkup}${empty}` +
+    `<div class="setadd">${addFields}<button type="button" class="btn" data-act="add-test">Add</button></div>` +
+    `</div>`
+  );
+}
+
+/**
+ * bindTestsList wires the Run, Add, and Remove controls of the Tests section, per
+ * FR-vadv-13 and the staging flow of FR-vadv-12.
+ */
+function bindTestsList(holder, id) {
+  const list = holder.querySelector('.setlist[data-section="tests"]');
+  if (!list) {
+    return;
+  }
+
+  const runButton = list.querySelector('[data-act="run-tests"]');
+  if (runButton) {
+    runButton.addEventListener("click", () => runAction(state.runTests(id)));
+  }
+
+  const srcField = list.querySelector("[data-add-src]");
+  const actionField = list.querySelector("[data-add-action]");
+  const dstField = list.querySelector("[data-add-dst]");
+  const addButton = list.querySelector('[data-act="add-test"]');
+  if (addButton && srcField && actionField && dstField) {
+    addButton.addEventListener("click", () => {
+      const src = srcField.value.trim();
+      const dst = membersFromInput(dstField.value);
+      if (!src || dst.length === 0) {
+        return;
+      }
+      const entry = actionField.value === "deny" ? { src, deny: dst } : { src, accept: dst };
+      runAction(state.stageListAdd(id, "tests", entry));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry")) {
+    const section = row.getAttribute("data-section");
+    const index = Number(row.getAttribute("data-index"));
+    const del = row.querySelector('[data-act="test-delete"]');
+    if (del) {
+      del.addEventListener("click", () => runAction(state.stageRuleRemove(id, section, index)));
+    }
+  }
 }
 
 /**
@@ -1283,6 +1916,8 @@ export const PUSHING_LABEL = "The control server takes the document";
  * because the push is the affirmative action of this view.
  * A tailnet that takes no write gets every control disabled, and a request that runs
  * disables every control until the answer arrives.
+ * Push also stays disabled while a Headscale document holds a posture, per FR-vadv-11,
+ * because the control server does not support the key that a push would send.
  */
 export function actionsModel(model) {
   if (model.state !== "document") {
@@ -1290,6 +1925,11 @@ export function actionsModel(model) {
   }
   const busy = model.stage === "validating" || model.stage === "pushing";
   const writable = !model.readOnly && !busy;
+  const postures = model.sections && model.sections.postures;
+  const holdsUnsupportedPosture =
+    model.kind === "headscale" &&
+    HEADSCALE_UNSUPPORTED_SECTIONS.has("postures") &&
+    Boolean(postures && Object.keys(postures).length > 0);
   return [
     {
       id: "validate",
@@ -1302,7 +1942,7 @@ export function actionsModel(model) {
       id: "push",
       label: model.stage === "pushing" ? PUSHING_LABEL : "Push",
       accent: true,
-      disabled: model.stage !== "validated",
+      disabled: model.stage !== "validated" || holdsUnsupportedPosture,
     },
   ];
 }
@@ -1465,7 +2105,14 @@ export function editorMarkup(model, toggle = null) {
   const readOnly = model.readOnly ? " readonly" : "";
   const showVisual = toggle && toggle.view === "visual";
   const body = showVisual
-    ? visualMarkup(toggle.sections, toggle.nav, toggle.pendingRemoval, toggle.baseSections, model.kind)
+    ? visualMarkup(
+        toggle.sections,
+        toggle.nav,
+        toggle.pendingRemoval,
+        toggle.baseSections,
+        model.kind,
+        { pending: toggle.testsPending, answer: toggle.testsAnswer },
+      )
     : `<div class="pol-ed">` +
       `<div class="pol-bar"><span class="pol-name mono">${esc(model.id)} &middot; policy.hujson</span>${chip}</div>` +
       `<div class="pol-code">${gutterMarkup(model.lines)}` +
@@ -1523,6 +2170,11 @@ export function createPolicyState(options = {}) {
         // request. See ruleRows.
         view: "text", sections: null, sectionsError: "", sectionsPending: false,
         nav: "", pendingRemoval: null, baseSections: null,
+        // testsPending is true while the Tests section's Run action runs, and
+        // testsAnswer holds its last answer, or null before a run. These fields sit
+        // apart from stage and result, so a failing test never touches the field Push
+        // reads, per FR-vadv-14.
+        testsPending: false, testsAnswer: null,
       };
       entries.set(id, entry);
     }
@@ -1532,12 +2184,14 @@ export function createPolicyState(options = {}) {
   /**
    * rest returns the entry to the stage read, which disables the push. It clears the
    * parse error of the last attempt to open Visual, because that error covers text the
-   * entry no longer holds.
+   * entry no longer holds. It also clears the last Tests answer, because that answer
+   * covers the assertions of the text the entry no longer holds.
    */
   function rest(entry) {
     entry.stage = "read";
     entry.result = "";
     entry.sectionsError = "";
+    entry.testsAnswer = null;
   }
 
   return {
@@ -1856,6 +2510,40 @@ export function createPolicyState(options = {}) {
       await this.loadSections(id);
     },
 
+    /**
+     * stageListAdd adds a new entry to a list-shaped section such as ssh, per
+     * FR-vadv-5. It sends one request, then reads the sections again so the list draws
+     * the new row.
+     */
+    stageListAdd(id, section, entry) {
+      return this.editSection(id, section, "add", { entry });
+    },
+
+    /** addAutoApproverRoute adds one route to the auto-approvers section, keyed by
+     *  cidr, per FR-vadv-6 and FR-vadv-7. */
+    addAutoApproverRoute(id, cidr, approvers) {
+      return this.editSection(id, "autoApprovers.routes", "add", { key: cidr, entry: JSON.stringify(approvers) });
+    },
+
+    /** replaceAutoApproverRoute replaces the approver list of one route, keeping its
+     *  cidr, per FR-vadv-7. */
+    replaceAutoApproverRoute(id, cidr, approvers) {
+      return this.editSection(id, "autoApprovers.routes", "replace", { key: cidr, entry: JSON.stringify(approvers) });
+    },
+
+    /** removeAutoApproverRoute removes one route from the auto-approvers section, per
+     *  FR-vadv-7. */
+    removeAutoApproverRoute(id, cidr) {
+      return this.editSection(id, "autoApprovers.routes", "remove", { key: cidr });
+    },
+
+    /** setAutoApproverExitNode replaces the whole approver list of the exit node, per
+     *  FR-vadv-7. The exit node carries no key, because it is a single field rather
+     *  than a keyed collection. */
+    setAutoApproverExitNode(id, approvers) {
+      return this.editSection(id, "autoApprovers.exitNode", "replace", { entry: JSON.stringify(approvers) });
+    },
+
     /** loadList reads GET /api/policy. */
     async loadList() {
       this.setList(await request(POLICY_ROUTE));
@@ -1915,6 +2603,41 @@ export function createPolicyState(options = {}) {
         }
         entry.stage = "validate-failed";
         entry.result = messageOf(err);
+      }
+    },
+
+    /**
+     * runTests sends the text of the operator to POST /api/policy/{id}/validate and
+     * holds the answer for the Tests section to read, per FR-vadv-13.
+     *
+     * runTests touches no field of entry.stage or entry.result, which the top Validate
+     * action and the Push action read, so a failing test row never disables Push, per
+     * FR-vadv-14. runTests sends one request, and it sends no second request while the
+     * previous one runs.
+     * The operator edits while the request runs, therefore runTests reads the text
+     * again when the answer arrives. A text that changed holds no answer of a document
+     * the entry no longer holds.
+     */
+    async runTests(id) {
+      const entry = entryOf(id);
+      if (entry.testsPending) {
+        return;
+      }
+      const sent = entry.text;
+      entry.testsPending = true;
+      try {
+        const answer = await request(policyValidateRoute(id), "POST", { document: sent });
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.testsAnswer = { passed: Boolean(answer && answer.passed), result: (answer && answer.result) || "" };
+      } catch (err) {
+        if (entry.text !== sent) {
+          return;
+        }
+        entry.testsAnswer = { passed: false, result: messageOf(err) };
+      } finally {
+        entry.testsPending = false;
       }
     },
 
@@ -2255,6 +2978,144 @@ function bindNamedSetList(holder, id) {
 }
 
 /**
+ * bindSSHList wires the add, edit, and remove controls of the SSH access section, per
+ * FR-vadv-5. Editing the source, the destination, or the user list replaces the whole
+ * field on change, in the manner of bindNamedSetList's member field. Editing the check
+ * period validates it first through parseSSHCheckPeriod, and it states the message
+ * inline on a bad value without staging anything, matching bindRuleList's port field.
+ */
+function bindSSHList(holder, id, sections) {
+  const list = holder.querySelector('.setlist[data-section="ssh"]');
+  if (!list) {
+    return;
+  }
+  const entries = (sections && sections.ssh) || [];
+
+  const srcField = list.querySelector("[data-add-src]");
+  const dstField = list.querySelector("[data-add-dst]");
+  const usersField = list.querySelector("[data-add-users]");
+  const actionField = list.querySelector("[data-add-action]");
+  const addButton = list.querySelector('.setadd [data-act="add-ssh"]');
+  if (addButton) {
+    addButton.addEventListener("click", () => {
+      const src = membersFromInput(srcField.value);
+      const dst = membersFromInput(dstField.value);
+      const users = membersFromInput(usersField.value);
+      if (src.length === 0 || dst.length === 0 || users.length === 0) {
+        return;
+      }
+      runAction(state.stageListAdd(id, "ssh", { action: actionField.value, src, dst, users }));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry")) {
+    const index = Number(row.getAttribute("data-index"));
+    const entry = entries[index];
+    const message = row.querySelector(".ns-error");
+    const replace = (field, value) => runAction(state.stageRuleReplace(id, "ssh", index, sshEntryWithField(entry, field, value)));
+
+    const del = row.querySelector('[data-act="ssh-delete"]');
+    if (del) {
+      del.addEventListener("click", () => runAction(state.stageRuleRemove(id, "ssh", index)));
+    }
+
+    const rowSrc = row.querySelector('[data-act="ssh-src"]');
+    if (rowSrc) {
+      rowSrc.addEventListener("change", () => replace("src", membersFromInput(rowSrc.value)));
+    }
+    const rowDst = row.querySelector('[data-act="ssh-dst"]');
+    if (rowDst) {
+      rowDst.addEventListener("change", () => replace("dst", membersFromInput(rowDst.value)));
+    }
+    const rowUsers = row.querySelector('[data-act="ssh-users"]');
+    if (rowUsers) {
+      rowUsers.addEventListener("change", () => replace("users", membersFromInput(rowUsers.value)));
+    }
+    const rowAction = row.querySelector('[data-act="ssh-action"]');
+    if (rowAction) {
+      rowAction.addEventListener("change", () => replace("action", rowAction.value));
+    }
+    const checkPeriodField = row.querySelector('[data-act="ssh-checkperiod"]');
+    if (checkPeriodField) {
+      checkPeriodField.addEventListener("change", () => {
+        const result = parseSSHCheckPeriod(checkPeriodField.value);
+        if (result.error) {
+          if (message) {
+            message.textContent = result.error;
+          }
+          checkPeriodField.setAttribute("aria-invalid", "true");
+          return;
+        }
+        replace("checkPeriod", result.value);
+      });
+    }
+  }
+}
+
+/**
+ * bindAutoApproversList wires the add-route, remove-route, and approver-list controls
+ * of the auto-approvers section, per FR-vadv-6 and FR-vadv-7. Adding or removing one
+ * approver of a route or of the exit node replaces the whole approver list, in the
+ * manner of bindNamedSetList's member field.
+ */
+function bindAutoApproversList(holder, id, sections) {
+  const list = holder.querySelector('.setlist[data-section="autoApprovers"]');
+  if (!list) {
+    return;
+  }
+  const autoApprovers = (sections && sections.autoApprovers) || {};
+  const routes = autoApprovers.routes || {};
+  const exitNode = autoApprovers.exitNode || [];
+
+  const cidrField = list.querySelector("[data-add-cidr]");
+  const addButton = list.querySelector('.setadd [data-act="add-route"]');
+  if (addButton && cidrField) {
+    addButton.addEventListener("click", () => {
+      const cidr = cidrField.value.trim();
+      if (!cidr) {
+        return;
+      }
+      runAction(state.addAutoApproverRoute(id, cidr, []));
+    });
+  }
+
+  for (const row of list.querySelectorAll(".setentry[data-cidr]")) {
+    const cidr = row.getAttribute("data-cidr");
+    const removeButton = row.querySelector('[data-act="remove-route"]');
+    if (removeButton) {
+      removeButton.addEventListener("click", () => runAction(state.removeAutoApproverRoute(id, cidr)));
+    }
+    bindApproverList(row, routes[cidr] || [], (next) => state.replaceAutoApproverRoute(id, cidr, next));
+  }
+
+  const exitRow = list.querySelector(".setentry[data-exit-node]");
+  if (exitRow) {
+    bindApproverList(exitRow, exitNode, (next) => state.setAutoApproverExitNode(id, next));
+  }
+}
+
+/** bindApproverList wires the add-member and remove-member controls of one approver
+ *  list, per FR-vadv-7. current is the approver list of the row that holder draws, and
+ *  replace applies the whole list back to the state after an add or a remove. */
+function bindApproverList(holder, current, replace) {
+  const memberField = holder.querySelector("[data-add-member]");
+  const addMemberButton = holder.querySelector('[data-act="add-member"]');
+  if (addMemberButton && memberField) {
+    addMemberButton.addEventListener("click", () => {
+      const member = memberField.value.trim();
+      if (!member) {
+        return;
+      }
+      runAction(replace([...current, member]));
+    });
+  }
+  for (const removeMemberButton of holder.querySelectorAll('[data-act="remove-member"]')) {
+    const member = removeMemberButton.getAttribute("data-member");
+    removeMemberButton.addEventListener("click", () => runAction(replace(current.filter((one) => one !== member))));
+  }
+}
+
+/**
  * bindMatrix wires the reachability matrix to the state, per FR-vacl-7 to FR-vacl-9.
  *
  * The square is a button, so the pointer and the keyboard both reach it. Hovering or
@@ -2421,6 +3282,11 @@ function draw(section, snapshot) {
       bindActions(editor, selected);
       bindSectionNav(editor, selected);
       bindNamedSetList(editor, selected);
+      bindSSHList(editor, selected, toggle.sections);
+      bindAutoApproversList(editor, selected, toggle.sections);
+      bindNodeAttrsList(editor, selected, toggle.sections);
+      bindPosturesList(editor, selected);
+      bindTestsList(editor, selected);
     }
   }
   grid.append(editor);
