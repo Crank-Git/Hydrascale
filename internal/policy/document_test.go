@@ -233,3 +233,157 @@ func TestReadingASectionDoesNotMutateTheDocument(t *testing.T) {
 		t.Fatalf("Pack after Groups: got %q, want the original text %q", got, text)
 	}
 }
+
+func TestAddingAnEntryKeepsTheCommentOnAnEarlierEntry(t *testing.T) {
+	text := `{
+  "acls": [
+    // admins reach everything
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+  ],
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddEntry("acls", `{"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]}`); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	want := `{
+  "acls": [
+    // admins reach everything
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+    {"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]},
+  ],
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestChangingAnEntryKeepsEveryOtherEntryByteForByte(t *testing.T) {
+	text := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+    {"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]},
+    {"action": "accept", "src": ["group:ops"], "dst": ["10.0.1.0/8:22"]},
+    {"action": "accept", "src": ["group:sre"], "dst": ["10.0.2.0/8:22"]},
+  ],
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceEntry("acls", 1, `{"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:2222"]}`); err != nil {
+		t.Fatalf("ReplaceEntry: %v", err)
+	}
+	want := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+    {"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:2222"]},
+    {"action": "accept", "src": ["group:ops"], "dst": ["10.0.1.0/8:22"]},
+    {"action": "accept", "src": ["group:sre"], "dst": ["10.0.2.0/8:22"]},
+  ],
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestRemovingTheLastEntryKeepsAnEmptySectionKey(t *testing.T) {
+	text := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+  ],
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.RemoveEntry("acls", 0); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+	want := `{
+  "acls": [
+  ],
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestAddingTheFirstEntryCreatesTheSectionKey(t *testing.T) {
+	text := "{\n}\n"
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddEntry("acls", `{"action": "accept", "src": ["group:admins"], "dst": ["*:*"]}`); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	want := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+  ],
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestEditingADocumentWithNoCommentsMatchesNeighbourIndentation(t *testing.T) {
+	text := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+    {"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]}
+  ]
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.AddEntry("acls", `{"action": "accept", "src": ["group:ops"], "dst": ["10.0.1.0/8:22"]}`); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	want := `{
+  "acls": [
+    {"action": "accept", "src": ["group:admins"], "dst": ["*:*"]},
+    {"action": "accept", "src": ["group:eng"], "dst": ["10.0.0.0/8:22"]},
+    {"action": "accept", "src": ["group:ops"], "dst": ["10.0.1.0/8:22"]}
+  ]
+}
+`
+	if got := string(doc.root.Pack()); got != want {
+		t.Fatalf("Pack: got %q, want %q", got, want)
+	}
+}
+
+func TestAddingAnEntryToAMissingSectionReturnsAnError(t *testing.T) {
+	doc, err := Parse("{}")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceEntry("acls", 0, `{"action": "accept"}`); err == nil {
+		t.Fatal("ReplaceEntry: got no error for a document with no acls section")
+	}
+	if err := doc.RemoveEntry("acls", 0); err == nil {
+		t.Fatal("RemoveEntry: got no error for a document with no acls section")
+	}
+}
+
+func TestReplacingAnEntryOutOfRangeReturnsAnError(t *testing.T) {
+	doc, err := Parse(`{"acls": [{"action": "accept"}]}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := doc.ReplaceEntry("acls", 1, `{"action": "accept"}`); err == nil {
+		t.Fatal("ReplaceEntry: got no error for an out-of-range index")
+	}
+}
