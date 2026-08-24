@@ -2083,10 +2083,10 @@ test("replaceSetValue replaces the member list of a Tag owners entry", async () 
   });
 });
 
-// The tests below read the entry field off the wire rather than out of the body object.
-// A test that asserts the body object alone passes while the field carries a string that
-// holds array text, which is the defect of issue #348. internal/api/policy.go reads Entry
-// as json.RawMessage, so the bytes are what decides whether the edit succeeds.
+// The tests below read the entry field from the wire format rather than from the body
+// object. A test that asserts the body object alone passes while the field holds array
+// text as a JSON string. Issue #348 is that defect. internal/api/policy.go reads Entry as
+// json.RawMessage, so the bytes decide whether the edit succeeds.
 
 // wireEntry returns the entry field as the daemon reads it. consoleRequestInit is the one
 // serializer of every console request, therefore a body that passes through it here
