@@ -171,6 +171,12 @@ type PolicySectionsResponse struct {
 // (`groups`, `hosts`, `tagOwners`, `ipsets`) addresses its entry by Key, which every op
 // requires; "rename" also requires NewKey and carries no Entry. Entry is required for
 // "add" and "replace", and it is omitted for "remove" and "rename".
+//
+// The section "autoApprovers.routes" addresses one route by Key, the route's CIDR, and
+// it takes "add", "replace", or "remove"; it takes no "rename". The section
+// "autoApprovers.exitNode" carries no Key: "replace" alone replaces the whole approver
+// list, and an empty Entry list clears it. Neither section is a top-level key of the
+// document, per docs/specs/features/13-visual-policy-advanced.md's Interfaces section.
 type PolicySectionsEditRequest struct {
 	Document string          `json:"document"`
 	Section  string          `json:"section"`

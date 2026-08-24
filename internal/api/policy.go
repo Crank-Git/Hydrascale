@@ -256,6 +256,17 @@ var mapSectionNames = map[string]bool{
 	"ipsets":    true,
 }
 
+// The two addressing schemes that POST /api/policy/{id}/sections/edit gives the
+// autoApprovers object, which holds no flat array or flat map at the top level, per
+// docs/specs/features/13-visual-policy-advanced.md's Interfaces section.
+// autoApproverRoutesSection addresses one route by Key, the route's CIDR, with the
+// approver list as Entry. autoApproverExitNodeSection carries no Key: op "replace"
+// alone replaces the whole approver list of the exit node, and an empty list clears it.
+const (
+	autoApproverRoutesSection   = "autoApprovers.routes"
+	autoApproverExitNodeSection = "autoApprovers.exitNode"
+)
+
 // sectionNames lists every top-level key that features/11-policy-document-model.md
 // FR-model-2 resolves into a named section. A key outside this list is opaque, per
 // FR-vacl-18.
@@ -437,7 +448,28 @@ func (s *Server) handlePolicySectionsEdit(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if mapSectionNames[req.Section] {
+	switch {
+	case req.Section == autoApproverRoutesSection:
+		switch req.Op {
+		case sectionOpAdd:
+			var approvers []string
+			if err = json.Unmarshal(req.Entry, &approvers); err == nil {
+				err = doc.AddAutoApproverRoute(req.Key, approvers)
+			}
+		case sectionOpReplace:
+			var approvers []string
+			if err = json.Unmarshal(req.Entry, &approvers); err == nil {
+				err = doc.ReplaceAutoApproverRoute(req.Key, approvers)
+			}
+		case sectionOpRemove:
+			err = doc.RemoveAutoApproverRoute(req.Key)
+		}
+	case req.Section == autoApproverExitNodeSection:
+		var approvers []string
+		if err = json.Unmarshal(req.Entry, &approvers); err == nil {
+			err = doc.SetAutoApproverExitNode(approvers)
+		}
+	case mapSectionNames[req.Section]:
 		switch req.Op {
 		case sectionOpAdd:
 			err = doc.AddMapEntry(req.Section, req.Key, string(req.Entry))
@@ -448,7 +480,7 @@ func (s *Server) handlePolicySectionsEdit(w http.ResponseWriter, r *http.Request
 		case sectionOpRename:
 			err = doc.RenameMapEntry(req.Section, req.Key, req.NewKey)
 		}
-	} else {
+	default:
 		switch req.Op {
 		case sectionOpAdd:
 			err = doc.AddEntry(req.Section, string(req.Entry))
@@ -475,6 +507,12 @@ func (req PolicySectionsEditRequest) validate() error {
 	}
 	if req.Section == "" {
 		return errors.New("section is required")
+	}
+	if req.Section == autoApproverRoutesSection {
+		return req.validateAutoApproverRoutesOp()
+	}
+	if req.Section == autoApproverExitNodeSection {
+		return req.validateAutoApproverExitNodeOp()
 	}
 	if mapSectionNames[req.Section] {
 		return req.validateMapOp()
@@ -532,6 +570,47 @@ func (req PolicySectionsEditRequest) validateMapOp() error {
 		}
 	default:
 		return fmt.Errorf("op %q is not one of \"add\", \"replace\", \"remove\", \"rename\"", req.Op)
+	}
+	return nil
+}
+
+// validateAutoApproverRoutesOp checks the request body for the section
+// autoApproverRoutesSection, which addresses one route by Key, the route's CIDR.
+func (req PolicySectionsEditRequest) validateAutoApproverRoutesOp() error {
+	switch req.Op {
+	case sectionOpAdd:
+		if req.Key == "" {
+			return errors.New("key is required for op \"add\"")
+		}
+		if len(req.Entry) == 0 {
+			return errors.New("entry is required for op \"add\"")
+		}
+	case sectionOpReplace:
+		if req.Key == "" {
+			return errors.New("key is required for op \"replace\"")
+		}
+		if len(req.Entry) == 0 {
+			return errors.New("entry is required for op \"replace\"")
+		}
+	case sectionOpRemove:
+		if req.Key == "" {
+			return errors.New("key is required for op \"remove\"")
+		}
+	default:
+		return fmt.Errorf("op %q is not one of \"add\", \"replace\", \"remove\"", req.Op)
+	}
+	return nil
+}
+
+// validateAutoApproverExitNodeOp checks the request body for the section
+// autoApproverExitNodeSection. The exit node is a single field, not a keyed collection,
+// so op "replace" is the only op this section accepts, and it carries no Key.
+func (req PolicySectionsEditRequest) validateAutoApproverExitNodeOp() error {
+	if req.Op != sectionOpReplace {
+		return fmt.Errorf("op %q is not \"replace\" for section %q", req.Op, autoApproverExitNodeSection)
+	}
+	if len(req.Entry) == 0 {
+		return errors.New("entry is required for op \"replace\"")
 	}
 	return nil
 }
