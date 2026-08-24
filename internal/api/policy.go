@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/policy"
@@ -233,6 +234,247 @@ func (s *Server) handlePolicyCredentials(w http.ResponseWriter, r *http.Request)
 	// result. See issue #276.
 	s.recordCredentialResult(target.id, nil)
 	writeJSON(w, policyRow(target.id, target.kind, cred, ""))
+}
+
+// The three edit operations that POST /api/policy/{id}/sections/edit accepts.
+const (
+	sectionOpAdd     = "add"
+	sectionOpReplace = "replace"
+	sectionOpRemove  = "remove"
+)
+
+// sectionNames lists every top-level key that features/11-policy-document-model.md
+// FR-model-2 resolves into a named section. A key outside this list is opaque, per
+// FR-vacl-18.
+var sectionNames = []string{
+	"groups", "hosts", "tagOwners", "ipsets", "acls", "grants",
+	"ssh", "autoApprovers", "nodeAttrs", "postures", "tests", "sshTests",
+}
+
+// handlePolicySections serves POST /api/policy/{id}/sections.
+// The route parses the request body's document field through the document model and
+// returns every named section as JSON, per features/12-visual-acl-editor.md's
+// Interfaces section. It reaches no control server and it changes nothing.
+func (s *Server) handlePolicySections(w http.ResponseWriter, r *http.Request) {
+	if err := validateTailnetID(r.PathValue("id")); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+	var req PolicySectionsRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Document == "" {
+		writeRefusal(w, "document is required")
+		return
+	}
+
+	doc, err := policy.Parse(req.Document)
+	if err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+	response, err := policySections(doc)
+	if err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+	writeJSON(w, response)
+}
+
+// policySections reads every named section of doc, plus the list of opaque top-level
+// keys. Groups, ACLs, SSH, and AutoApprovers use the typed accessors of #310; a section
+// FR-model-2 names with no typed accessor yet is read from the raw top-level key, so
+// that the response holds every section the plan promises to the sibling issues.
+func policySections(doc *policy.Document) (PolicySectionsResponse, error) {
+	groups, err := doc.Groups()
+	if err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	acls, err := doc.ACLs()
+	if err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	ssh, err := doc.SSH()
+	if err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	autoApprovers, err := doc.AutoApprovers()
+	if err != nil {
+		return PolicySectionsResponse{}, err
+	}
+
+	raw, err := doc.RawSections()
+	if err != nil {
+		return PolicySectionsResponse{}, err
+	}
+
+	response := PolicySectionsResponse{
+		Groups:        emptyIfNil(groups),
+		Hosts:         map[string]string{},
+		TagOwners:     map[string][]string{},
+		IPSets:        map[string][]string{},
+		ACLs:          emptyIfNilACLs(acls),
+		Grants:        []json.RawMessage{},
+		SSH:           emptyIfNilSSH(ssh),
+		AutoApprovers: autoApprovers,
+		NodeAttrs:     []json.RawMessage{},
+		Postures:      map[string][]string{},
+		Tests:         []json.RawMessage{},
+		SSHTests:      []json.RawMessage{},
+	}
+	if err := unmarshalSection(raw, "hosts", &response.Hosts); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	if err := unmarshalSection(raw, "tagOwners", &response.TagOwners); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	if err := unmarshalSection(raw, "ipsets", &response.IPSets); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	if err := unmarshalSection(raw, "grants", &response.Grants); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	if err := unmarshalSection(raw, "nodeAttrs", &response.NodeAttrs); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	if err := unmarshalSection(raw, "postures", &response.Postures); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	if err := unmarshalSection(raw, "tests", &response.Tests); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+	if err := unmarshalSection(raw, "sshTests", &response.SSHTests); err != nil {
+		return PolicySectionsResponse{}, err
+	}
+
+	known := make(map[string]bool, len(sectionNames))
+	for _, name := range sectionNames {
+		known[name] = true
+	}
+	opaque := make([]string, 0, len(raw))
+	for key := range raw {
+		if !known[key] {
+			opaque = append(opaque, key)
+		}
+	}
+	sort.Strings(opaque)
+	response.OpaqueKeys = opaque
+
+	return response, nil
+}
+
+// unmarshalSection decodes raw[name] into dst when the document holds that key. dst
+// keeps its zero value, an empty map or an empty list, when the document holds no such
+// key, per FR-model-6.
+func unmarshalSection(raw map[string]json.RawMessage, name string, dst interface{}) error {
+	value, ok := raw[name]
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(value, dst); err != nil {
+		return fmt.Errorf("policy: section %q: %w", name, err)
+	}
+	return nil
+}
+
+func emptyIfNil(groups map[string][]string) map[string][]string {
+	if groups == nil {
+		return map[string][]string{}
+	}
+	return groups
+}
+
+func emptyIfNilACLs(acls []policy.ACLRule) []policy.ACLRule {
+	if acls == nil {
+		return []policy.ACLRule{}
+	}
+	return acls
+}
+
+func emptyIfNilSSH(rules []policy.SSHRule) []policy.SSHRule {
+	if rules == nil {
+		return []policy.SSHRule{}
+	}
+	return rules
+}
+
+// handlePolicySectionsEdit serves POST /api/policy/{id}/sections/edit.
+// The route validates the whole request body before it changes anything, per this
+// project's validation convention. It then parses the document, applies the one edit
+// through the matching method of #311, and serializes the result with #312's Bytes.
+// It reaches no control server; the operator's later Push writes the result.
+func (s *Server) handlePolicySectionsEdit(w http.ResponseWriter, r *http.Request) {
+	if err := validateTailnetID(r.PathValue("id")); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+	var req PolicySectionsEditRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if err := req.validate(); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
+	doc, err := policy.Parse(req.Document)
+	if err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
+	switch req.Op {
+	case sectionOpAdd:
+		if err := doc.AddEntry(req.Section, string(req.Entry)); err != nil {
+			writeRefusal(w, err.Error())
+			return
+		}
+	case sectionOpReplace:
+		if err := doc.ReplaceEntry(req.Section, *req.Index, string(req.Entry)); err != nil {
+			writeRefusal(w, err.Error())
+			return
+		}
+	case sectionOpRemove:
+		if err := doc.RemoveEntry(req.Section, *req.Index); err != nil {
+			writeRefusal(w, err.Error())
+			return
+		}
+	}
+
+	writeJSON(w, PolicySectionsEditResponse{Document: string(doc.Bytes())})
+}
+
+// validate returns an error when the request body of POST /api/policy/{id}/sections/edit
+// holds a bad value. It runs before the route changes anything, matching this project's
+// validation convention.
+func (req PolicySectionsEditRequest) validate() error {
+	if req.Document == "" {
+		return errors.New("document is required")
+	}
+	if req.Section == "" {
+		return errors.New("section is required")
+	}
+	switch req.Op {
+	case sectionOpAdd:
+		if len(req.Entry) == 0 {
+			return errors.New("entry is required for op \"add\"")
+		}
+	case sectionOpReplace:
+		if req.Index == nil {
+			return errors.New("index is required for op \"replace\"")
+		}
+		if len(req.Entry) == 0 {
+			return errors.New("entry is required for op \"replace\"")
+		}
+	case sectionOpRemove:
+		if req.Index == nil {
+			return errors.New("index is required for op \"remove\"")
+		}
+	default:
+		return fmt.Errorf("op %q is not one of \"add\", \"replace\", \"remove\"", req.Op)
+	}
+	return nil
 }
 
 // validate returns the result of the validate route of the control server.

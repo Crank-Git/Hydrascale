@@ -123,18 +123,29 @@ func (d *Document) AutoApprovers() (AutoApprovers, error) {
 	return approvers, nil
 }
 
-// sectionRaw returns the raw JSON of the top-level key name, and whether the
-// document holds that key.
-// sectionRaw reads a clone of d.root, so it never mutates d.root: Minimize
-// strips every comment and trailing comma from the value it runs on, and
-// running it on d.root would corrupt the byte-preservation guarantee that a
-// later serialize depends on.
-func sectionRaw(d *Document, name string) (json.RawMessage, bool, error) {
+// RawSections returns the JSON of every top-level key that the document holds, keyed by
+// name. A caller that reads a section FR-model-2 does not name a typed accessor for
+// (`internal/api` reads `hosts`, `tagOwners`, `ipsets`, `grants`, `nodeAttrs`,
+// `postures`, `tests`, and `sshTests` this way) unmarshals the raw value itself.
+// RawSections reads a clone of d.root, so it never mutates d.root: Minimize strips
+// every comment and trailing comma from the value it runs on, and running it on d.root
+// would corrupt the byte-preservation guarantee that a later serialize depends on.
+func (d *Document) RawSections() (map[string]json.RawMessage, error) {
 	clone := d.root.Clone()
 	clone.Minimize()
 	var sections map[string]json.RawMessage
 	if err := json.Unmarshal(clone.Pack(), &sections); err != nil {
-		return nil, false, fmt.Errorf("policy: reading the document: %w", err)
+		return nil, fmt.Errorf("policy: reading the document: %w", err)
+	}
+	return sections, nil
+}
+
+// sectionRaw returns the raw JSON of the top-level key name, and whether the
+// document holds that key.
+func sectionRaw(d *Document, name string) (json.RawMessage, bool, error) {
+	sections, err := d.RawSections()
+	if err != nil {
+		return nil, false, err
 	}
 	raw, ok := sections[name]
 	return raw, ok, nil

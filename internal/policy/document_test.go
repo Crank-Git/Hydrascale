@@ -78,6 +78,53 @@ func TestASectionAbsentFromTheDocumentReturnsAnEmptyList(t *testing.T) {
 	}
 }
 
+func TestRawSectionsReturnsTheJSONOfEveryTopLevelKey(t *testing.T) {
+	text := `{
+  "groups": {"group:admins": ["alice@example.com"]},
+  "hosts": {"server": "100.64.0.1"},
+  "randomizeClientPort": true,
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	sections, err := doc.RawSections()
+	if err != nil {
+		t.Fatalf("RawSections: %v", err)
+	}
+	if _, ok := sections["groups"]; !ok {
+		t.Fatalf("RawSections: got %v, want a key named groups", sections)
+	}
+	if _, ok := sections["hosts"]; !ok {
+		t.Fatalf("RawSections: got %v, want a key named hosts", sections)
+	}
+	if _, ok := sections["randomizeClientPort"]; !ok {
+		t.Fatalf("RawSections: got %v, want a key named randomizeClientPort", sections)
+	}
+	if _, ok := sections["acls"]; ok {
+		t.Fatalf("RawSections: got %v, want no key named acls, which the document does not hold", sections)
+	}
+}
+
+func TestRawSectionsDoesNotMutateTheDocument(t *testing.T) {
+	text := `{
+  // a comment RawSections must keep
+  "groups": {"group:admins": ["alice@example.com"]},
+}
+`
+	doc, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := doc.RawSections(); err != nil {
+		t.Fatalf("RawSections: %v", err)
+	}
+	if got := string(doc.Bytes()); got != text {
+		t.Fatalf("Bytes after RawSections: got %q, want the original text %q", got, text)
+	}
+}
+
 func TestGroupsReturnsEveryMember(t *testing.T) {
 	text := `{
   "groups": {

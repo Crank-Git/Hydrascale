@@ -700,6 +700,48 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-doc[readonly]{color:var(--text-secondary)}
 .pol-meta{display:flex; gap:var(--sp-2); margin-top:var(--sp-3); flex-wrap:wrap}
 
+/* The Visual/Text toggle, FR-vacl-1. The selected control takes a neutral surface, not
+   the accent: the push action already holds the one accent use of this view. */
+.seg{
+  display:inline-flex;
+  border:1px solid var(--border-default);
+  border-radius:var(--r-pill);
+  padding:2px;
+  background:var(--surface-raised);
+  margin-bottom:var(--sp-3);
+}
+.seg button{
+  font:inherit;
+  font-size:var(--fs-sm);
+  font-weight:500;
+  padding:var(--sp-2) var(--sp-4);
+  border-radius:var(--r-pill);
+  border:none;
+  background:transparent;
+  color:var(--text-secondary);
+  cursor:pointer;
+}
+.seg button[aria-selected="true"]{background:var(--surface-inset); color:var(--text-body)}
+.seg button:disabled{color:var(--text-tertiary); cursor:not-allowed}
+.seg button:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.pol-parse-error{color:var(--crit)}
+
+/* The visual editor's section counts. #315 to #317 replace this with the matrix, the
+   rule list, and the named-set editors; this issue proves the toggle re-parses and
+   re-renders on every switch. */
+.pol-visual{margin-top:var(--sp-3)}
+.pol-visual .setrow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--sp-3);
+  padding:var(--pad-row);
+  border-radius:var(--r);
+  background:var(--surface-inset);
+}
+.pol-visual .setrow + .setrow{margin-top:var(--sp-2)}
+.pol-visual .name{color:var(--text-secondary)}
+
 /* The two sentences of the push come before the controls, because a warning comes before
    the step that it applies to. */
 .pol-acts{
