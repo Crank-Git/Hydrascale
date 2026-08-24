@@ -45,8 +45,12 @@ jobs:
         # A later image that drops node fails this step rather than skipping those tests,
         # because GitHub Actions sets CI. See issue 181. The console has no build step and
         # internal/ui/package.json names no dependency, so the workflow installs nothing.
+        #
+        # The image provides python3 as well, and TestTheSpecificationRendererTestsPass in
+        # docs/specs runs the tests of the specification renderer with it. See issue 392.
         run: |
           node --version
+          python3 --version
           go test -race -v ./...
 
       - name: Vulnerability check
