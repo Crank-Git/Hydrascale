@@ -58,8 +58,8 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("%s failed with HTTP %d: %s", e.Operation, e.StatusCode, e.Message)
 }
 
-// Document is one policy document and the ETag value that the control server returned.
-type Document struct {
+// TextDocument is one policy document and the ETag value that the control server returned.
+type TextDocument struct {
 	Text string
 	ETag string
 }
@@ -110,18 +110,18 @@ func NewTailscaleClient(baseURL, tailnet string, credential func() (secrets.Tail
 // ReadPolicy returns ErrNoCredential when the tailnet holds no credential, and it then
 // sends no request. It returns an *APIError when the control server rejects the request.
 // See FR-policy-9 and FR-policy-12.
-func (c *TailscaleClient) ReadPolicy(ctx context.Context) (Document, error) {
+func (c *TailscaleClient) ReadPolicy(ctx context.Context) (TextDocument, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, "/tailnet/"+url.PathEscape(c.tailnet)+"/acl", "")
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
 	req.Header.Set("Accept", hujsonContentType)
 
 	body, header, err := c.send(req, "the policy read")
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
-	return Document{Text: body, ETag: header.Get("ETag")}, nil
+	return TextDocument{Text: body, ETag: header.Get("ETag")}, nil
 }
 
 // WritePolicy writes document to the control server and returns the document that the
@@ -129,10 +129,10 @@ func (c *TailscaleClient) ReadPolicy(ctx context.Context) (Document, error) {
 // etag carries the ETag value from the read, and the client sends it as the If-Match
 // header. An empty etag sends no If-Match header. A mismatch returns an error that wraps
 // ErrPolicyConflict. See FR-policy-16 and FR-policy-17.
-func (c *TailscaleClient) WritePolicy(ctx context.Context, document, etag string) (Document, error) {
+func (c *TailscaleClient) WritePolicy(ctx context.Context, document, etag string) (TextDocument, error) {
 	req, err := c.newRequest(ctx, http.MethodPost, "/tailnet/"+url.PathEscape(c.tailnet)+"/acl", document)
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
 	req.Header.Set("Content-Type", hujsonContentType)
 	req.Header.Set("Accept", hujsonContentType)
@@ -143,12 +143,12 @@ func (c *TailscaleClient) WritePolicy(ctx context.Context, document, etag string
 	body, header, err := c.send(req, "the policy write")
 	var apiErr *APIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusPreconditionFailed {
-		return Document{}, fmt.Errorf("%w: %s", ErrPolicyConflict, apiErr.Message)
+		return TextDocument{}, fmt.Errorf("%w: %s", ErrPolicyConflict, apiErr.Message)
 	}
 	if err != nil {
-		return Document{}, err
+		return TextDocument{}, err
 	}
-	return Document{Text: body, ETag: header.Get("ETag")}, nil
+	return TextDocument{Text: body, ETag: header.Get("ETag")}, nil
 }
 
 // ValidatePolicy sends document to the validate endpoint and returns the result.
