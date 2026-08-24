@@ -67,10 +67,21 @@ type TextDocument struct {
 // ValidateResult is the answer of the validate endpoint.
 // Passed is true when the control server accepted the document. Body holds the response
 // verbatim, because the console shows each error with its line number. See FR-policy-26.
+// TestsFailed is true when an assertion of the tests section failed, and false when the
+// control server refused the document itself. The console states a different reason for
+// each, per FR-vadv-16.
 type ValidateResult struct {
-	Passed bool
-	Body   string
+	Passed      bool
+	Body        string
+	TestsFailed bool
 }
+
+// testsFailedMessage is the message that the validate endpoint states when an assertion
+// of the tests section or of the sshTests section fails. The OpenAPI schema of
+// operationId validateAndTestPolicyFile names this value and the value
+// "warning(s) found", retrieved 2026-08-24. A message outside this set reaches the
+// console as a document error, which states the answer of the control server verbatim.
+const testsFailedMessage = "test(s) failed"
 
 // TailscaleClient reads, validates, and writes the policy of one Tailscale tailnet.
 //
@@ -178,7 +189,14 @@ func (c *TailscaleClient) ValidatePolicy(ctx context.Context, document string) (
 	if err := json.Unmarshal([]byte(trimmed), &answer); err != nil {
 		return ValidateResult{Passed: false, Body: body}, nil
 	}
-	return ValidateResult{Passed: answer.Message == "", Body: body}, nil
+	// A non-2xx status reaches send, which returns an error, therefore this point holds
+	// status 200 alone. The control server states a failed assertion at status 200, and it
+	// refuses a malformed document with status 400.
+	return ValidateResult{
+		Passed:      answer.Message == "",
+		Body:        body,
+		TestsFailed: strings.TrimSpace(answer.Message) == testsFailedMessage,
+	}, nil
 }
 
 // newRequest returns a request to path with the access token as the bearer token.

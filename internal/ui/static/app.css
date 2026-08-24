@@ -564,6 +564,12 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
    square carries the 6 pixel radius token, because a grid must read as a grid.
    FR-editor-7 to FR-editor-15. */
 .ac-matrix{margin-top:var(--sp-3)}
+/* The policy editor wraps its matrix in .ac-mtx-wrap. The square holds a fixed size and the
+   table never stretches to fill its card, therefore a document that names many identities
+   makes the table wider than the card. The wrapper carries the scroll, so the matrix stays
+   inside its own card. The local access editor needs no wrapper, because it draws the
+   tailnets of the host and it shrinks the square on a dense host. Issue #387. */
+.ac-mtx-wrap{overflow-x:auto}
 .ac-mtx{--ac-square:34px; border-collapse:separate; border-spacing:4px; margin-top:var(--sp-3)}
 .ac-mtx th{
   font-family:var(--font-data);

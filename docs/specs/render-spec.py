@@ -159,7 +159,18 @@ def split_front_matter(text):
 
 def inline(text):
     text = html.escape(text, quote=False)
-    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+    # A code span is literal text. Each rendered span moves into spans, and a marker
+    # takes its place. The marker holds no markdown character, so the substitutions
+    # below read no asterisk and no bracket of a code span. Without the marker they
+    # pair an asterisk of one span with an asterisk of the next span. See issue #383.
+    # split_cells tracks in_code for the same reason.
+    spans = []
+
+    def hold(match):
+        spans.append("<code>%s</code>" % match.group(1))
+        return "\x00%d\x00" % (len(spans) - 1)
+
+    text = re.sub(r"`([^`]+)`", hold, text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"(?<!\*)\*([^*\s][^*]*)\*(?!\*)", r"<em>\1</em>", text)
     text = re.sub(
@@ -167,7 +178,7 @@ def inline(text):
         lambda m: '<a href="%s">%s</a>' % (html.escape(m.group(2), quote=True), m.group(1)),
         text,
     )
-    return text
+    return re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], text)
 
 
 def split_cells(row):

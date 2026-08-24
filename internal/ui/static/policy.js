@@ -345,11 +345,13 @@ export function readFailure(message) {
  * null. The state field names one of unselected, no-credential, loading, document,
  * read-only, and failed. Each one reads a value that the daemon reported.
  * The stage field names the stage of the two actions, and the result field holds the
- * answer of the last action word for word.
+ * answer of the last action word for word. The testsFailed field is true when an
+ * assertion of the document failed. The result region states that reason apart from a
+ * document error, per FR-vadv-16.
  */
 export function editorModel(state, id) {
   if (!id) {
-    return { id: "", state: "unselected", stage: "read", result: "", lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
+    return { id: "", state: "unselected", stage: "read", result: "", testsFailed: false, lines: 0, text: "", edited: false, readOnly: true, etag: "", detail: "", sentence: "" };
   }
 
   const row = state.rows().find((entry) => entry.id === id);
@@ -360,6 +362,7 @@ export function editorModel(state, id) {
     state: "loading",
     stage: held.stage,
     result: held.result,
+    testsFailed: held.testsFailed,
     lines: 0,
     text: held.text,
     edited: held.text !== held.base,
@@ -1197,7 +1200,7 @@ function bindPosturesList(holder, id) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests (#325, FR-vadv-12 to FR-vadv-14)
+// Tests (#325, FR-vadv-12 to FR-vadv-17)
 // ---------------------------------------------------------------------------
 
 /** RUNNING_TESTS_LABEL is the label of the Run action while the control server checks
@@ -1430,6 +1433,23 @@ function reachabilityPairs(sections) {
 }
 
 /**
+ * MATRIX_IDENTITY_SECTIONS lists the named-set section whose key names an identity that
+ * the matrix places on an axis, per FR-vacl-7 and the operator's decision of 2026-08-24.
+ *
+ * A groups key, a tagOwners key, and a hosts key each name the identity in the exact form
+ * that a rule's src field and dst field carry. The key alone therefore gives the axis
+ * label. The ipsets section is absent, because a rule names an IP set as `ipset:<name>`.
+ * This repository writes an ipsets key both with and without that prefix. A Headscale
+ * control server also supports no ipsets section, per FR-vacl-19.
+ */
+const MATRIX_IDENTITY_SECTIONS = ["groups", "tagOwners", "hosts"];
+
+/** namedIdentities returns every identity that a named-set section of sections defines. */
+function namedIdentities(sections) {
+  return MATRIX_IDENTITY_SECTIONS.flatMap((key) => Object.keys((sections && sections[key]) || {}));
+}
+
+/**
  * selfReference tells whether one square of the matrix names one identity on both axes.
  *
  * The wildcard * matches every identity, so a * row and a * column name the path from
@@ -1464,14 +1484,18 @@ function matrixSquare(from, to, allowed) {
 /**
  * matrixModel returns the grid of squares of the reachability matrix, per FR-vacl-7.
  *
- * sections is the answer of POST .../sections. The matrix places every tag, group, and
- * autogroup that an acls entry or a grants entry references on both axes, sorted so the
- * grid draws the same order on every call. matrixModel carries no port, because the
+ * sections is the answer of POST .../sections. The matrix places two kinds of identity on
+ * both axes, and it sorts them so the grid draws the same order on every call. The first
+ * kind is every tag, group, and autogroup that an acls entry or a grants entry
+ * references. The second kind is every tag, group, and host alias that a named-set
+ * section defines. The second kind answers issue #351. A rule is the only way to reach a
+ * square, so an identity that no rule references yet needs a row. The row gives the
+ * operator the square that grants the first path. matrixModel carries no port, because the
  * ports live in the rule list that features/12-visual-acl-editor.md's issue #317 builds.
  */
 export function matrixModel(sections) {
   const pairs = reachabilityPairs(sections);
-  const nodeSet = new Set();
+  const nodeSet = new Set(namedIdentities(sections));
   for (const pair of pairs) {
     nodeSet.add(pair.src);
     nodeSet.add(pair.dst);
@@ -1534,7 +1558,8 @@ export function matrixClickPlan(sections, from, to) {
  * model is the value that matrixModel returned. The square is a button, so it reaches
  * focus by keyboard, and an inert square carries the disabled attribute per FR-vacl-7. The
  * console binds the click, the hover, the focus, and the blur handlers after it sets
- * this markup, because a handler that a string carries never runs.
+ * this markup, because a handler that a string carries never runs. The wrapper `.ac-mtx-wrap`
+ * carries the horizontal scroll, so a wide matrix stays inside its own card.
  */
 export function matrixMarkup(model) {
   const columns = model.nodes.map((node) => `<th class="col" scope="col">${esc(node)}</th>`).join("");
@@ -1555,7 +1580,7 @@ export function matrixMarkup(model) {
     `<div class="card ac-matrix">` +
     `<span class="label">Reachability</span>` +
     `<p class="note">A filled square means that an acls entry or a grants entry allows the path. The ports live in the rule list.</p>` +
-    `<table class="ac-mtx"><thead><tr><th></th>${columns}</tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class="ac-mtx-wrap"><table class="ac-mtx"><thead><tr><th></th>${columns}</tr></thead><tbody>${rows}</tbody></table></div>` +
     `</div>`
   );
 }
@@ -2014,6 +2039,14 @@ export function resultModel(model) {
       return result("ok", "validated", "The control server accepted the document.", detail);
     }
     case "validate-failed":
+      if (model.testsFailed) {
+        // The control server refuses a write whose test fails, which the OpenAPI schema of
+        // operationId setPolicyFile states. Push therefore stays disabled, and this
+        // sentence names that reason rather than the reason of a malformed document.
+        return result("crit", "test failed", "The control server accepts no document whose test fails. Push stays disabled while a test of this document fails.", {
+          errors: validateErrors(model.result),
+        });
+      }
       return result("crit", "validate failed", "The control server rejected the document.", {
         errors: validateErrors(model.result),
       });
@@ -2200,6 +2233,10 @@ export function createPolicyState(options = {}) {
     if (!entry) {
       entry = {
         loaded: false, base: "", text: "", etag: "", writeAvailable: false, error: "", stage: "read", result: "",
+        // testsFailed is true when the last validate failed because an assertion of the
+        // tests section failed. The result region states that reason apart from a
+        // document error, per FR-vadv-16.
+        testsFailed: false,
         // view holds "text" or "visual", per FR-vacl-1. sections holds the last answer
         // of POST .../sections, and sectionsError names the parse error of the last
         // attempt to open Visual, per FR-vacl-2, or the message of a failed edit to a
@@ -2220,8 +2257,9 @@ export function createPolicyState(options = {}) {
         nav: "", pendingRemoval: null, baseSections: null, sectionsText: null,
         // testsPending is true while the Tests section's Run action runs, and
         // testsAnswer holds its last answer, or null before a run. These fields sit
-        // apart from stage and result, so a failing test never touches the field Push
-        // reads, per FR-vadv-14.
+        // apart from stage and result, so a run of the tests advances no stage. Validate
+        // alone advances the stage, and a failed assertion holds it at validate-failed,
+        // per FR-vadv-14.
         testsPending: false, testsAnswer: null,
       };
       entries.set(id, entry);
@@ -2238,6 +2276,7 @@ export function createPolicyState(options = {}) {
   function rest(entry) {
     entry.stage = "read";
     entry.result = "";
+    entry.testsFailed = false;
     entry.sectionsError = "";
     entry.testsAnswer = null;
   }
@@ -2671,6 +2710,7 @@ export function createPolicyState(options = {}) {
       const sent = entry.text;
       entry.stage = "validating";
       entry.result = "";
+      entry.testsFailed = false;
       try {
         const answer = await request(policyValidateRoute(id), "POST", { document: sent });
         if (entry.text !== sent) {
@@ -2678,6 +2718,7 @@ export function createPolicyState(options = {}) {
         }
         entry.stage = answer && answer.passed ? "validated" : "validate-failed";
         entry.result = (answer && answer.result) || "";
+        entry.testsFailed = Boolean(answer && answer.tests_failed);
       } catch (err) {
         if (entry.text !== sent) {
           return;
@@ -2691,10 +2732,10 @@ export function createPolicyState(options = {}) {
      * runTests sends the text of the operator to POST /api/policy/{id}/validate and
      * holds the answer for the Tests section to read, per FR-vadv-13.
      *
-     * runTests touches no field of entry.stage or entry.result, which the top Validate
-     * action and the Push action read, so a failing test row never disables Push, per
-     * FR-vadv-14. runTests sends one request, and it sends no second request while the
-     * previous one runs.
+     * runTests touches no field of entry.stage or entry.result. The top Validate action
+     * and the Push action read those two fields, therefore a run of the tests advances no
+     * stage and it enables no push, per FR-vadv-14. runTests sends one request, and it
+     * sends no second request while the previous one runs.
      * The operator edits while the request runs, therefore runTests reads the text
      * again when the answer arrives. A text that changed holds no answer of a document
      * the entry no longer holds.

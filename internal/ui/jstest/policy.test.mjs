@@ -709,6 +709,44 @@ test("a validate failure states each error with its line number", async () => {
   assert.match(markup, /unknown group &quot;group:ops&quot;/);
 });
 
+test("a failed test states that the control server takes no such document", async () => {
+  const body = '{"message":"test(s) failed","data":[{"user":"test2@example.com","errors":["address \\"100.64.0.2:443\\": want: Drop, got: Accept"]}]}';
+  const state = loaded(async () => ({ passed: false, tests_failed: true, result: body }));
+
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(controlOf(actionsModel(model), "push").disabled, true);
+
+  const result = resultModel(model);
+  assert.equal(result.word, "test failed");
+  assert.match(result.sentence, /accepts no document whose test fails/);
+});
+
+test("a document error states the rejection rather than a failed test", async () => {
+  const body = '{"message":"line 3: unknown field \\"acl\\""}';
+  const state = loaded(async () => ({ passed: false, result: body }));
+
+  await state.validate("jbones");
+
+  const result = resultModel(entryOf(state, "jbones"));
+  assert.equal(result.word, "validate failed");
+  assert.match(result.sentence, /rejected the document/);
+});
+
+test("a validate that passes after a failed test clears the failed test", async () => {
+  let answer = { passed: false, tests_failed: true, result: '{"message":"test(s) failed"}' };
+  const state = loaded(async () => answer);
+
+  await state.validate("jbones");
+  answer = { passed: true, result: "" };
+  await state.validate("jbones");
+
+  const model = entryOf(state, "jbones");
+  assert.equal(model.testsFailed, false);
+  assert.equal(controlOf(actionsModel(model), "push").disabled, false);
+});
+
 test("a validate error that names a line and a character reads the line number", () => {
   const errors = validateErrors('{"message":"parse error: policy.hujson:7:3: unexpected token"}');
 
@@ -2006,7 +2044,7 @@ test("runTests sends the staged document to POST /api/policy/{id}/validate and h
   assert.deepEqual(toggle.testsAnswer, { passed: false, result: '{"message":"test(s) failed","data":[]}' });
 });
 
-test("running tests changes no field that Push reads, so a failing test row does not disable Push, per FR-vadv-14", async () => {
+test("a run of the tests changes no field that Push reads, per FR-vadv-14", async () => {
   let calls = 0;
   const state = loaded(async (route) => {
     if (route === policyValidateRoute("jbones")) {
@@ -2323,7 +2361,10 @@ function squareAt(model, from, to) {
 }
 
 test("the matrix places every tag, group, and autogroup that a rule references on both axes", () => {
+  // groups is empty so that this test measures the referenced identities alone. The
+  // matrix also draws every named identity, which issue #351's own tests cover.
   const sections = sectionsBody({
+    groups: {},
     acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
     grants: [{ src: ["group:eng"], dst: ["tag:server"], ip: ["tcp:22"] }],
   });
@@ -2362,6 +2403,7 @@ test("an empty square means no acls or grants entry allows the path", () => {
 
 test("the matrix drops the port that an acls destination carries, and draws no separate node for it", () => {
   const sections = sectionsBody({
+    groups: {},
     acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] }],
     grants: [],
   });
@@ -2409,6 +2451,104 @@ test("the matrix markup escapes a hostile node name", () => {
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
+test("the matrix scrolls sideways inside its own card", async () => {
+  // Issue #387. The square holds a fixed size, therefore a document that names many
+  // identities makes the table wider than the card, and the table overflowed into the next
+  // card. The wrapper carries the scroll, so the matrix stays inside its own card. The
+  // mockup docs/specs/mockups/06-visual-acl-editor.html holds the same treatment in
+  // `.mtxwrap`.
+  const sections = sectionsBody({ groups: {}, acls: [], grants: [] });
+
+  const markup = matrixMarkup(matrixModel(sections));
+
+  assert.match(markup, /<div class="ac-mtx-wrap"><table class="ac-mtx"/);
+
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  assert.match(style, /\.ac-mtx-wrap\{[^}]*overflow-x:auto/);
+});
+
+test("the matrix draws a row and a column for a group that no rule references", () => {
+  // Issue #351. The operator decided on 2026-08-24 that the matrix draws every named
+  // identity. A group therefore reaches the axes before a rule names it.
+  const sections = sectionsBody({
+    groups: { "group:admins": ["alice@example.com"], "group:new": ["bob@example.com"] },
+    acls: [{ action: "accept", src: ["group:admins"], dst: ["*:*"] }],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.ok(model.nodes.includes("group:new"), model.nodes.join(" "));
+  assert.equal(squareAt(model, "group:new", "group:admins").allowed, false);
+});
+
+test("the matrix draws a row and a column for a host alias and for a tag owner that no rule references", () => {
+  // Issue #351.
+  const sections = sectionsBody({
+    groups: {},
+    hosts: { "build-box": "100.64.0.9" },
+    tagOwners: { "tag:new": ["group:admins"] },
+    acls: [],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.deepEqual(model.nodes, ["build-box", "tag:new"]);
+  assert.equal(squareAt(model, "build-box", "tag:new").allowed, false);
+});
+
+test("a click on the square of an identity that no rule references stages a new acls entry", () => {
+  // Issue #351. The row alone grants no path. FR-vacl-8 must accept the click that the
+  // new square draws.
+  const sections = sectionsBody({
+    groups: {},
+    hosts: { "build-box": "100.64.0.9" },
+    tagOwners: { "tag:new": ["group:admins"] },
+    acls: [],
+    grants: [],
+  });
+
+  assert.deepEqual(matrixClickPlan(sections, "build-box", "tag:new"), {
+    op: "add",
+    section: "acls",
+    entry: { action: "accept", src: ["build-box"], dst: ["tag:new:*"] },
+  });
+});
+
+test("the matrix draws no row for an IP set", () => {
+  // Issue #351. The operator's decision of 2026-08-24 names a tag, a group, and a host
+  // alone. A rule names an IP set as `ipset:<name>`, and this repository writes the key
+  // in both forms. The key alone therefore does not give the axis label. Headscale
+  // supports no ipsets section, per FR-vacl-19.
+  const sections = sectionsBody({
+    groups: {},
+    ipsets: { "ipset:corp": ["10.0.0.0/24"] },
+    acls: [],
+    grants: [],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.deepEqual(model.nodes, []);
+});
+
+test("the matrix keeps the wildcard square when it also draws an identity that no rule references", () => {
+  // Issue #351 with issue #349. A larger node set must not change the wildcard square.
+  const sections = sectionsBody({
+    groups: { "group:new": ["bob@example.com"] },
+    acls: [],
+    grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }],
+  });
+
+  const model = matrixModel(sections);
+
+  assert.deepEqual(model.nodes, ["*", "group:new"]);
+  assert.equal(squareAt(model, "*", "*").allowed, true);
+  assert.equal(squareAt(model, "*", "*").inert, false);
+  assert.equal(squareAt(model, "group:new", "group:new").inert, true);
+});
+
 test("the route of the sections edit action encodes the identifier", () => {
   assert.equal(policySectionsEditRoute("jbones"), "/api/policy/jbones/sections/edit");
   assert.equal(policySectionsEditRoute("lab hs/1"), "/api/policy/lab%20hs%2F1/sections/edit");
@@ -2434,7 +2574,9 @@ test("the wildcard square is not inert, because * names every identity and not o
 });
 
 test("the wildcard square carries the click data that the console binds", () => {
-  const sections = sectionsBody({ acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
+  // groups is empty so that the wildcard square is the one square of the matrix. A named
+  // identity would add an inert diagonal square, which the disabled assertion below reads.
+  const sections = sectionsBody({ groups: {}, acls: [], grants: [{ src: ["*"], dst: ["*"], ip: ["*"] }] });
 
   const markup = matrixMarkup(matrixModel(sections));
 
