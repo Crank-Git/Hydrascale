@@ -189,3 +189,176 @@ func lineColumn(text []byte, n int) (line, column int) {
 	column = 1 + n - (bytes.LastIndexByte(text[:n], '\n') + len("\n"))
 	return line, column
 }
+
+// AddEntry appends one entry to the named section.
+// AddEntry parses entry as one JSON or huJSON value. The new entry matches
+// the indentation of the section's other entries. AddEntry creates the
+// section when the document does not hold it yet. AddEntry keeps every
+// other byte of the document unchanged, including a comment on an existing
+// entry.
+func (d *Document) AddEntry(section, entry string) error {
+	value, err := hujson.Parse([]byte(entry))
+	if err != nil {
+		return fmt.Errorf("policy: adding an entry: parsing the entry: %w", err)
+	}
+	obj, ok := d.root.Value.(*hujson.Object)
+	if !ok {
+		return fmt.Errorf("policy: adding an entry: the document root is not an object")
+	}
+	for i := range obj.Members {
+		if memberName(obj.Members[i]) != section {
+			continue
+		}
+		arr, ok := obj.Members[i].Value.Value.(*hujson.Array)
+		if !ok {
+			return fmt.Errorf("policy: adding an entry: section %q is not an array", section)
+		}
+		indent := arrayEntryIndent(obj.Members[i])
+		arr.Elements = append(arr.Elements, newArrayElement(value.Value, indent, newTrailingComma(arr)))
+		return nil
+	}
+	obj.Members = append(obj.Members, newSectionMember(section, value.Value, topLevelIndent(obj)))
+	return nil
+}
+
+// ReplaceEntry replaces the entry at index in the named section.
+// ReplaceEntry parses entry as one JSON or huJSON value and keeps the
+// indentation and the comment that surround the replaced entry. It returns
+// an error when the document holds no section named section, when the
+// section is not an array, or when index is out of range.
+func (d *Document) ReplaceEntry(section string, index int, entry string) error {
+	arr, err := d.arraySection(section)
+	if err != nil {
+		return fmt.Errorf("policy: replacing an entry: %w", err)
+	}
+	if index < 0 || index >= len(arr.Elements) {
+		return fmt.Errorf("policy: replacing an entry: index %d is out of range for section %q, which holds %d entries", index, section, len(arr.Elements))
+	}
+	value, err := hujson.Parse([]byte(entry))
+	if err != nil {
+		return fmt.Errorf("policy: replacing an entry: parsing the entry: %w", err)
+	}
+	arr.Elements[index].Value = value.Value
+	return nil
+}
+
+// RemoveEntry removes the entry at index from the named section.
+// RemoveEntry keeps the section's key when the removal empties the section.
+// It returns an error when the document holds no section named section,
+// when the section is not an array, or when index is out of range.
+func (d *Document) RemoveEntry(section string, index int) error {
+	arr, err := d.arraySection(section)
+	if err != nil {
+		return fmt.Errorf("policy: removing an entry: %w", err)
+	}
+	if index < 0 || index >= len(arr.Elements) {
+		return fmt.Errorf("policy: removing an entry: index %d is out of range for section %q, which holds %d entries", index, section, len(arr.Elements))
+	}
+	arr.Elements = append(arr.Elements[:index], arr.Elements[index+1:]...)
+	return nil
+}
+
+// arraySection returns the array behind the named top-level section.
+func (d *Document) arraySection(section string) (*hujson.Array, error) {
+	obj, ok := d.root.Value.(*hujson.Object)
+	if !ok {
+		return nil, fmt.Errorf("the document root is not an object")
+	}
+	for i := range obj.Members {
+		if memberName(obj.Members[i]) != section {
+			continue
+		}
+		arr, ok := obj.Members[i].Value.Value.(*hujson.Array)
+		if !ok {
+			return nil, fmt.Errorf("section %q is not an array", section)
+		}
+		return arr, nil
+	}
+	return nil, fmt.Errorf("the document holds no section %q", section)
+}
+
+// memberName returns the unquoted name of an object member.
+func memberName(member hujson.ObjectMember) string {
+	return member.Name.Value.(hujson.Literal).String()
+}
+
+// newArrayElement returns the array element that AddEntry inserts.
+// The element carries indent as its leading whitespace, and it carries a
+// trailing comma when comma is true.
+func newArrayElement(value hujson.ValueTrimmed, indent []byte, comma bool) hujson.Value {
+	element := hujson.Value{
+		BeforeExtra: append([]byte("\n"), indent...),
+		Value:       value,
+	}
+	if comma {
+		element.AfterExtra = hujson.Extra{}
+	}
+	return element
+}
+
+// newSectionMember returns the top-level member that AddEntry inserts when
+// the document does not hold section yet. The member holds one entry.
+func newSectionMember(section string, value hujson.ValueTrimmed, indent []byte) hujson.ObjectMember {
+	entryIndent := append(append([]byte{}, indent...), []byte("  ")...)
+	arr := &hujson.Array{
+		Elements:   []hujson.Value{newArrayElement(value, entryIndent, true)},
+		AfterExtra: append([]byte("\n"), indent...),
+	}
+	return hujson.ObjectMember{
+		Name: hujson.Value{
+			BeforeExtra: append([]byte("\n"), indent...),
+			Value:       hujson.String(section),
+		},
+		Value: hujson.Value{
+			BeforeExtra: []byte(" "),
+			Value:       arr,
+			AfterExtra:  hujson.Extra{},
+		},
+	}
+}
+
+// arrayEntryIndent returns the indentation that a new entry of member's
+// array section matches. It copies the indentation of the array's last
+// entry, or, when the array holds no entry yet, the section key's own
+// indentation plus one level.
+func arrayEntryIndent(member hujson.ObjectMember) []byte {
+	arr := member.Value.Value.(*hujson.Array)
+	if len(arr.Elements) > 0 {
+		if indent := trailingIndent(arr.Elements[len(arr.Elements)-1].BeforeExtra); indent != nil {
+			return indent
+		}
+	}
+	return append(trailingIndent(member.Name.BeforeExtra), []byte("  ")...)
+}
+
+// topLevelIndent returns the indentation that a new top-level section key
+// matches. It copies the indentation of the last existing top-level key, or
+// two spaces when the document holds no top-level key yet.
+func topLevelIndent(obj *hujson.Object) []byte {
+	for i := len(obj.Members) - 1; i >= 0; i-- {
+		if indent := trailingIndent(obj.Members[i].Name.BeforeExtra); indent != nil {
+			return indent
+		}
+	}
+	return []byte("  ")
+}
+
+// newTrailingComma reports whether a new last entry of arr keeps a trailing
+// comma, matching the array's own convention. An empty array defaults to a
+// trailing comma, which matches this project's own document style.
+func newTrailingComma(arr *hujson.Array) bool {
+	if len(arr.Elements) == 0 {
+		return true
+	}
+	return arr.Elements[len(arr.Elements)-1].AfterExtra != nil
+}
+
+// trailingIndent returns the whitespace after the last newline in extra, or
+// nil when extra holds no newline.
+func trailingIndent(extra hujson.Extra) []byte {
+	i := bytes.LastIndexByte(extra, '\n')
+	if i < 0 {
+		return nil
+	}
+	return append([]byte{}, extra[i+1:]...)
+}
