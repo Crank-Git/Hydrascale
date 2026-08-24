@@ -375,9 +375,15 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <h3 id="visual-acl-editor-data-touched">Data touched</h3>
-<p>The visual editor reads and writes the same policy document that <code>features/08-upstream-policy.md</code>'s <code>GET /api/policy/{id}</code>, <code>POST /api/policy/{id}/validate</code>, and <code>PUT /api/policy/{id}</code> already read and write. It creates no new entity and adds no new daemon route.</p>
+<p>The visual editor reads and writes the same policy document that <code>features/08-upstream-policy.md</code>'s <code>GET /api/policy/{id}</code>, <code>POST /api/policy/{id}/validate</code>, and <code>PUT /api/policy/{id}</code> already read and write. It creates no new entity.</p>
 <h3 id="visual-acl-editor-interfaces">Interfaces</h3>
-<p>None new. The visual editor is a console feature built on <code>features/08-upstream-policy.md</code>'s existing routes and <code>features/11-policy-document-model.md</code>'s in-process document model.</p>
+<p><strong>Correction, made during Epic 12 planning (2026-08-23):</strong> the first draft of this feature file stated no new route. That was wrong. Browser JavaScript cannot parse or edit huJSON with <code>features/11-policy-document-model.md</code>'s byte-preservation guarantee — only the daemon's Go document model can. The visual editor therefore needs two new routes, both stateless (the document model holds no state between requests, matching <code>features/11-policy-document-model.md</code>'s Data touched section):</p>
+<div class="table-wrap"><table>
+<tr><th>Method and path</th><th>Purpose</th></tr>
+<tr><td><code>POST /api/policy/{id}/sections</code></td><td>Parses the request body's <code>document</code> field through the document model and returns every named section (FR-model-2's list) as JSON, or an error naming the line and column of a parse failure. Read-only: it changes nothing.</td></tr>
+<tr><td><code>POST /api/policy/{id}/sections/edit</code></td><td>Takes the request body's <code>document</code> field, a <code>section</code> name, an <code>op</code> (<code>add</code>, <code>replace</code>, or <code>remove</code>), an <code>index</code> (for <code>replace</code>/<code>remove</code>), and an <code>entry</code> (for <code>add</code>/<code>replace</code>), and returns the new <code>document</code> text — the one edit applied through the document model, every other byte unchanged.</td></tr>
+</table></div>
+<p>The console holds the huJSON text as the single source of truth for the staged document (FR-vacl-1). Every visual edit is: send the current text plus the intended change to <code>/sections/edit</code>, replace the staged text with the response, then call <code>/sections</code> to re-render the matrix and the rule list. The console's own JavaScript never parses or edits huJSON itself.</p>
 <h3 id="visual-acl-editor-edge-cases-failures">Edge cases &amp; failures</h3>
 <div class="table-wrap"><table>
 <tr><th>Case</th><th>Behaviour</th></tr>

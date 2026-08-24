@@ -192,14 +192,27 @@ flowchart TD
 
 The visual editor reads and writes the same policy document that
 `features/08-upstream-policy.md`'s `GET /api/policy/{id}`, `POST /api/policy/{id}/validate`,
-and `PUT /api/policy/{id}` already read and write. It creates no new entity and adds no
-new daemon route.
+and `PUT /api/policy/{id}` already read and write. It creates no new entity.
 
 ## Interfaces
 
-None new. The visual editor is a console feature built on
-`features/08-upstream-policy.md`'s existing routes and
-`features/11-policy-document-model.md`'s in-process document model.
+**Correction, made during Epic 12 planning (2026-08-23):** the first draft of this
+feature file stated no new route. That was wrong. Browser JavaScript cannot parse or
+edit huJSON with `features/11-policy-document-model.md`'s byte-preservation guarantee —
+only the daemon's Go document model can. The visual editor therefore needs two new
+routes, both stateless (the document model holds no state between requests, matching
+`features/11-policy-document-model.md`'s Data touched section):
+
+| Method and path | Purpose |
+|---|---|
+| `POST /api/policy/{id}/sections` | Parses the request body's `document` field through the document model and returns every named section (FR-model-2's list) as JSON, or an error naming the line and column of a parse failure. Read-only: it changes nothing. |
+| `POST /api/policy/{id}/sections/edit` | Takes the request body's `document` field, a `section` name, an `op` (`add`, `replace`, or `remove`), an `index` (for `replace`/`remove`), and an `entry` (for `add`/`replace`), and returns the new `document` text — the one edit applied through the document model, every other byte unchanged. |
+
+The console holds the huJSON text as the single source of truth for the staged document
+(FR-vacl-1). Every visual edit is: send the current text plus the intended change to
+`/sections/edit`, replace the staged text with the response, then call `/sections` to
+re-render the matrix and the rule list. The console's own JavaScript never parses or
+edits huJSON itself.
 
 ## Edge cases & failures
 
