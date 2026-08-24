@@ -27,6 +27,7 @@ import {
   matrixMarkup,
   matrixModel,
   namedSetEntries,
+  parseRulePorts,
   policyDocumentRoute,
   policyListMarkup,
   policyRows,
@@ -36,8 +37,13 @@ import {
   readFailure,
   referencingRules,
   referencingSentence,
+  removeGrantCapability,
+  renameGrantCapability,
   resultMarkup,
   resultModel,
+  ruleEntryWithPorts,
+  ruleListMarkup,
+  ruleRows,
   toggleMarkup,
   toggleModel,
   validateErrors,
@@ -1289,6 +1295,29 @@ test("the Rules row reopens the matrix after a named-set section was open", () =
   assert.ok(!markup.includes("setlist"));
 });
 
+test("Rules draws the matrix and the rule list together, per the mockup", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+
+  const markup = visualMarkup(sections);
+  assert.ok(markup.includes("ac-matrix"));
+  assert.ok(markup.includes("ac-rulelist"));
+  assert.ok(markup.indexOf("ac-matrix") < markup.indexOf("ac-rulelist"), "the matrix comes before the rule list");
+  assert.match(markup, /tag:laptop/);
+});
+
+test("switching to a named-set section replaces the matrix and the rule list, not just the matrix", () => {
+  const sections = sectionsBody({
+    acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }],
+  });
+
+  const markup = visualMarkup(sections, "groups");
+  assert.ok(!markup.includes("ac-matrix"));
+  assert.ok(!markup.includes("ac-rulelist"));
+  assert.ok(markup.includes("setlist"));
+});
+
 test("the Groups section lists every group and its members", () => {
   const markup = visualMarkup(
     sectionsBody({ groups: { "group:admins": ["alice@example.com", "bob@example.com"] } }),
@@ -1721,4 +1750,199 @@ test("clicking a filled matrix square removes every matching entry, highest inde
   assert.equal(edits[0].body.document, documents[0]);
   assert.equal(edits[1].body.index, 0);
   assert.equal(edits[1].body.document, documents[1]);
+});
+
+// ---------------------------------------------------------------------------
+// The rule list. FR-vacl-10 to FR-vacl-12.
+// ---------------------------------------------------------------------------
+
+test("a rule staged by the matrix appears in the rule list, marked staged", async () => {
+  const added = '{\n  "grants": [],\n  "acls": [{"action":"accept","src":["tag:laptop"],"dst":["tag:server:*"]}],\n}';
+  const state = loaded(async (route, method, body) => {
+    if (route.endsWith("/sections/edit")) {
+      return { document: added };
+    }
+    return body.document === added
+      ? sectionsBody({ acls: [{ action: "accept", src: ["tag:laptop"], dst: ["tag:server:*"] }], grants: [] })
+      : sectionsBody({ acls: [], grants: [] });
+  });
+
+  await state.loadSections("jbones");
+  await state.stageMatrixClick("jbones", "tag:laptop", "tag:server");
+
+  const toggle = toggleModel(state, "jbones");
+  const rows = ruleRows(toggle.sections, toggle.baseSections);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].from, "tag:laptop");
+  assert.equal(rows[0].to, "tag:server");
+  assert.equal(rows[0].staged, true);
+  assert.match(ruleListMarkup(rows), /<span class="chip mono">staged<\/span>/);
+});
+
+test("a rule that matches the document the console read shows no staged chip", () => {
+  const base = sectionsBody({ acls: [{ action: "accept", src: ["a"], dst: ["b:*"] }], grants: [] });
+  const rows = ruleRows(base, base);
+
+  assert.equal(rows[0].staged, false);
+  assert.ok(!ruleListMarkup(rows).includes("staged"));
+});
+
+test("a grants entry's capability name shows in its row, per FR-vacl-11", () => {
+  const entry = { src: ["tag:laptop"], dst: ["tag:server"], app: { "tailscale.com/cap/ssh": [{}] } };
+  const rows = ruleRows(sectionsBody({ acls: [], grants: [entry] }));
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].section, "grants");
+  assert.equal(rows[0].chip, "grants · app: tailscale.com/cap/ssh");
+  assert.match(ruleListMarkup(rows), /tailscale\.com\/cap\/ssh/);
+});
+
+test("editing a grants entry removes a capability and keeps every other field", () => {
+  const entry = { src: ["a"], dst: ["b"], ip: ["tcp:22"], app: { "cap-a": [{ x: 1 }], "cap-b": [] } };
+
+  const removed = removeGrantCapability(entry, "cap-a");
+
+  assert.deepEqual(removed, { src: ["a"], dst: ["b"], ip: ["tcp:22"], app: { "cap-b": [] } });
+});
+
+test("removing the last capability of a grants entry drops the app field entirely", () => {
+  const entry = { src: ["a"], dst: ["b"], app: { "cap-a": [{}] } };
+
+  const removed = removeGrantCapability(entry, "cap-a");
+
+  assert.equal("app" in removed, false);
+});
+
+test("editing a grants entry renames a capability and keeps its parameters", () => {
+  const entry = { src: ["a"], dst: ["b"], app: { "cap-a": [{ x: 1 }] } };
+
+  const renamed = renameGrantCapability(entry, "cap-a", "cap-a-renamed");
+
+  assert.deepEqual(renamed.app, { "cap-a-renamed": [{ x: 1 }] });
+});
+
+test("a grants entry with no capability, only ports, shows identically to an acls entry", () => {
+  const rows = ruleRows(sectionsBody({ acls: [], grants: [{ src: ["a"], dst: ["b"], ip: ["tcp:22"] }] }));
+
+  assert.equal(rows[0].chip, "grants");
+  assert.deepEqual(rows[0].ports, ["tcp/22"]);
+});
+
+test("a bad port format is rejected with the concrete example message, per FR-vacl-12", () => {
+  const result = parseRulePorts("tcp/22, garbage");
+
+  assert.equal(result.ports, null);
+  assert.equal(
+    result.error,
+    'invalid port "garbage": the form is tcp/<n>, udp/<n>, tcp/<n>-<m>, or udp/<n>-<m>, for example tcp/22',
+  );
+});
+
+test("a good port list parses into its entries, matching internal/access/rules.go's format", () => {
+  const result = parseRulePorts(" tcp/22, udp/1-1024 ");
+
+  assert.deepEqual(result, { ports: ["tcp/22", "udp/1-1024"], error: null });
+});
+
+test("two rules with the same source and destination and different ports both show as separate rows", () => {
+  const sections = sectionsBody({
+    acls: [
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:22"] },
+      { action: "accept", src: ["tag:laptop"], dst: ["tag:server:443"] },
+    ],
+    grants: [],
+  });
+
+  const rows = ruleRows(sections);
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].to, "tag:server");
+  assert.equal(rows[1].to, "tag:server");
+  assert.deepEqual(rows[0].ports, ["22"]);
+  assert.deepEqual(rows[1].ports, ["443"]);
+});
+
+test("an acls entry with no port reads all ports", () => {
+  const rows = ruleRows(sectionsBody({ acls: [{ action: "accept", src: ["a"], dst: ["b:*"] }], grants: [] }));
+
+  assert.equal(rows[0].allPorts, true);
+  assert.match(ruleListMarkup(rows), /<span class="ac-noports mono">all ports<\/span>/);
+});
+
+test("ruleEntryWithPorts replaces a grants entry's ip field, converting the slash to a colon", () => {
+  const row = { section: "grants", entry: { src: ["a"], dst: ["b"] } };
+
+  const next = ruleEntryWithPorts(row, ["tcp/22", "udp/1-1024"]);
+
+  assert.deepEqual(next, { src: ["a"], dst: ["b"], ip: ["tcp:22", "udp:1-1024"] });
+});
+
+test("ruleEntryWithPorts replaces an acls entry's dst ports and its proto", () => {
+  const row = { section: "acls", entry: { action: "accept", src: ["a"], dst: ["b:*"] } };
+
+  const next = ruleEntryWithPorts(row, ["tcp/22", "tcp/443"]);
+
+  assert.deepEqual(next, { action: "accept", src: ["a"], dst: ["b:22", "b:443"], proto: "tcp" });
+});
+
+test("ruleEntryWithPorts clears the ports and the proto of an acls entry back to all ports", () => {
+  const row = { section: "acls", entry: { action: "accept", src: ["a"], dst: ["b:22"], proto: "tcp" } };
+
+  const next = ruleEntryWithPorts(row, []);
+
+  assert.deepEqual(next, { action: "accept", src: ["a"], dst: ["b:*"] });
+});
+
+test("deleting a row of the rule list sends the remove op with the row's section and index", async () => {
+  const sent = [];
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: '{\n  "acls": [],\n}' };
+    }
+    return sectionsBody({ acls: [] });
+  });
+  state.setText("jbones", '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}');
+
+  await state.stageRuleRemove("jbones", "acls", 0);
+
+  assert.deepEqual(sent[0], {
+    route: "/api/policy/jbones/sections/edit",
+    method: "POST",
+    body: { document: '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}', section: "acls", op: "remove", index: 0 },
+  });
+});
+
+test("replacing a row of the rule list sends the replace op with the row's section, index, and entry", async () => {
+  const sent = [];
+  const nextEntry = { action: "accept", src: ["a"], dst: ["b:22"], proto: "tcp" };
+  const state = loaded(async (route, method, body) => {
+    sent.push({ route, method, body });
+    if (route.endsWith("/sections/edit")) {
+      return { document: '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:22"],"proto":"tcp"}],\n}' };
+    }
+    return sectionsBody({ acls: [nextEntry] });
+  });
+  state.setText("jbones", '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}');
+
+  await state.stageRuleReplace("jbones", "acls", 0, nextEntry);
+
+  assert.deepEqual(sent[0].body, {
+    document: '{\n  "acls": [{"action":"accept","src":["a"],"dst":["b:*"]}],\n}',
+    section: "acls",
+    op: "replace",
+    index: 0,
+    entry: nextEntry,
+  });
+});
+
+test("the rule list states no acls entry and no grants entry when the document holds none", () => {
+  assert.match(ruleListMarkup([]), /No acls entry and no grants entry exist/);
+});
+
+test("the rule list escapes a hostile source", () => {
+  const rows = ruleRows(sectionsBody({ acls: [{ action: "accept", src: ['<script>alert(1)</script>'], dst: ["b"] }], grants: [] }));
+
+  const markup = ruleListMarkup(rows);
+  assert.ok(!markup.includes("<script>"), markup);
 });
