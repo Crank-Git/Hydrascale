@@ -2,7 +2,7 @@
 id: visual-acl-editor
 feature: Visual ACL editor
 epic: "Epic 12: Visual ACL editor"
-status: issued
+status: built
 issues: [314, 315, 316, 317, 318, 319]
 mockups: [mockups/06-visual-acl-editor.html]
 ---
