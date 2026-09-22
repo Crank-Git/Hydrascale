@@ -1,12 +1,15 @@
 package hostaccess
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/dns"
 )
 
 func makeTestStatus() *daemon.TailscaleStatus {
@@ -42,7 +45,7 @@ func TestSync_FullFlow(t *testing.T) {
 	m.Runner = quietRunner{}
 	status := makeTestStatus()
 
-	m.Sync("havoc", status, "10.0.0.1", "veth0", "ns-havoc")
+	m.Sync("havoc", status, "10.0.0.1", "veth0", "10.0.0.2", "ns-havoc")
 
 	got, err := os.ReadFile(hostsPath)
 	if err != nil {
@@ -84,7 +87,7 @@ func TestSync_NilStatus(t *testing.T) {
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	m.Runner = quietRunner{}
-	m.Sync("havoc", nil, "10.0.0.1", "veth0", "ns-havoc")
+	m.Sync("havoc", nil, "10.0.0.1", "veth0", "10.0.0.2", "ns-havoc")
 
 	info2, _ := os.Stat(hostsPath)
 	if info2.ModTime() != info1.ModTime() {
@@ -108,7 +111,7 @@ func TestSync_PartialFailure(t *testing.T) {
 	status := makeTestStatus()
 
 	// Routes will fail (no root), but should not block DNS update
-	m.Sync("havoc", status, "10.0.0.1", "veth0", "ns-havoc")
+	m.Sync("havoc", status, "10.0.0.1", "veth0", "10.0.0.2", "ns-havoc")
 
 	got, err := os.ReadFile(hostsPath)
 	if err != nil {
@@ -126,13 +129,36 @@ func TestSync_PartialFailure(t *testing.T) {
 
 // mockForwarder records the most recent SetDomainRoutes call.
 type mockForwarder struct {
-	lastRoutes map[string]string
-	callCount  int
+	deadListeners map[string]bool
+	lastRoutes    map[string]string
+	lastZones     map[string]dns.AliasZone
+	lastListeners []string
+	callCount     int
 }
 
 func (f *mockForwarder) SetDomainRoutes(routes map[string]string) {
 	f.lastRoutes = routes
 	f.callCount++
+}
+
+func (f *mockForwarder) SetAliasZones(zones map[string]dns.AliasZone) {
+	f.lastZones = zones
+}
+
+// SyncListeners records the addresses and answers that every one of them holds a
+// listener. deadListeners names an address that fails to bind.
+func (f *mockForwarder) SyncListeners(addrs []string) (map[string]bool, error) {
+	f.lastListeners = addrs
+	live := make(map[string]bool, len(addrs))
+	var errs []error
+	for _, a := range addrs {
+		if f.deadListeners[a] {
+			errs = append(errs, fmt.Errorf("open the UDP listener on %s: address already in use", a))
+			continue
+		}
+		live[a] = true
+	}
+	return live, errors.Join(errs...)
 }
 
 // TestSyncDNS_SetsDomainRoutes verifies that syncDNS wires each tailnet's
@@ -149,8 +175,8 @@ func TestSyncDNS_SetsDomainRoutes(t *testing.T) {
 	status1 := &daemon.TailscaleStatus{MagicDNSSuffix: "corp.ts.net"}
 	status2 := &daemon.TailscaleStatus{MagicDNSSuffix: "home.ts.net"}
 
-	m.Sync("corp", status1, "10.200.0.2", "vh001", "ns-corp")
-	m.Sync("home", status2, "10.200.0.6", "vh002", "ns-home")
+	m.Sync("corp", status1, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	m.Sync("home", status2, "10.200.0.6", "vh002", "10.200.0.5", "ns-home")
 
 	if fwd.callCount == 0 {
 		t.Fatal("SetDomainRoutes was never called")
@@ -175,7 +201,7 @@ func TestSyncDNS_NoForwarder(t *testing.T) {
 	status := &daemon.TailscaleStatus{MagicDNSSuffix: "corp.ts.net"}
 
 	// Must not panic
-	m.Sync("corp", status, "10.200.0.2", "vh001", "ns-corp")
+	m.Sync("corp", status, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
 }
 
 // TestSyncDNS_EmptySuffix verifies that a tailnet with no MagicDNSSuffix is
@@ -191,7 +217,7 @@ func TestSyncDNS_EmptySuffix(t *testing.T) {
 
 	// Tailnet with no MagicDNSSuffix
 	status := &daemon.TailscaleStatus{MagicDNSSuffix: ""}
-	m.Sync("corp", status, "10.200.0.2", "vh001", "ns-corp")
+	m.Sync("corp", status, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
 
 	if fwd.callCount == 0 {
 		t.Fatal("SetDomainRoutes was never called")

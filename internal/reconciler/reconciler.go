@@ -753,12 +753,28 @@ func (r *Reconciler) executeAction(action Action) error {
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
 		}
-		_, _, _, vethGW, err := namespaces.VethIPs(r.infraSubnet, index)
+		// VethIPs returns the first two addresses with the prefix length and the last two
+		// without it. The DNS forwarder binds an address and systemd-resolved names one,
+		// therefore both need the address alone.
+		_, _, vethHostIP, vethGW, err := namespaces.VethIPs(r.infraSubnet, index)
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get veth IPs: %w", err)
 		}
 		vethHost, _ := namespaces.VethNames(nsName)
-		r.ha.Sync(action.TailnetID, status, vethGW, vethHost, nsName)
+		// The alias of a tailnet lives in the configuration file, which the operator
+		// changes while the daemon runs, therefore the reconciler reads it each cycle.
+		cfg, cfgErr := config.LoadConfig(r.configPath)
+		if cfgErr != nil {
+			return fmt.Errorf("host-access: failed to read the alias of each tailnet: %w", cfgErr)
+		}
+		aliases := make(map[string]string, len(cfg.Tailnets))
+		for _, tn := range cfg.Tailnets {
+			if tn.Alias != "" {
+				aliases[tn.ID] = tn.Alias
+			}
+		}
+		r.ha.SetAliasResolution(cfg.Resolver.ResolveAliases, aliases)
+		r.ha.Sync(action.TailnetID, status, vethGW, vethHost, vethHostIP, nsName)
 		return nil
 	default:
 		return fmt.Errorf("unknown action type: %s", action.Type)

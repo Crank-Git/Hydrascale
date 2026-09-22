@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/dns"
 	"hydrascale/internal/execx"
 )
 
@@ -15,6 +16,13 @@ import (
 // Implemented by *dns.Forwarder; defined here to avoid an import cycle.
 type DNSForwarder interface {
 	SetDomainRoutes(routes map[string]string)
+
+	// SetAliasZones replaces the zones that the forwarder answers itself.
+	SetAliasZones(zones map[string]dns.AliasZone)
+
+	// SyncListeners makes the forwarder answer on each veth address of the list, and it
+	// returns the addresses on which it answers now.
+	SyncListeners(addrs []string) (map[string]bool, error)
 }
 
 // Manager coordinates host access features: routes, DNS, and namespace setup.
@@ -29,6 +37,14 @@ type Manager struct {
 	infraSubnet string
 	resolved    *ResolvedManager
 	forwarder   DNSForwarder
+
+	// resolveAliases holds the value of resolver.resolve_aliases. With the value false,
+	// syncDNS writes exactly the registration that the daemon writes without the key.
+	resolveAliases bool
+
+	// aliases holds the alias of each tailnet, keyed by the tailnet ID. A tailnet that
+	// holds no alias is absent, and it gets no alias zone.
+	aliases map[string]string
 
 	// Track which tailnets have been synced so teardown knows what to clean up
 	activeTailnets map[string]TailnetPeers
@@ -80,9 +96,20 @@ func (m *Manager) SetForwarder(f DNSForwarder) {
 	m.forwarder = f
 }
 
+// SetAliasResolution records the value of resolver.resolve_aliases and the alias of each
+// tailnet, keyed by the tailnet ID.
+// The reconciler calls SetAliasResolution on each cycle, because the operator adds a
+// tailnet and changes an alias while the daemon runs.
+func (m *Manager) SetAliasResolution(enabled bool, aliases map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resolveAliases = enabled
+	m.aliases = aliases
+}
+
 // Sync updates host routes and DNS for a tailnet's peers.
-func (m *Manager) Sync(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHost, nsName string) {
-	peers := ParsePeers(tailnetID, status, vethGW, vethHost, nsName)
+func (m *Manager) Sync(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHost, vethHostIP, nsName string) {
+	peers := ParsePeers(tailnetID, status, vethGW, vethHost, vethHostIP, nsName)
 
 	if len(peers.Peers) == 0 && status == nil {
 		return
@@ -157,13 +184,19 @@ func (m *Manager) TeardownAll() error {
 }
 
 // syncDNS writes the names of every active tailnet where the host resolver reads them.
+// syncDNS starts the alias listeners before it registers a domain with systemd-resolved,
+// because a link that names an address on which nothing answers loses the names of that
+// tailnet. See SyncListeners in internal/dns/alias.go.
 // syncDNS returns the failure of the hosts file write or of the resolved registration.
 func (m *Manager) syncDNS() error {
 	m.mu.Lock()
 	allV4 := make(map[string]string)
 	allV6 := make(map[string]string)
-	var links []Link
 	domainRoutes := make(map[string]string)
+
+	aliasZones := make(map[string]dns.AliasZone)
+	var listenAddrs []string
+	registrations := make([]TailnetPeers, 0, len(m.activeTailnets))
 
 	for _, peers := range m.activeTailnets {
 		v4, v6 := BuildDNSRecords(peers.TailnetID, peers.Peers)
@@ -173,38 +206,88 @@ func (m *Manager) syncDNS() error {
 		for k, v := range v6 {
 			allV6[k] = v
 		}
+
+		// The alias zone needs the alias of the tailnet and the host side address, on
+		// which the forwarder answers.
+		alias := m.aliases[peers.TailnetID]
+		zoneOn := m.resolveAliases && alias != "" && peers.VethHostIP != ""
+		if zoneOn {
+			zv4, zv6 := BuildAliasRecords(peers.Peers)
+			aliasZones[dns.AliasZoneName(alias)] = dns.AliasZone{V4: zv4, V6: zv6}
+			listenAddrs = append(listenAddrs, peers.VethHostIP)
+		}
+
 		if peers.MagicDNSSuffix != "" && peers.VethGateway != "" {
 			domainRoutes[peers.MagicDNSSuffix] = peers.VethGateway
-			// systemd-resolved registers the suffix on the veth device of the tailnet,
-			// because it refuses a per-link domain on the loopback device.
-			if peers.VethHost != "" {
-				links = append(links, Link{
-					Device:  peers.VethHost,
-					Address: peers.VethGateway,
-					Domain:  peers.MagicDNSSuffix,
-				})
-			}
+		}
+		// systemd-resolved registers the domains on the veth device of the tailnet,
+		// because it refuses a per-link domain on the loopback device. A tailnet that
+		// holds an alias zone registers the device even when the control server serves
+		// no MagicDNS suffix, so the alias zone answers on such a tailnet as well.
+		if peers.VethHost != "" && (zoneOn || (peers.MagicDNSSuffix != "" && peers.VethGateway != "")) {
+			registrations = append(registrations, peers)
 		}
 	}
 	fwd := m.forwarder
+	resolveAliases := m.resolveAliases
+	aliasOf := make(map[string]string, len(m.aliases))
+	for k, v := range m.aliases {
+		aliasOf[k] = v
+	}
 	m.mu.Unlock()
 
 	var err error
+
+	// The listeners start first, and live names every address that answers now. A link
+	// that names an address with no listener loses the MagicDNS suffix of that tailnet as
+	// well as the alias zone, therefore such a link keeps the namespace side address.
+	live := map[string]bool{}
+	if fwd != nil {
+		fwd.SetDomainRoutes(domainRoutes)
+		// The zones go in before the listeners start, so a listener never answers a
+		// query of a zone that the forwarder does not hold yet.
+		fwd.SetAliasZones(aliasZones)
+		var e error
+		if live, e = fwd.SyncListeners(listenAddrs); e != nil {
+			err = errors.Join(err, fmt.Errorf("host-access: alias listener sync failed: %w", e))
+		}
+	}
+
+	links := make([]Link, 0, len(registrations))
+	for _, peers := range registrations {
+		// A link carries one server for every domain that it holds. With an alias zone
+		// the link therefore names the host side address, and the forwarder sends the
+		// MagicDNS suffix onward to the namespace. Without one the link names the
+		// namespace side address, which is the registration that the daemon writes
+		// without resolver.resolve_aliases.
+		alias := aliasOf[peers.TailnetID]
+		zoneUp := resolveAliases && alias != "" && peers.VethHostIP != "" && live[peers.VethHostIP]
+		address := peers.VethGateway
+		var domains []string
+		if peers.MagicDNSSuffix != "" && peers.VethGateway != "" {
+			domains = append(domains, peers.MagicDNSSuffix)
+		}
+		if zoneUp {
+			address = peers.VethHostIP
+			domains = append(domains, dns.AliasZoneName(alias))
+		}
+		if address == "" || len(domains) == 0 {
+			continue
+		}
+		links = append(links, Link{Device: peers.VethHost, Address: address, Domains: domains})
+	}
+
 	switch m.dnsMode {
 	case "hosts":
 		if e := UpdateHostsFile(m.hostsPath, allV4, allV6); e != nil {
-			err = fmt.Errorf("host-access: failed to update hosts file: %w", e)
+			err = errors.Join(err, fmt.Errorf("host-access: failed to update hosts file: %w", e))
 		}
 	case "resolved":
 		if m.resolved != nil {
 			if e := m.resolved.RegisterDomains(links); e != nil {
-				err = fmt.Errorf("host-access: resolved registration failed: %w", e)
+				err = errors.Join(err, fmt.Errorf("host-access: resolved registration failed: %w", e))
 			}
 		}
-	}
-
-	if fwd != nil {
-		fwd.SetDomainRoutes(domainRoutes)
 	}
 	return err
 }

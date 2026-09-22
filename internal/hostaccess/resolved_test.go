@@ -9,7 +9,7 @@ import (
 func TestResolvedManager_NilWhenUnavailable(t *testing.T) {
 	rm := NewResolvedManager()
 	rm.Runner = quietRunner{}
-	err := rm.RegisterDomains([]Link{{Device: "vhcorp", Address: "10.200.1.46", Domain: "example.com"}})
+	err := rm.RegisterDomains([]Link{{Device: "vhcorp", Address: "10.200.1.46", Domains: []string{"example.com"}}})
 	// Either succeeds (resolved is running) or returns a clear error — no panic.
 	if err != nil {
 		t.Logf("RegisterDomains returned expected error (resolved unavailable): %v", err)

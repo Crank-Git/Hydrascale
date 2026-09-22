@@ -201,3 +201,57 @@ func TestSaveConfig_keeps_the_alias_across_a_round_trip(t *testing.T) {
 		t.Errorf("alias = %q, want %q after a round trip", back.Tailnets[0].Alias, "alias1")
 	}
 }
+
+// aliasConfig returns a configuration whose tailnets hold the given aliases.
+func aliasConfig(resolveAliases bool, aliases ...string) *Config {
+	c := &Config{}
+	c.Resolver.ResolveAliases = resolveAliases
+	for i, a := range aliases {
+		c.Tailnets = append(c.Tailnets, Tailnet{ID: string(rune('a'+i)) + "-tailnet", Alias: a})
+	}
+	return c
+}
+
+// resolve_aliases builds the domain <alias>.ts.internal, therefore an alias must be a DNS
+// label. An underscore is a legal alias and it is no DNS label.
+func TestValidateTailnetNames_rejects_an_alias_that_is_no_dns_label(t *testing.T) {
+	err := aliasConfig(true, "my_tailnet").ValidateTailnetNames()
+	if err == nil {
+		t.Fatal("ValidateTailnetNames accepted the alias my_tailnet with resolve_aliases set")
+	}
+	if !strings.Contains(err.Error(), "ts.internal") {
+		t.Errorf("the error does not name the domain: %v", err)
+	}
+}
+
+// A file that leaves resolve_aliases out keeps every alias that it holds now.
+func TestValidateTailnetNames_accepts_an_underscore_when_resolve_aliases_is_unset(t *testing.T) {
+	if err := aliasConfig(false, "my_tailnet").ValidateTailnetNames(); err != nil {
+		t.Errorf("ValidateTailnetNames rejected my_tailnet with resolve_aliases unset: %v", err)
+	}
+}
+
+// A domain name folds case, therefore two aliases that differ by case alone name one zone.
+func TestValidateTailnetNames_rejects_two_aliases_that_differ_by_case(t *testing.T) {
+	if err := aliasConfig(true, "mmo", "MMO").ValidateTailnetNames(); err == nil {
+		t.Fatal("ValidateTailnetNames accepted the aliases mmo and MMO with resolve_aliases set")
+	}
+	if err := aliasConfig(false, "mmo", "MMO").ValidateTailnetNames(); err != nil {
+		t.Errorf("ValidateTailnetNames rejected mmo and MMO with resolve_aliases unset: %v", err)
+	}
+}
+
+// An alias that is the ID of another tailnet, case folded, names that tailnet twice.
+func TestValidateTailnetNames_rejects_an_alias_that_is_an_id_of_another_case(t *testing.T) {
+	c := &Config{Tailnets: []Tailnet{{ID: "Corp"}, {ID: "home", Alias: "CORP"}}}
+	c.Resolver.ResolveAliases = true
+	if err := c.ValidateTailnetNames(); err == nil {
+		t.Fatal("ValidateTailnetNames accepted the alias CORP against the ID Corp")
+	}
+}
+
+func TestValidateTailnetNames_accepts_a_dns_label_alias(t *testing.T) {
+	if err := aliasConfig(true, "mmo", "psm-eu", "t1").ValidateTailnetNames(); err != nil {
+		t.Errorf("ValidateTailnetNames rejected a DNS label alias: %v", err)
+	}
+}

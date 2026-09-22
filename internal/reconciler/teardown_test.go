@@ -116,8 +116,8 @@ func TestDeleteNamespaceRemovesTheNamesOfTheTailnetFromTheHostsFile(t *testing.T
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 	ha := hostaccess.NewManager("hosts", hostsPath, "10.200.0.0/16")
-	ha.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "ns-corp")
-	ha.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "ns-home")
+	ha.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	ha.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "10.200.0.5", "ns-home")
 
 	cfgPath := writeTestConfig(t, "home")
 	r := New(cfgPath, newMockNS(), newMockDaemon(), newMockRouting(), time.Second, ha, "10.200.0.0/16")

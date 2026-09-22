@@ -64,27 +64,36 @@ func (rm *ResolvedManager) isAvailable(ctx context.Context) bool {
 }
 
 // Link names the registration of one tailnet. Device is the host side veth device of that
-// tailnet, Address is the namespace side address that answers a query on it, and Domain is
-// the MagicDNS suffix of that tailnet.
+// tailnet, Address is the server that answers a query on it, and Domains holds every
+// domain that the device routes.
+// A link of systemd-resolved carries one list of servers for every domain that it holds,
+// therefore each domain of Domains reaches Address. See RegisterDomains.
 type Link struct {
 	Device  string
 	Address string
-	Domain  string
+	Domains []string
 }
 
 // validDeviceName reports whether d is a device name that resolvectl reads as a link.
 // A name that starts with a hyphen reads as an option, which is the finding SA-19.
 var validDeviceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,14}$`)
 
-// RegisterDomains gives the MagicDNS suffix of each tailnet to systemd-resolved, on the
-// veth device of that tailnet.
+// RegisterDomains gives the domains of each tailnet to systemd-resolved, on the veth
+// device of that tailnet.
 // systemd-resolved refuses a per-link domain on the loopback device, and it answers
 // "Link lo is loopback device". The registration therefore names the veth device of the
-// tailnet, and it names the namespace side address as the server. A DNAT rule inside the
-// namespace sends a query that arrives on the veth device to 100.100.100.100, which is
-// the MagicDNS address of that tailnet. See SetupHostAccess in internal/namespaces/ns.go.
-// RegisterDomains sets the server before the domain. A link that holds a domain and no
+// tailnet.
+// A link carries one list of servers for every domain that it holds, therefore every
+// domain of one link reaches one server. The caller names that server in Link.Address.
+// With resolver.resolve_aliases unset, the server is the namespace side address, and a
+// DNAT rule inside the namespace sends the query to 100.100.100.100, which is the
+// MagicDNS address of that tailnet. See SetupHostAccess in internal/namespaces/ns.go.
+// With the key set, the server is the host side address, on which the DNS forwarder
+// answers the alias zone and routes the MagicDNS suffix onward.
+// RegisterDomains sets the server before the domains. A link that holds a domain and no
 // server sends every query of that domain to a resolver that does not exist.
+// RegisterDomains writes every domain of a link in one command, because `resolvectl
+// domain` replaces the list of the link rather than add to it.
 // RegisterDomains validates every link first. If one link fails the check, RegisterDomains
 // rejects the whole set and runs no command.
 func (rm *ResolvedManager) RegisterDomains(links []Link) error {
@@ -94,13 +103,18 @@ func (rm *ResolvedManager) RegisterDomains(links []Link) error {
 
 	for _, l := range links {
 		if !validDeviceName.MatchString(l.Device) {
-			return fmt.Errorf("the device %q of the tailnet that holds %q is not a device name", l.Device, l.Domain)
+			return fmt.Errorf("the device %q is not a device name", l.Device)
 		}
 		if net.ParseIP(l.Address) == nil {
 			return fmt.Errorf("the address %q of the device %q is not an IP address", l.Address, l.Device)
 		}
-		if !validDNSName(strings.TrimPrefix(l.Domain, "~")) {
-			return fmt.Errorf("the MagicDNS suffix %q is not a DNS name", l.Domain)
+		if len(l.Domains) == 0 {
+			return fmt.Errorf("the device %q carries no domain", l.Device)
+		}
+		for _, d := range l.Domains {
+			if !validDNSName(strings.TrimPrefix(d, "~")) {
+				return fmt.Errorf("the domain %q of the device %q is not a DNS name", d, l.Device)
+			}
 		}
 	}
 
@@ -118,9 +132,12 @@ func (rm *ResolvedManager) RegisterDomains(links []Link) error {
 			errs = append(errs, fmt.Errorf("resolvectl dns %s %s: %v (%s)", l.Device, l.Address, err, out))
 			continue
 		}
-		domain := "~" + strings.TrimPrefix(l.Domain, "~")
-		if out, err := rm.runner().Run(ctx, "resolvectl", "domain", l.Device, domain); err != nil {
-			errs = append(errs, fmt.Errorf("resolvectl domain %s %s: %v (%s)", l.Device, domain, err, out))
+		args := []string{"domain", l.Device}
+		for _, d := range l.Domains {
+			args = append(args, "~"+strings.TrimPrefix(d, "~"))
+		}
+		if out, err := rm.runner().Run(ctx, "resolvectl", args...); err != nil {
+			errs = append(errs, fmt.Errorf("resolvectl %s: %v (%s)", strings.Join(args, " "), err, out))
 			continue
 		}
 		registered = append(registered, l.Device)

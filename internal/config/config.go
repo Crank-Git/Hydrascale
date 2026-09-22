@@ -29,6 +29,17 @@ var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 // the guard that keeps a path safe.
 var validAliasPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`)
 
+// validDNSLabelPattern restricts an alias to one label of a domain name, which carries a
+// letter, a digit and a hyphen, and which starts and ends with a letter or a digit.
+// resolver.resolve_aliases builds a domain name from an alias, and a domain name takes no
+// underscore, therefore the key narrows the alias to this pattern.
+var validDNSLabelPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+
+// aliasDomainSuffix is the parent domain of an alias zone. internal/dns holds the same
+// value as dns.AliasDomainSuffix; this package states it again rather than import that
+// package, which would make a cycle.
+const aliasDomainSuffix = "ts.internal"
+
 // DefaultConfigPath is the default location for the Hydrascale config file.
 // Config lives in /etc (declarative system config); runtime state and the API
 // socket live under /var/lib/hydrascale. This matches the systemd unit, so the
@@ -83,6 +94,12 @@ type ReconcilerConfig struct {
 type ResolverConfig struct {
 	Mode        string `yaml:"mode"`
 	BindAddress string `yaml:"bind_address,omitempty"`
+
+	// ResolveAliases makes the daemon answer the short name <host>.<alias>.ts.internal
+	// for each tailnet that holds an alias. The daemon answers the name from the peer
+	// table of that tailnet, and it answers no other name of that domain.
+	// An unset key keeps the DNS behaviour that the daemon holds without it.
+	ResolveAliases bool `yaml:"resolve_aliases,omitempty"`
 }
 
 // Config represents the Hydrascale service configuration.
@@ -316,10 +333,30 @@ func (c *Config) ValidateTailnetNames() error {
 		if ids[tn.Alias] {
 			return fmt.Errorf("alias %q of tailnet %q is the ID of a tailnet", tn.Alias, tn.ID)
 		}
-		if other, ok := aliases[tn.Alias]; ok {
+		// resolve_aliases builds the domain <alias>.ts.internal, and a domain name folds
+		// case, therefore two aliases that differ by case alone name one zone. The check
+		// runs only when the key is set, so a file that leaves the key out keeps every
+		// alias that it holds now.
+		key := tn.Alias
+		if c.Resolver.ResolveAliases {
+			key = strings.ToLower(tn.Alias)
+			for id := range ids {
+				if strings.EqualFold(id, tn.Alias) {
+					return fmt.Errorf("alias %q of tailnet %q is the ID of the tailnet %q, which differs by case alone: resolver.resolve_aliases builds a domain name, and a domain name folds case", tn.Alias, tn.ID, id)
+				}
+			}
+		}
+		// An alias takes an underscore, and a DNS label does not. resolve_aliases turns
+		// each alias into the domain <alias>.ts.internal, therefore it narrows the alias
+		// to a DNS label. The check runs only when the key is set, so a file that leaves
+		// the key out keeps every alias that it holds now.
+		if c.Resolver.ResolveAliases && !validDNSLabelPattern.MatchString(tn.Alias) {
+			return fmt.Errorf("alias %q of tailnet %q is not a DNS label: resolver.resolve_aliases builds the domain %s.%s, so the alias takes a letter, a digit and a hyphen, and it takes no underscore", tn.Alias, tn.ID, tn.Alias, aliasDomainSuffix)
+		}
+		if other, ok := aliases[key]; ok {
 			return fmt.Errorf("duplicate alias %q: tailnet %q and tailnet %q both hold it", tn.Alias, other, tn.ID)
 		}
-		aliases[tn.Alias] = tn.ID
+		aliases[key] = tn.ID
 	}
 	return nil
 }

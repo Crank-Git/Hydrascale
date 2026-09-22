@@ -548,25 +548,84 @@ access:
    MagicDNS resolver of that namespace at `100.100.100.100`. Several tailnets therefore
    answer MagicDNS queries on one host.
 
+5. **A short name per tailnet.** With `resolver.resolve_aliases` set, the daemon answers
+   `<peer>.<alias>.ts.internal` with the tailnet address of that peer. See "Short names
+   for a peer" below.
+
 The daemon syncs the routes and the DNS entries on every tick. It removes them at shutdown,
 and when host access is disabled.
 
-### The DNS lifecycle of tailscaled
+### Short names for a peer
 
-Two subtleties matter for a MagicDNS route per tailnet, and the daemon handles both.
+A MagicDNS name holds the suffix of the control server, such as
+`laptop.taildf854a.ts.net`. The operator gives a tailnet a second name with the key
+`alias`, and the daemon answers a name under that alias for the same peer:
 
-**Namespace upstreams.** Each namespace gets `/etc/netns/<ns>/resolv.conf` with the real
-upstream resolvers of the host. The daemon reads them from
-`/run/systemd/resolve/resolv.conf` or from `/etc/resolv.conf`, it removes a loopback
-address, and it falls back to `1.1.1.1`. The address `100.100.100.100` must not go into
-that file: `tailscaled` removes its own address as a self-loop, an empty resolver chain
-returns SERVFAIL for every query, and the daemon then answers no name at all.
+```yaml
+resolver:
+  mode: unified
+  resolve_aliases: true
+host_dns:
+  mode: resolved
+tailnets:
+  - id: Ta1a1a1a1a1CNTRL
+    alias: mmo
+    host_access: true
+```
 
-**A refresh after a restart.** The reconciler restarts an unhealthy `tailscaled`. The new
-process loads its state from disk and does not read `resolv.conf` again, which can leave
-its MagicDNS proxy stopped. The daemon waits for `BackendState=Running`, then sets
-`--accept-dns=false` and `--accept-dns=true`, which rebuilds the resolver chain. DNS
-therefore recovers on every restart, and the operator runs no `tailscale set` by hand.
+With this file, `laptop.mmo.ts.internal` resolves to the tailnet address of the peer
+`laptop` of that tailnet. The daemon answers an A record and an AAAA record with a time to
+live of 30 seconds. It writes no entry in `/etc/hosts` for this name.
+
+ICANN reserved the top level domain `.internal` in 2024 for a private name, therefore a
+name under `ts.internal` never collides with a name of the public domain name system.
+
+The name below the alias holds every label that the MagicDNS name holds below the suffix
+of the tailnet. A control server that names a peer `a.b.taildf854a.ts.net` therefore gives
+`a.b.mmo.ts.internal`, and a nested name keeps its shape.
+
+Three conditions apply, and the daemon answers no alias name when one of them is absent:
+
+- `resolver.resolve_aliases` is `true`.
+- `host_dns.mode` is `resolved`. The `hosts` mode writes a file, and a file holds no zone.
+- The tailnet holds an `alias` and `host_access: true`.
+
+An alias becomes one DNS label, therefore `LoadConfig` refuses an alias that is not a DNS
+label when `resolve_aliases` is set. An alias may hold `_`, and a DNS label may not.
+`LoadConfig` also refuses two aliases that differ by case alone, because a domain name
+folds case.
+
+The daemon builds the zone as follows:
+
+- The DNS forwarder answers on the host side veth address of each tailnet, on port 53, for
+  UDP and for TCP.
+- The daemon registers two domains on the veth device of that tailnet: the MagicDNS suffix
+  and `<alias>.ts.internal`. A link of systemd-resolved carries one server list for every
+  domain that it holds, therefore both domains reach the forwarder, and the forwarder
+  routes a MagicDNS query onward to the namespace.
+- A query of a name below the alias that the zone does not hold returns NXDOMAIN. The
+  forwarder sends no such query to an upstream server.
+- The reconciler rebuilds the zone on each tick, therefore a peer that the control server
+  adds resolves within one interval of `reconciler.interval`.
+
+The veth address carries the traffic of the namespace as well as the traffic of the host,
+so a process inside a namespace can send a packet to this port. The listener therefore
+answers the host alone: the host holds one end of every veth pair, and the namespace holds
+the other end, which the host does not hold. A query from an address that no interface of
+the host holds gets REFUSED, and the daemon logs the refusal with that address. A namespace
+reads no name of another tailnet through this port.
+
+Port 53 of the veth address may already belong to another resolver of the host. The daemon
+opens the socket before it registers a domain. If the socket does not open, the daemon logs
+the failure, registers the MagicDNS suffix alone, and points the link at the namespace side
+address, therefore MagicDNS keeps working and the alias zone alone is absent. The daemon
+opens the socket again on the next tick.
+
+A name that the key does not cover, such as `laptop.taildf854a.ts.net`, reaches
+systemd-resolved on the same path as before. The daemon rewrites no query.
+
+The key is unset by default, and an unset key changes nothing: the veth device carries the
+MagicDNS suffix alone, and the link names the namespace side address.
 
 ### The overlay mount on /etc
 
@@ -793,6 +852,7 @@ dns:
 resolver:
   mode: unified                    # the one mode the daemon runs
   bind_address: "127.0.0.53:5354"  # optional, and it defaults to 127.0.0.53:5354
+  resolve_aliases: false           # default: false. See "Short names for a peer" above.
 
 # The host DNS mode, which host access uses
 host_dns:

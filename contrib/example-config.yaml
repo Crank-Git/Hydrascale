@@ -42,6 +42,14 @@ resolver:
   # Default: 127.0.0.53:5354
   bind_address: "127.0.0.53:5354"
 
+  # Answer <peer>.<alias>.ts.internal with the tailnet address of that peer.
+  # The name below the alias holds every label that the MagicDNS name holds below the
+  # suffix of the tailnet, therefore a.b.tailXXXX.ts.net gives a.b.<alias>.ts.internal.
+  # The daemon needs host_dns.mode resolved. Each tailnet needs host_access: true and an
+  # alias that is a DNS label. A tailnet with no alias gets no zone.
+  # Default: false
+  resolve_aliases: false
+
 # Reconciler settings.
 reconciler:
   # How often Hydrascale checks the desired state against the actual state

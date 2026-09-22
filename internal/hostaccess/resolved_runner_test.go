@@ -18,7 +18,7 @@ func TestRegisterDomainsRunsTheFullCommandListInOrder(t *testing.T) {
 	rm := NewResolvedManager()
 	rm.Runner = rec
 
-	links := []Link{{Device: "vhcorp", Address: "10.200.1.46", Domain: "corp.ts.net"}}
+	links := []Link{{Device: "vhcorp", Address: "10.200.1.46", Domains: []string{"corp.ts.net"}}}
 	if err := rm.RegisterDomains(links); err != nil {
 		t.Fatalf("RegisterDomains: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestAMagicDNSSuffixThatIsNotADNSNameReachesNoCommand(t *testing.T) {
 	rm := NewResolvedManager()
 	rm.Runner = rec
 
-	err := rm.RegisterDomains([]Link{{Device: "vhcorp", Address: "10.200.1.46", Domain: hostile}})
+	err := rm.RegisterDomains([]Link{{Device: "vhcorp", Address: "10.200.1.46", Domains: []string{hostile}}})
 	if err == nil {
 		t.Fatal("RegisterDomains returned no error for a suffix that is not a DNS name")
 	}
@@ -85,8 +85,8 @@ func TestRegisterDomainsRegistersEachTailnetOnItsOwnDevice(t *testing.T) {
 	rm.Runner = rec
 
 	links := []Link{
-		{Device: "vhone", Address: "10.200.1.46", Domain: "one.ts.net"},
-		{Device: "vhtwo", Address: "10.200.2.202", Domain: "two.ts.net"},
+		{Device: "vhone", Address: "10.200.1.46", Domains: []string{"one.ts.net"}},
+		{Device: "vhtwo", Address: "10.200.2.202", Domains: []string{"two.ts.net"}},
 	}
 	if err := rm.RegisterDomains(links); err != nil {
 		t.Fatalf("RegisterDomains: %v", err)
@@ -101,7 +101,7 @@ func TestRegisterDomainsRejectsADeviceThatResolvectlReadsAsAnOption(t *testing.T
 	rm := NewResolvedManager()
 	rm.Runner = rec
 
-	links := []Link{{Device: "-interface=eth0", Address: "10.200.1.46", Domain: "corp.ts.net"}}
+	links := []Link{{Device: "-interface=eth0", Address: "10.200.1.46", Domains: []string{"corp.ts.net"}}}
 	if err := rm.RegisterDomains(links); err == nil {
 		t.Fatal("RegisterDomains returned no error for a device that is not a device name")
 	}
@@ -115,7 +115,7 @@ func TestRegisterDomainsRejectsAnAddressThatIsNotAnIPAddress(t *testing.T) {
 	rm := NewResolvedManager()
 	rm.Runner = rec
 
-	links := []Link{{Device: "vhcorp", Address: "127.0.0.53:5354", Domain: "corp.ts.net"}}
+	links := []Link{{Device: "vhcorp", Address: "127.0.0.53:5354", Domains: []string{"corp.ts.net"}}}
 	if err := rm.RegisterDomains(links); err == nil {
 		t.Fatal("RegisterDomains returned no error for an address that holds a port")
 	}
@@ -138,8 +138,8 @@ func TestDeregisterAllRevertsEveryDeviceThatItRegistered(t *testing.T) {
 	rm.Runner = rec
 
 	links := []Link{
-		{Device: "vhone", Address: "10.200.1.46", Domain: "one.ts.net"},
-		{Device: "vhtwo", Address: "10.200.2.202", Domain: "two.ts.net"},
+		{Device: "vhone", Address: "10.200.1.46", Domains: []string{"one.ts.net"}},
+		{Device: "vhtwo", Address: "10.200.2.202", Domains: []string{"two.ts.net"}},
 	}
 	if err := rm.RegisterDomains(links); err != nil {
 		t.Fatalf("RegisterDomains: %v", err)

@@ -606,7 +606,9 @@ func serveCmd() *cobra.Command {
 
 			// Stop DNS forwarder
 			if forwarder != nil {
-				forwarder.Stop()
+				if err := forwarder.Stop(); err != nil {
+					fmt.Fprintf(os.Stderr, "DNS forwarder shutdown warning: %v\n", err)
+				}
 			}
 
 			// Close event log

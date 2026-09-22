@@ -25,8 +25,8 @@ func TestTeardownRemovesTheNamesOfTheTailnetFromTheHostsFile(t *testing.T) {
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	m.Runner = quietRunner{}
-	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "ns-corp")
-	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "ns-home")
+	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "10.200.0.5", "ns-home")
 
 	before, err := os.ReadFile(hostsPath)
 	if err != nil {
@@ -56,8 +56,8 @@ func TestTeardownReturnsTheErrorOfAFailedHostsFileWrite(t *testing.T) {
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	m.Runner = quietRunner{}
-	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "ns-corp")
-	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "ns-home")
+	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "10.200.0.5", "ns-home")
 
 	// The write of the hosts file needs the directory, so remove it. One tailnet stays
 	// after the teardown, so the manager writes a block rather than nothing.
@@ -80,7 +80,7 @@ func TestTeardownAllReturnsTheErrorOfAFailedHostsFileWrite(t *testing.T) {
 
 	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
 	m.Runner = quietRunner{}
-	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "ns-corp")
+	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
 
 	// TeardownAll removes the last tailnet, so the manager rewrites the file without the
 	// block. Replace the file with a directory, because a rename over a directory fails.
