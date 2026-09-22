@@ -351,6 +351,8 @@ func validateTailnetID(id string) error {
 }
 
 // hasTailnet reports whether the configuration holds a tailnet with this identifier.
+// hasTailnet reports whether a tailnet holds id as its ID. The routes that change or read
+// one tailnet use id as it stands, therefore hasTailnet reads no alias.
 func hasTailnet(cfg *config.Config, id string) bool {
 	for _, tn := range cfg.Tailnets {
 		if tn.ID == id {
@@ -358,6 +360,15 @@ func hasTailnet(cfg *config.Config, id string) bool {
 		}
 	}
 	return false
+}
+
+// nameInUse reports whether a tailnet holds name as its ID or as its alias. The route that
+// adds a tailnet reads the alias as well, because a tailnet whose ID is the alias of
+// another tailnet makes the configuration file unreadable. Every later request then fails
+// on the load.
+func nameInUse(cfg *config.Config, name string) bool {
+	_, err := cfg.ResolveTailnetRef(name)
+	return err == nil
 }
 
 // handleTailnetAdd serves POST /api/tailnet/add.
@@ -390,8 +401,8 @@ func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if hasTailnet(cfg, req.ID) {
-		writeRefusal(w, fmt.Sprintf("tailnet %s already exists", req.ID))
+	if nameInUse(cfg, req.ID) {
+		writeRefusal(w, fmt.Sprintf("the name %s is the ID or the alias of a tailnet", req.ID))
 		return
 	}
 

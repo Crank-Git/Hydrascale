@@ -20,6 +20,15 @@ import (
 // Prevents path traversal and shell argument issues.
 var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
+// validAliasPattern restricts a tailnet alias to a letter, a digit, a hyphen and an
+// underscore. The set excludes the dot that an ID accepts, because an operator types an
+// alias by hand and a short flat name reads back without a question.
+// An alias reaches no path and no command argument: ResolveTailnetRef answers with the ID
+// of the tailnet, and the daemon builds every namespace name, device name and state
+// directory from that ID. The pattern therefore bounds the shape of a name, and it is not
+// the guard that keeps a path safe.
+var validAliasPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`)
+
 // DefaultConfigPath is the default location for the Hydrascale config file.
 // Config lives in /etc (declarative system config); runtime state and the API
 // socket live under /var/lib/hydrascale. This matches the systemd unit, so the
@@ -39,6 +48,12 @@ type Tailnet struct {
 	AuthKey    string `yaml:"auth_key,omitempty" json:"-"`
 	HostAccess *bool  `yaml:"host_access,omitempty"`
 	ControlURL string `yaml:"control_url,omitempty"`
+	// Alias is a second name for this tailnet. Every command that takes a tailnet ID takes
+	// the alias as well. An alias holds a letter, a digit, a hyphen and an underscore.
+	// The daemon reads the alias in two places only: it compares the alias to answer with
+	// the ID of the tailnet, and it prints the alias. No path, no device name and no
+	// command argument carries it.
+	Alias string `yaml:"alias,omitempty"`
 }
 
 // HostDNSConfig holds DNS configuration for host access.
@@ -157,19 +172,10 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	// Validate tailnet IDs
-	seen := make(map[string]bool, len(cfg.Tailnets))
+	if err := cfg.ValidateTailnetNames(); err != nil {
+		return nil, err
+	}
 	for _, tn := range cfg.Tailnets {
-		if tn.ID == "" {
-			return nil, fmt.Errorf("tailnet ID cannot be empty")
-		}
-		if !validIDPattern.MatchString(tn.ID) {
-			return nil, fmt.Errorf("invalid tailnet ID %q: must match [a-zA-Z0-9._-], start with alphanumeric, max 63 chars", tn.ID)
-		}
-		if seen[tn.ID] {
-			return nil, fmt.Errorf("duplicate tailnet ID %q", tn.ID)
-		}
-		seen[tn.ID] = true
-
 		if err := ValidateControlURL(tn.ControlURL); err != nil {
 			return nil, fmt.Errorf("tailnet %q: %w", tn.ID, err)
 		}
@@ -273,6 +279,67 @@ func DefaultConfig() *Config {
 // IsValidID reports whether id is a valid tailnet ID.
 func IsValidID(id string) bool {
 	return validIDPattern.MatchString(id)
+}
+
+// ValidateTailnetNames checks the ID and the alias of every tailnet. An ID is unique among
+// the IDs, an alias is unique among the aliases, and an alias is the ID of no tailnet. An
+// ID obeys validIDPattern and an alias obeys validAliasPattern.
+// LoadConfig and SaveConfig both call ValidateTailnetNames. A writer that appends a tailnet
+// therefore cannot store a file that the loader refuses, which would leave every later
+// command without a configuration. See issue for `hydrascale add <alias>`.
+// ValidateTailnetNames returns the first failure that it finds.
+func (c *Config) ValidateTailnetNames() error {
+	ids := make(map[string]bool, len(c.Tailnets))
+	for _, tn := range c.Tailnets {
+		if tn.ID == "" {
+			return fmt.Errorf("tailnet ID cannot be empty")
+		}
+		if !validIDPattern.MatchString(tn.ID) {
+			return fmt.Errorf("invalid tailnet ID %q: must match [a-zA-Z0-9._-], start with alphanumeric, max 63 chars", tn.ID)
+		}
+		if ids[tn.ID] {
+			return fmt.Errorf("duplicate tailnet ID %q", tn.ID)
+		}
+		ids[tn.ID] = true
+	}
+
+	// The alias check runs after the loop above. An alias must differ from the ID of every
+	// tailnet, and not only from the IDs that the file declares before it.
+	aliases := make(map[string]string, len(c.Tailnets))
+	for _, tn := range c.Tailnets {
+		if tn.Alias == "" {
+			continue
+		}
+		if !validAliasPattern.MatchString(tn.Alias) {
+			return fmt.Errorf("invalid alias %q of tailnet %q: must match [a-zA-Z0-9_-], start with alphanumeric, max 63 chars", tn.Alias, tn.ID)
+		}
+		if ids[tn.Alias] {
+			return fmt.Errorf("alias %q of tailnet %q is the ID of a tailnet", tn.Alias, tn.ID)
+		}
+		if other, ok := aliases[tn.Alias]; ok {
+			return fmt.Errorf("duplicate alias %q: tailnet %q and tailnet %q both hold it", tn.Alias, other, tn.ID)
+		}
+		aliases[tn.Alias] = tn.ID
+	}
+	return nil
+}
+
+// ResolveTailnetRef returns the ID of the tailnet that ref names. ref is an ID or an
+// alias, and an ID wins over an alias. The loader rejects a file in which an alias equals
+// an ID, therefore the two never name different tailnets.
+// ResolveTailnetRef returns an error when no tailnet holds ref.
+func (c *Config) ResolveTailnetRef(ref string) (string, error) {
+	for _, tn := range c.Tailnets {
+		if tn.ID == ref {
+			return tn.ID, nil
+		}
+	}
+	for _, tn := range c.Tailnets {
+		if tn.Alias != "" && tn.Alias == ref {
+			return tn.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no tailnet holds the ID or the alias %q", ref)
 }
 
 // ValidateBindAddress checks that addr is empty or a loopback host:port.
@@ -384,6 +451,12 @@ func ResolveControlURL(perTailnet, global string) string {
 
 // SaveConfig writes the config to disk atomically (temp file + rename).
 func SaveConfig(path string, cfg *Config) error {
+	// A file that holds a name collision stops every later command, because each one loads
+	// the file first. SaveConfig therefore refuses the write rather than store that state.
+	if err := cfg.ValidateTailnetNames(); err != nil {
+		return err
+	}
+
 	// Ensure the reconciler raw interval is set
 	if cfg.Reconciler.Interval > 0 && cfg.Reconciler.RawInterval == "" {
 		cfg.Reconciler.RawInterval = cfg.Reconciler.Interval.String()

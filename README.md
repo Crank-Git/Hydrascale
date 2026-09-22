@@ -765,6 +765,7 @@ host_access: false
 # The tailnets that the daemon manages
 tailnets:
   - id: "corp-prod"                # unique; letters, digits, dots, hyphens, underscores; 63 characters at most
+    alias: "prod"                  # optional second name; letters, digits, hyphens, underscores
     exit_node: "node1.example.com" # optional exit node name
     auth_key: "tskey-auth-xxxxx"   # optional auth key for an unattended setup
     host_access: true              # optional, and it overrides the global value

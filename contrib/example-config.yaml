@@ -12,6 +12,10 @@ tailnets:
   # HYDRASCALE_AUTHKEY_<ID> (uppercased id), e.g. HYDRASCALE_AUTHKEY_PERSONAL
   - id: personal
     auth_key: tskey-auth-xxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    # An alias is a second name for this tailnet. Every command that takes an id takes the
+    # alias, for example `hydrascale exec home -- ping 4.2.2.2`. An alias holds letters,
+    # digits, hyphens and underscores, it is unique, and it is the id of no tailnet.
+    alias: home
 
   # Example 2: Work tailnet that routes all traffic through an exit node.
   # exit_node is the hostname (or IP) of the Tailscale node to use as an

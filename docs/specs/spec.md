@@ -106,6 +106,7 @@ the operator what is allowed.
 | tag | noun | An ownership label that a control server assigns to a device, named `tag:<name>` in a policy document. | label, group (for a tag) |
 | group | noun | A named set of users that a policy document's `groups` block defines, named `group:<name>`. | tag (for a group), team |
 | host alias | noun | A named alias for a device or a subnet that a policy document's `hosts` block defines. Distinct from `host`, the Linux machine that runs the daemon. | host, alias |
+| tailnet alias | noun | A second name for a tailnet that the configuration file declares in the key `alias`. It holds a letter, a digit, a hyphen and an underscore. Every command that takes a tailnet ID takes it. Distinct from `host alias`, which a policy document defines. | alias, nickname, short name, label |
 | autogroup | noun | A control-server-defined group that a policy document references by name, such as `autogroup:internet`. | built-in group |
 | allow rule | noun | One entry of a policy document's `acls` block: a source, a destination, and a port list. | acl, rule |
 | grant | noun | One entry of a policy document's `grants` block: a source, a destination, and an optional application capability. | acl (for a grant) |
