@@ -519,7 +519,7 @@ func serveCmd() *cobra.Command {
 			var ha *hostaccess.Manager
 			dnsMode := cfg.EffectiveHostDNSMode()
 			if dnsMode != "" {
-				ha = hostaccess.NewManager(dnsMode, "/etc/hosts", cfg.InfraSubnet)
+				ha = hostaccess.NewManager(dnsMode, "/etc/hosts", cfg.InfraSubnet, cfg.RouteTable)
 				if forwarder != nil {
 					ha.SetForwarder(forwarder)
 				}

@@ -533,7 +533,8 @@ access:
 
 1. **Host routes.** The daemon adds a host route for the Tailscale address of each peer,
    for IPv4 and for IPv6, through the veth pair of the namespace. The kernel then sends a
-   packet to the right namespace.
+   packet to the right namespace. The daemon writes each route into the main table, or into
+   the table that `route_table` declares. See "A dedicated route table" below.
 
 2. **Namespace masquerade.** The daemon adds an iptables masquerade rule inside the
    namespace on `tailscale0`. Traffic of the host then carries the Tailscale address of the
@@ -717,7 +718,34 @@ daemon removes:
 - The masquerade rule and the DNS DNAT rule inside the namespace.
 - The entries of that tailnet in `/etc/hosts`, or the `systemd-resolved` registration.
 
-A graceful shutdown removes the same state.
+A graceful shutdown removes the same state. A graceful shutdown also removes the two
+routing policy rules and empties the route table, when `route_table` declares one.
+
+### A dedicated route table
+
+The key `route_table` names the routing table that holds every route the daemon writes on
+the host. Leave the key out to keep the main table, which is the behaviour of version 0.9.
+
+53 is the suggested value, because `tailscaled` already uses the table 52 inside each
+namespace. The kernel reserves 253, 254 and 255, and the daemon refuses each of them.
+
+```yaml
+route_table: 53
+```
+
+A route in a table other than the main table reaches no packet until a routing policy rule
+sends a lookup to that table. The daemon therefore owns one rule per address family:
+
+```
+ip rule add priority 32000 from all lookup 53
+ip -6 rule add priority 32000 from all lookup 53
+```
+
+The priority 32000 comes after every rule of `tailscaled`, which holds 5210 to 5270, and
+before the main table, which the kernel consults at 32766. A host that runs its own
+`tailscaled` therefore keeps its precedence, and a route of the daemon still wins over the
+main table. The daemon reads the rule list on each tick and it adds no second copy. A
+shutdown removes each rule and empties the table.
 
 ### Compatibility
 
@@ -807,6 +835,13 @@ host_access: false
 # (default: 10.200.0.0/16). Change it when 10.200.0.0/16 collides with a route on
 # the network. It must be an IPv4 CIDR of at least /16.
 # infra_subnet: "10.200.0.0/16"
+
+# The routing table that holds every route the daemon writes on the host
+# (default: absent, which is the main table). A declared table makes the daemon own
+# one `ip rule` per address family, at the priority 32000, which sends a lookup to
+# that table. 53 is the suggested value, because tailscaled already uses the table 52
+# inside each namespace. The kernel reserves 253, 254 and 255.
+# route_table: 53
 
 # The Unix group that reaches the control socket (default: empty, which is root only).
 # Warning: membership of this group is equivalent to root access on this host, because a
@@ -1264,6 +1299,20 @@ infra_subnet: "10.201.0.0/16"
 ```
 Then restart the daemon. It deletes the namespaces and builds them again with the new
 addresses.
+
+**A host route does not carry traffic**
+A route in a table other than the main table reaches no packet until a routing policy rule
+sends a lookup to that table. Read the rules and the table:
+```bash
+ip rule
+ip -6 rule
+ip route show table 53
+ip -6 route show table 53
+```
+The rule list holds `32000: from all lookup 53` for IPv4 and for IPv6, and the table holds
+one route per peer. When the rule is absent, read the log for `hostaccess`. When another
+rule of the operator already holds the priority 32000, the daemon adds none and it states
+the table that the rule looks up.
 
 **`name not a valid ifname`**
 An older version used the whole tailnet identifier as the interface name, which passes the

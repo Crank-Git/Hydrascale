@@ -115,6 +115,13 @@ type Config struct {
 	HostDNS     HostDNSConfig    `yaml:"host_dns,omitempty"`
 	DNS         DNSConfig        `yaml:"dns,omitempty"`
 	InfraSubnet string           `yaml:"infra_subnet,omitempty"` // Default: 10.200.0.0/16
+	// RouteTable names the routing table that holds every route the daemon writes on the
+	// host. The value 0 means that the file declares no table: the daemon writes into the
+	// main table and it writes no routing policy rule, which is the behaviour of version
+	// 0.9. A declared table makes the daemon own one `ip rule` per address family, which
+	// sends a lookup to that table. The suggested value is 53, because tailscaled already
+	// owns the table 52 inside each namespace.
+	RouteTable int `yaml:"route_table,omitempty"`
 	// SocketGroup, when set, makes the API control socket group-accessible:
 	// the daemon chowns /var/lib/hydrascale + api.sock to root:<group> with
 	// group-traversable/rw modes. Add a trusted user to that group to let it
@@ -273,7 +280,49 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
+	if err := ValidateRouteTable(cfg.RouteTable); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+// Reserved routing table numbers. The kernel gives each of these a meaning, therefore the
+// daemon refuses one: a route that the daemon writes into such a table changes the routing
+// of the host rather than holding the routes of the daemon apart.
+const (
+	// RouteTableDefault is the table 253, which the kernel names `default`.
+	RouteTableDefault = 253
+	// RouteTableMain is the table 254, which the kernel names `main`.
+	RouteTableMain = 254
+	// RouteTableLocal is the table 255, which the kernel names `local`.
+	RouteTableLocal = 255
+	// MaxRouteTable is the largest routing table number that the kernel accepts. The type
+	// is int64, because the value passes the range of int on a 32-bit host.
+	MaxRouteTable int64 = 4294967294
+)
+
+// ValidateRouteTable reports whether the value of `route_table` is one that the daemon
+// writes into.
+//
+// The value 0 means that the file declares no table, which ValidateRouteTable accepts.
+// ValidateRouteTable rejects a negative number, a number above 4294967294, and each of the
+// reserved tables 253, 254 and 255.
+func ValidateRouteTable(table int) error {
+	switch {
+	case table == 0:
+		return nil
+	case table < 0:
+		return fmt.Errorf("invalid route_table %d: declare a positive number", table)
+	case int64(table) > MaxRouteTable:
+		return fmt.Errorf("invalid route_table %d: the largest table is %d", table, MaxRouteTable)
+	case table == RouteTableDefault || table == RouteTableMain || table == RouteTableLocal:
+		return fmt.Errorf(
+			"invalid route_table %d: the kernel reserves %d (default), %d (main) and %d (local); declare another table, such as 53",
+			table, RouteTableDefault, RouteTableMain, RouteTableLocal)
+	default:
+		return nil
+	}
 }
 
 // DefaultConfig returns a default v2 configuration.

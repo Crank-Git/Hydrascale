@@ -119,6 +119,8 @@ the operator what is allowed.
 | document model | noun | The in-memory structure that the daemon builds from a policy document's text, used to read and change a policy section without altering a byte it does not touch. | AST, parse tree, document object |
 | visual editor | noun | The policy view's region that draws tags, groups, and rules instead of raw text. | drawn editor, GUI editor |
 | text editor | noun | The policy view's region that shows the huJSON document as editable text, which `features/08-upstream-policy.md` builds. | raw editor, code editor |
+| route table | noun | The routing table that holds every route the daemon writes on the host, which the configuration key `route_table` declares. Distinct from the table 52, which tailscaled owns inside each namespace. | routing table, table |
+| routing policy rule | noun | One entry of `ip rule` that sends a route lookup to a named table at a stated priority. | ip rule, policy route, rule |
 | result region | noun | The policy view's region that states the answer of the last validate or push, with one line per error. | result panel, status area, message box |
 
 ## Goals
@@ -275,6 +277,10 @@ tailnets:
 console:
   enabled: true
   bind_address: 127.0.0.1:9443
+
+# The routing table that holds every route the daemon writes on the host. The key is
+# absent by default, which keeps the main table and writes no routing policy rule.
+route_table: 53
 
 access:
   # "enforce" applies the rule set. "observe" logs what it would deny and denies nothing.

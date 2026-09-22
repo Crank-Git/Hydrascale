@@ -285,11 +285,14 @@ argument list.
 
 | File | Lines | Command | Argument origins |
 |---|---|---|---|
-| `internal/hostaccess/routes.go` | 220, 230 | `ip netns exec <ns> ip [-6] route show table 52` | `nsName` from the reconciler, derived from the tailnet id |
-| `internal/hostaccess/routes.go` | 296 | `ip [-6] route get <addr>` | `dest` from the control server |
-| `internal/hostaccess/routes.go` | 361, 365, 433, 442 | `ip [-6] route show` | constants |
-| `internal/hostaccess/routes.go` | 380, 395 | `ip [-6] route replace <dest> via <gw> dev <veth>` | `dest` from the control server; `gw` and `veth` from the reconciler |
-| `internal/hostaccess/routes.go` | 387, 402, 436, 445 | `ip [-6] route del <dest>` | `dest` from the host route table |
+| `internal/hostaccess/routes.go` | 296, 306 | `ip netns exec <ns> ip [-6] route show table 52` | `nsName` from the reconciler, derived from the tailnet id |
+| `internal/hostaccess/routes.go` | 396 | `ip [-6] route get <addr>` | `dest` from the control server |
+| `internal/hostaccess/routes.go` | 629, 635, 716, 729 | `ip [-6] route show [table <n>]` | constants; `<n>` is `route_table`, which `config.ValidateRouteTable` accepts as a number that is neither negative, nor above 4294967294, nor one of the reserved tables 253, 254 and 255 |
+| `internal/hostaccess/routes.go` | 649, 665 | `ip [-6] route replace <dest> [via <gw>] dev <veth> [table <n>]` | `dest` from the control server; `gw` and `veth` from the reconciler; `<n>` from `route_table` |
+| `internal/hostaccess/routes.go` | 657, 673, 722, 735 | `ip [-6] route del <dest> [table <n>]` | `dest` from the host route table; `<n>` from `route_table` |
+| `internal/hostaccess/routes.go` | 517 | `ip [-6] rule show` | constants |
+| `internal/hostaccess/routes.go` | 529, 541 | `ip [-6] rule add priority 32000 from all lookup <n>`, `ip [-6] rule del priority 32000 from all lookup <n>` | `32000` is the constant `hostRouteRulePriority`; `<n>` from `route_table` |
+| `internal/hostaccess/routes.go` | 551 | `ip [-6] route flush table <n>` | `<n>` from `route_table` |
 | `internal/hostaccess/resolved.go` | 19 | `systemctl is-active --quiet systemd-resolved` | constants |
 | `internal/hostaccess/resolved.go` | 36 | `resolvectl domain lo ~<domain>` | `domain` from the control server |
 | `internal/hostaccess/resolved.go` | 40, 52 | `resolvectl dns lo 127.0.0.53:5354`, `resolvectl revert lo` | constants |
@@ -452,7 +455,8 @@ result.
 | `<state>/etc-upper` and `<state>/etc-work` | `cmd/hydrascale/nsdaemon.go:46` and `:49` | `cmd/hydrascale/nsdaemon.go:44` and `:45` on the next start, and the state directory removal | No — `SA-32` |
 | The overlay mount on `/etc` | `cmd/hydrascale/nsdaemon.go:55` | The mount namespace ends with the process | Not applicable |
 | `/var/lib/hydrascale/state/<id>` | `internal/daemon/daemon.go:114` | `internal/reconciler/reconciler.go:327` | No — `SA-29` |
-| The host routes to the peers | `internal/hostaccess/routes.go:333` | `internal/hostaccess/routes.go:432`, through `TeardownAll` at `internal/reconciler/reconciler.go:633` | No — `SA-25` |
+| The host routes to the peers | `internal/hostaccess/routes.go:585` | `internal/hostaccess/routes.go:706`, through `TeardownAll` at `internal/reconciler/reconciler.go:633` | No — `SA-25` |
+| The two routing policy rules of the route table | `internal/hostaccess/routes.go:509` | `internal/hostaccess/routes.go:566`, through `TeardownAll` at `internal/reconciler/reconciler.go:633` | No — `SA-25` |
 | The `/etc/hosts` block | `internal/hostaccess/hosts.go` | `syncDNS`, through `TeardownAll` at `internal/reconciler/reconciler.go:633` | No — `SA-25` |
 | The systemd-resolved registration | `internal/hostaccess/resolved.go` | `DeregisterAll` at `internal/hostaccess/hostaccess.go:110` | No — see `SA-39` |
 | `/var/lib/hydrascale/api.sock` | `internal/api/server.go:88` | `internal/api/server.go:125` | No — `SA-42` |

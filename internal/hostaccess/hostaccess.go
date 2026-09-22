@@ -35,8 +35,12 @@ type Manager struct {
 	dnsMode     string // "hosts" or "resolved"
 	hostsPath   string
 	infraSubnet string
-	resolved    *ResolvedManager
-	forwarder   DNSForwarder
+	// routeTable is the routing table that holds every route the Manager writes on the
+	// host, which the configuration key `route_table` declares. The value 0 means that the
+	// Manager writes into the main table and owns no routing policy rule.
+	routeTable int
+	resolved   *ResolvedManager
+	forwarder  DNSForwarder
 
 	// resolveAliases holds the value of resolver.resolve_aliases. With the value false,
 	// syncDNS writes exactly the registration that the daemon writes without the key.
@@ -51,7 +55,10 @@ type Manager struct {
 }
 
 // NewManager creates a new host access Manager.
-func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
+//
+// routeTable is the value of the configuration key `route_table`. The value 0 means that
+// the Manager writes every host route into the main table and owns no routing policy rule.
+func NewManager(dnsMode string, hostsPath string, infraSubnet string, routeTable int) *Manager {
 	if hostsPath == "" {
 		hostsPath = "/etc/hosts"
 	}
@@ -63,6 +70,7 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string) *Manager {
 		dnsMode:        dnsMode,
 		hostsPath:      hostsPath,
 		infraSubnet:    infraSubnet,
+		routeTable:     routeTable,
 		activeTailnets: make(map[string]TailnetPeers),
 	}
 	if dnsMode == "resolved" {
@@ -179,6 +187,12 @@ func (m *Manager) TeardownAll() error {
 		if err := m.resolved.DeregisterAll(); err != nil {
 			errs = append(errs, err)
 		}
+	}
+
+	// The daemon owns the routing policy rule and the route table, therefore the last
+	// teardown removes both. A tailnet teardown removes the routes of that tailnet alone.
+	if err := m.RemoveHostRouteTable(); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

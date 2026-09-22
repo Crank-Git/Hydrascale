@@ -58,6 +58,15 @@ reconciler:
   # Default: 10s
   interval: 10s
 
+# The routing table that holds every route the daemon writes on the host.
+# Leave this key out to keep the main table, which is the behaviour of version 0.9.
+# A declared table makes the daemon own one `ip rule` per address family, at the
+# priority 32000, which sends a lookup to that table. The daemon adds each rule at
+# start and it removes each rule at shutdown.
+# 53 is the suggested value, because tailscaled already uses the table 52 inside
+# each namespace. The kernel reserves 253, 254 and 255.
+# route_table: 53
+
 # Optional path for a JSON-lines event log.
 # Each reconcile action is written as a JSON object with a timestamp, type,
 # tailnet id, and outcome.  The directory must exist and be writable.

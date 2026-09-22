@@ -41,7 +41,7 @@ func TestSync_FullFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	status := makeTestStatus()
 
@@ -85,7 +85,7 @@ func TestSync_NilStatus(t *testing.T) {
 	}
 	info1, _ := os.Stat(hostsPath)
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	m.Sync("havoc", nil, "10.0.0.1", "veth0", "10.0.0.2", "ns-havoc")
 
@@ -106,7 +106,7 @@ func TestSync_PartialFailure(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	status := makeTestStatus()
 
@@ -168,7 +168,7 @@ func TestSyncDNS_SetsDomainRoutes(t *testing.T) {
 	hostsPath := dir + "/hosts"
 
 	fwd := &mockForwarder{}
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	m.SetForwarder(fwd)
 
@@ -196,7 +196,7 @@ func TestSyncDNS_NoForwarder(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := dir + "/hosts"
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	status := &daemon.TailscaleStatus{MagicDNSSuffix: "corp.ts.net"}
 
@@ -211,7 +211,7 @@ func TestSyncDNS_EmptySuffix(t *testing.T) {
 	hostsPath := dir + "/hosts"
 
 	fwd := &mockForwarder{}
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	m.SetForwarder(fwd)
 
@@ -235,7 +235,7 @@ func TestTeardown_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 
 	// Should not panic

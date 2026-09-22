@@ -237,6 +237,8 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>document model</td><td>noun</td><td>The in-memory structure that the daemon builds from a policy document's text, used to read and change a policy section without altering a byte it does not touch.</td><td>AST, parse tree, document object</td></tr>
 <tr><td>visual editor</td><td>noun</td><td>The policy view's region that draws tags, groups, and rules instead of raw text.</td><td>drawn editor, GUI editor</td></tr>
 <tr><td>text editor</td><td>noun</td><td>The policy view's region that shows the huJSON document as editable text, which <code>features/08-upstream-policy.md</code> builds.</td><td>raw editor, code editor</td></tr>
+<tr><td>route table</td><td>noun</td><td>The routing table that holds every route the daemon writes on the host, which the configuration key <code>route_table</code> declares. Distinct from the table 52, which tailscaled owns inside each namespace.</td><td>routing table, table</td></tr>
+<tr><td>routing policy rule</td><td>noun</td><td>One entry of <code>ip rule</code> that sends a route lookup to a named table at a stated priority.</td><td>ip rule, policy route, rule</td></tr>
 <tr><td>result region</td><td>noun</td><td>The policy view's region that states the answer of the last validate or push, with one line per error.</td><td>result panel, status area, message box</td></tr>
 </table></div>
 <h2 id="goals">Goals</h2>
@@ -368,6 +370,10 @@ tailnets:
 console:
   enabled: true
   bind_address: 127.0.0.1:9443
+
+# The routing table that holds every route the daemon writes on the host. The key is
+# absent by default, which keeps the main table and writes no routing policy rule.
+route_table: 53
 
 access:
   # "enforce" applies the rule set. "observe" logs what it would deny and denies nothing.

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/execx"
 )
 
 // statusWithPeer returns a status that holds one peer with one IPv4 address.
@@ -23,7 +24,7 @@ func TestTeardownRemovesTheNamesOfTheTailnetFromTheHostsFile(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
 	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "10.200.0.5", "ns-home")
@@ -54,7 +55,7 @@ func TestTeardownReturnsTheErrorOfAFailedHostsFileWrite(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
 	m.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "10.200.0.5", "ns-home")
@@ -78,7 +79,7 @@ func TestTeardownAllReturnsTheErrorOfAFailedHostsFileWrite(t *testing.T) {
 	dir := t.TempDir()
 	hostsPath := filepath.Join(dir, "hosts")
 
-	m := NewManager("hosts", hostsPath, "10.200.0.0/16")
+	m := NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
 	m.Runner = quietRunner{}
 	m.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
 
@@ -93,5 +94,47 @@ func TestTeardownAllReturnsTheErrorOfAFailedHostsFileWrite(t *testing.T) {
 
 	if err := m.TeardownAll(); err == nil {
 		t.Fatal("TeardownAll returned no error for a failed hosts file write")
+	}
+}
+
+func TestTeardownAllRemovesTheRuleAndEmptiesTheRouteTable(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{}, "ip", "rule", "del", "priority", "32000", "from", "all", "lookup", "53")
+	rec.Script(execx.Result{}, "ip", "-6", "rule", "del", "priority", "32000", "from", "all", "lookup", "53")
+	rec.Script(execx.Result{}, "ip", "route", "flush", "table", "53")
+	rec.Script(execx.Result{}, "ip", "-6", "route", "flush", "table", "53")
+	m := &Manager{Runner: rec, routeTable: 53}
+
+	if err := m.TeardownAll(); err != nil {
+		t.Fatalf("TeardownAll: %v", err)
+	}
+
+	want := []string{
+		"ip rule del priority 32000 from all lookup 53",
+		"ip -6 rule del priority 32000 from all lookup 53",
+		"ip route flush table 53",
+		"ip -6 route flush table 53",
+	}
+	calls := rec.Calls()
+	if len(calls) != len(want) {
+		t.Fatalf("TeardownAll ran %d commands, want %d:\n%s", len(calls), len(want), callList(calls))
+	}
+	for i := range want {
+		if calls[i].String() != want[i] {
+			t.Errorf("command %d = %q, want %q", i, calls[i].String(), want[i])
+		}
+	}
+}
+
+func TestTeardownAllRunsNoRouteTableCommandWhenNoRouteTableIsDeclared(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	m := &Manager{Runner: rec}
+
+	if err := m.TeardownAll(); err != nil {
+		t.Fatalf("TeardownAll: %v", err)
+	}
+	if len(rec.Calls()) != 0 {
+		t.Errorf("TeardownAll ran %d commands for a manager that declares no route table:\n%s",
+			len(rec.Calls()), callList(rec.Calls()))
 	}
 }

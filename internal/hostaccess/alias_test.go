@@ -57,7 +57,7 @@ func (r *aliasRunner) resolvectl(verb string) ([]string, bool) {
 func aliasManager(t *testing.T) (*Manager, *aliasRunner) {
 	t.Helper()
 	run := &aliasRunner{}
-	m := NewManager("resolved", t.TempDir()+"/hosts", "10.200.0.0/16")
+	m := NewManager("resolved", t.TempDir()+"/hosts", "10.200.0.0/16", 0)
 	m.Runner = run
 	m.resolved = &ResolvedManager{Runner: run}
 	return m, run
