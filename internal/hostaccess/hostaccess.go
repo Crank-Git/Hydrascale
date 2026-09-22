@@ -162,7 +162,7 @@ func (m *Manager) syncDNS() error {
 	m.mu.Lock()
 	allV4 := make(map[string]string)
 	allV6 := make(map[string]string)
-	var domains []string
+	var links []Link
 	domainRoutes := make(map[string]string)
 
 	for _, peers := range m.activeTailnets {
@@ -173,10 +173,16 @@ func (m *Manager) syncDNS() error {
 		for k, v := range v6 {
 			allV6[k] = v
 		}
-		if peers.MagicDNSSuffix != "" {
-			domains = append(domains, peers.MagicDNSSuffix)
-			if peers.VethGateway != "" {
-				domainRoutes[peers.MagicDNSSuffix] = peers.VethGateway
+		if peers.MagicDNSSuffix != "" && peers.VethGateway != "" {
+			domainRoutes[peers.MagicDNSSuffix] = peers.VethGateway
+			// systemd-resolved registers the suffix on the veth device of the tailnet,
+			// because it refuses a per-link domain on the loopback device.
+			if peers.VethHost != "" {
+				links = append(links, Link{
+					Device:  peers.VethHost,
+					Address: peers.VethGateway,
+					Domain:  peers.MagicDNSSuffix,
+				})
 			}
 		}
 	}
@@ -191,7 +197,7 @@ func (m *Manager) syncDNS() error {
 		}
 	case "resolved":
 		if m.resolved != nil {
-			if e := m.resolved.RegisterDomains(domains); e != nil {
+			if e := m.resolved.RegisterDomains(links); e != nil {
 				err = fmt.Errorf("host-access: resolved registration failed: %w", e)
 			}
 		}

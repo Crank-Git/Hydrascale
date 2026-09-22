@@ -9,7 +9,7 @@ import (
 func TestResolvedManager_NilWhenUnavailable(t *testing.T) {
 	rm := NewResolvedManager()
 	rm.Runner = quietRunner{}
-	err := rm.RegisterDomains([]string{"example.com"})
+	err := rm.RegisterDomains([]Link{{Device: "vhcorp", Address: "10.200.1.46", Domain: "example.com"}})
 	// Either succeeds (resolved is running) or returns a clear error — no panic.
 	if err != nil {
 		t.Logf("RegisterDomains returned expected error (resolved unavailable): %v", err)
@@ -37,7 +37,7 @@ func TestResolvedManager_EmptyDomains(t *testing.T) {
 	if err := rm.RegisterDomains(nil); err != nil {
 		t.Errorf("expected nil error for nil domains, got: %v", err)
 	}
-	if err := rm.RegisterDomains([]string{}); err != nil {
+	if err := rm.RegisterDomains([]Link{}); err != nil {
 		t.Errorf("expected nil error for empty domains, got: %v", err)
 	}
 }
