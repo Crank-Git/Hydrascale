@@ -92,6 +92,7 @@ export function dnsModel(body) {
       changedAt: "",
       changed: false,
       namespaces: [],
+      splitDNS: [],
     };
   }
 
@@ -120,6 +121,11 @@ export function dnsModel(body) {
     changedAt: body.host_resolv_changed_at || "",
     changed: (body.host_resolv_changed_at || "") !== "",
     namespaces,
+    splitDNS: (body.split_dns || []).map((entry) => ({
+      tailnet: entry.tailnet || "",
+      domains: entry.domains || [],
+      conflict: entry.conflict || "",
+    })),
   };
 }
 
@@ -174,6 +180,34 @@ export function dnsMarkup(model) {
       (model.upstreams.length === 0
         ? '<p class="note">The forwarder reports no upstream. An upstream arrives when the daemon reads the host file, or when a tailnet reports a MagicDNS server.</p>'
         : "") +
+      "</section>",
+  );
+
+  // FR-split-9. A split DNS domain that two tailnets claim is an error state, so the
+  // console draws the alert. An empty set is no error, so absence is a note and no card
+  // draws a denial.
+  const splitAlerts = model.splitDNS
+    .filter((entry) => entry.conflict !== "")
+    .map((entry) =>
+      alert("crit", [entry.conflict.replace(/^./, (letter) => letter.toUpperCase()) + "."]),
+    )
+    .join("");
+  const splitRows = model.splitDNS
+    .filter((entry) => entry.domains.length > 0)
+    .map(
+      (entry) =>
+        '<div class="nsrow">' +
+        `<span class="id mono">${esc(entry.tailnet)}</span>` +
+        `<span class="domains mono">${entry.domains.map((domain) => esc(domain)).join("<br>")}</span>` +
+        "</div>",
+    )
+    .join("");
+  parts.push(
+    '<section class="card"><h2>Split DNS</h2>' +
+      '<p class="note">The control server of a tailnet routes each split domain to the resolver of that tailnet.</p>' +
+      (splitRows === "" && splitAlerts === ""
+        ? '<p class="note">No tailnet reports a split DNS domain.</p>'
+        : `<div class="nsrows">${splitRows}</div>` + splitAlerts) +
       "</section>",
   );
 

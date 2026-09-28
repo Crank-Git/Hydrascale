@@ -13,6 +13,7 @@ import (
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
+	"hydrascale/internal/hostaccess"
 	"hydrascale/internal/reconciler"
 )
 
@@ -128,6 +129,45 @@ func TestDNSEndpoint_returns_the_checksum_and_the_protected_state_of_each_namesp
 		if ns.Error != "" {
 			t.Errorf("error of %q = %q, want an empty string", id, ns.Error)
 		}
+	}
+}
+
+// silentRunner answers every route command of the host access manager with empty output
+// and no error, so that the test changes no route on the host.
+type silentRunner struct{}
+
+func (silentRunner) Run(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+
+func TestDNSEndpoint_returns_the_split_dns_of_each_tailnet(t *testing.T) {
+	cfgPath := writeTestConfig(t, "alpha", "beta")
+	ha := hostaccess.NewManager("hosts", filepath.Join(t.TempDir(), "hosts"), "10.200.0.0/16", 0)
+	ha.Runner = silentRunner{}
+	r := reconciler.New(cfgPath, newMockNS(), newMockDaemon(), &mockRouting{}, time.Second, ha, "10.200.0.0/16")
+
+	ha.Sync("alpha", &daemon.TailscaleStatus{SplitDNSRoutes: []string{"acme.example.com"}},
+		"10.200.0.2", "vh001", "10.200.0.1", "ns-alpha")
+	ha.Sync("beta", &daemon.TailscaleStatus{SplitDNSRoutes: []string{"acme.example.com"}},
+		"10.200.0.6", "vh002", "10.200.0.5", "ns-beta")
+
+	srv, _, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	body := getDNS(t, srv)
+
+	if body.SplitDNS == nil {
+		t.Fatal("split_dns is null, want a list")
+	}
+	if len(body.SplitDNS) != 2 {
+		t.Fatalf("len(split_dns) = %d, want 2", len(body.SplitDNS))
+	}
+	if body.SplitDNS[0].Tailnet != "alpha" || body.SplitDNS[1].Tailnet != "beta" {
+		t.Fatalf("split_dns tailnets = %v, want [alpha beta]", body.SplitDNS)
+	}
+	if len(body.SplitDNS[0].Domains) != 1 || body.SplitDNS[0].Domains[0] != "acme.example.com" {
+		t.Errorf("alpha split_dns = %+v, want the domain acme.example.com", body.SplitDNS[0])
+	}
+	if body.SplitDNS[1].Conflict == "" {
+		t.Errorf("beta split_dns = %+v, want a conflict", body.SplitDNS[1])
 	}
 }
 

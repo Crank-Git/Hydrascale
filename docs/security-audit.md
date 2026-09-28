@@ -1221,6 +1221,10 @@ belongs with it. Record this finding for the console work.
 - **Condition**: The control server returns a crafted MagicDNS suffix, and the
   configuration selects the `resolved` DNS mode.
 - **Epic 3**: Yes. Epic 3 validates the domain as a DNS name before the command runs.
+- **Note, 2026-09-28**: The split DNS domains of `tailscale dns status --json` are a new
+  control server value that reaches `resolvectl`, beside the MagicDNS suffix. The daemon
+  validates each one with the same DNS name test before it builds the command: an invalid
+  domain is dropped and logged, and the valid domains of the tailnet survive.
 
 #### SA-20 — `tailscaled` inherits the complete environment of the daemon
 

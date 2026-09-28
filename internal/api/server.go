@@ -658,6 +658,19 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	split := []SplitDNSEntry{}
+	for _, entry := range s.reconciler.SplitDNSReport() {
+		domains := entry.Domains
+		if domains == nil {
+			domains = []string{}
+		}
+		split = append(split, SplitDNSEntry{
+			Tailnet:  entry.TailnetID,
+			Domains:  domains,
+			Conflict: entry.Conflict,
+		})
+	}
+
 	resp := DNSResponse{
 		BindAddress:         bindAddress,
 		Mode:                cfg.Resolver.Mode,
@@ -667,6 +680,7 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		HostResolvSHA256:    hostFile.Checksum,
 		HostResolvChangedAt: changedAtText,
 		Namespaces:          namespaceStates,
+		SplitDNS:            split,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

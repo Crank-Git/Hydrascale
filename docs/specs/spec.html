@@ -146,6 +146,7 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a class="sub" href="#architecture-stack">Architecture &amp; stack</a></li>
 <li><a class="sub" href="#data-model">Data model</a></li>
 <li><a class="sub" href="#cross-cutting-concerns">Cross-cutting concerns</a></li>
+<li><a class="sub" href="#split-dns-export">Split DNS export</a></li>
 <li><a class="sub" href="#environments-config">Environments &amp; config</a></li>
 <li><a class="sub" href="#testing-strategy">Testing strategy</a></li>
 <li><a class="sub" href="#epics">Epics</a></li>
@@ -172,7 +173,7 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="html/feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
 </ul></aside>
 <main>
-<p class="meta"><span class="badge">approved</span> &nbsp; created 2026-08-04 &nbsp; rendered 2026-08-24</p>
+<p class="meta"><span class="badge">approved</span> &nbsp; created 2026-08-04 &nbsp; rendered 2026-09-28</p>
 <h1>Hydrascale v1.0</h1>
 <h1 id="hydrascale-v1-0">Hydrascale v1.0</h1>
 <h2 id="overview">Overview</h2>
@@ -205,7 +206,7 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>security audit</td><td>noun</td><td>The written review of the code that Epic 2 produces.</td><td>pentest, review, assessment</td></tr>
 <tr><td>finding</td><td>noun</td><td>One defect that the security audit records.</td><td>issue, bug, vulnerability</td></tr>
 <tr><td>brand asset</td><td>noun</td><td>One design token file, icon, or logo that the console uses.</td><td>branding, design file, resource</td></tr>
-<tr><td>overlay mount</td><td>noun</td><td>The OverlayFS mount that the daemon places on <code>/etc</code> inside a namespace.</td><td>shield, DNS shield, overlay hack</td></tr>
+<tr><td>overlay mount</td><td>noun</td><td>The OverlayFS mount that the daemon places on <code>/etc</code>, or that the CLI places on <code>/run</code>, inside a namespace.</td><td>shield, DNS shield, overlay hack</td></tr>
 <tr><td>test host</td><td>noun</td><td>The machine at <code>phobos</code> that verifies a change against a real kernel.</td><td>staging, dev box, lab machine</td></tr>
 <tr><td>crash record</td><td>noun</td><td>The kernel log that the <code>pstore</code> backend keeps across a restart.</td><td>crash dump, core dump, panic log, vmcore</td></tr>
 <tr><td>credential</td><td>noun</td><td>One value that authenticates the daemon to a control server: an auth key, an OAuth client identifier, an OAuth client secret, or a Headscale API key.</td><td>secret, token, key, password</td></tr>
@@ -226,6 +227,7 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>host alias</td><td>noun</td><td>A named alias for a device or a subnet that a policy document's <code>hosts</code> block defines. Distinct from <code>host</code>, the Linux machine that runs the daemon.</td><td>host, alias</td></tr>
 <tr><td>tailnet alias</td><td>noun</td><td>A second name for a tailnet that the configuration file declares in the key <code>alias</code>. It holds a letter, a digit, a hyphen and an underscore. Every command that takes a tailnet ID takes it. Distinct from <code>host alias</code>, which a policy document defines.</td><td>alias, nickname, short name, label</td></tr>
 <tr><td>alias zone</td><td>noun</td><td>The DNS zone <code>&lt;tailnet alias&gt;.ts.internal</code>, which the DNS forwarder answers from the peer list of that tailnet.</td><td>alias domain, short zone, internal zone</td></tr>
+<tr><td>split DNS</td><td>noun</td><td>The mapping of a domain name to a resolver of one tailnet, which the control server gives the client of that tailnet.</td><td>split horizon, custom DNS route, conditional forwarder</td></tr>
 <tr><td>autogroup</td><td>noun</td><td>A control-server-defined group that a policy document references by name, such as <code>autogroup:internet</code>.</td><td>built-in group</td></tr>
 <tr><td>allow rule</td><td>noun</td><td>One entry of a policy document's <code>acls</code> block: a source, a destination, and a port list.</td><td>acl, rule</td></tr>
 <tr><td>grant</td><td>noun</td><td>One entry of a policy document's <code>grants</code> block: a source, a destination, and an optional application capability.</td><td>acl (for a grant)</td></tr>
@@ -449,6 +451,54 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <p>The console first paint completes within 500 ms on the test host. A status poll completes within 200 ms for 8 tailnets and 200 peers. The rule engine writes a changed rule set within 2 seconds. The reconciler tick does not grow longer than 1 second because of the rule engine.</p>
 <h3 id="security-posture">Security posture</h3>
 <p>The repository is public. No file in the repository contains a secret, a private development note, an internal planning document, or a reference to the tools that generated it. Epic 1 establishes the check. Epic 9 repeats it before the release.</p>
+<h2 id="split-dns-export">Split DNS export</h2>
+<p>A control server can hold split DNS for a tailnet: a set of domain names, each with a resolver of that tailnet. Before this section, the daemon exported the MagicDNS suffix and the alias zone of each tailnet to the host resolver only, so a query of a split domain left the host for the default upstream and never reached the tailnet resolver. This section declares the export of the split DNS domains.</p>
+<ul>
+<li><strong>FR-split-1.</strong> On every host access sync the daemon runs <code>tailscale dns status --json</code>
+</li>
+</ul>
+<p>inside the namespace of the tailnet, on the socket of that tailnet, and it reads the field <code>SplitDNSRoutes</code>, a map of domain to resolver list. The resolver addresses are unused: each domain reaches the veth device of its tailnet, and the DNAT rule inside the namespace sends the query to <code>100.100.100.100</code>.</p>
+<ul>
+<li><strong>FR-split-2.</strong> The reconciler copies the domains into the status that the host access
+</li>
+</ul>
+<p>manager reads, and <code>ParsePeers</code> copies them onto the peers of the tailnet.</p>
+<ul>
+<li><strong>FR-split-3.</strong> In the <code>resolved</code> DNS mode the daemon registers every surviving split
+</li>
+</ul>
+<p>domain on the veth device of its tailnet. A tailnet that holds a split domain registers its device even when the control server serves no MagicDNS suffix and the tailnet holds no alias zone.</p>
+<ul>
+<li><strong>FR-split-4.</strong> One domain is held by one tailnet. The daemon claims the domains of the
+</li>
+</ul>
+<p>active tailnets in the sorted order of their identifier, after it claims every MagicDNS suffix and every active alias zone name. A later claim of a taken domain is dropped, and the losing tailnet records a conflict that names the owner.</p>
+<ul>
+<li><strong>FR-split-5.</strong> The DNS forwarder routes every surviving split domain to the veth
+</li>
+</ul>
+<p>gateway of its tailnet, in every DNS mode, as it routes the MagicDNS suffix.</p>
+<ul>
+<li><strong>FR-split-6.</strong> When the split DNS read fails, the daemon treats the tailnet as holding
+</li>
+</ul>
+<p>no split domain, it logs a warning, and the sync fails not.</p>
+<ul>
+<li><strong>FR-split-7.</strong> The daemon validates each split domain as a DNS name before it reaches
+</li>
+</ul>
+<p><code>resolvectl</code>. An invalid domain is dropped and logged; the valid domains survive.</p>
+<ul>
+<li><strong>FR-split-8.</strong> The daemon records one <code>dns.split_domain_conflict</code> event for each new
+</li>
+</ul>
+<p>conflict. A conflict that stays across every tick repeats not, and a conflict that returns after it was gone reports again.</p>
+<ul>
+<li><strong>FR-split-9.</strong> The console shows the split DNS domains of each tailnet in the DNS
+</li>
+</ul>
+<p>view, and each conflict as a critical alert that names both tailnets.</p>
+<p>The requirements of this section are not yet bound to an issue, so the issue map counts them not.</p>
 <h2 id="environments-config">Environments &amp; config</h2>
 <div class="table-wrap"><table>
 <tr><th>Environment</th><th>What it is</th></tr>
@@ -738,6 +788,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>2026-08-24</td><td>2</td><td>Issue #389. <strong>A warning of the control server is not a rejection.</strong> The validate route answers status 200 with the message <code>warning(s) found</code> when the document is valid and it holds a warning. <code>internal/policy/tailscale.go</code> set <code>Passed</code> from an empty message alone, therefore a warning read as a rejection: Push stayed disabled and the result region stated "The control server rejected the document." The write route accepts that document. <code>features/13-visual-policy-advanced.md</code> gains FR-vadv-18, which keeps Push available for a warning, and FR-vadv-19, which states that the result region names a warning as a warning. The <code>## Terms</code> table gains the row <code>warning</code>. <code>ValidateResult</code> and <code>PolicyValidateResponse</code> gain the field <code>Warning</code>, which follows the <code>TestsFailed</code> pattern of issue #353. The OpenAPI schema of operationId <code>validateAndTestPolicyFile</code> names the two status 200 messages <code>test(s) failed</code> and <code>warning(s) found</code>. Verified against <code>https://api.tailscale.com/api/v2?outputOpenapiSchema=true</code> (retrieved 2026-08-24).</td></tr>
 <tr><td>2026-09-22</td><td>1</td><td><strong>Decision: the daemon answers a short name for a peer, behind the key <code>resolver.resolve_aliases</code>.</strong> A MagicDNS name holds the suffix of the control server, such as <code>laptop.taildf854a.ts.net</code>, which the operator must remember per tailnet. The operator already names each tailnet with a tailnet alias. With the key set, the DNS forwarder answers the alias zone <code>&lt;alias&gt;.ts.internal</code> from the peer list of that tailnet, and it answers NXDOMAIN for a name below the zone that the zone does not hold. ICANN reserved the top level domain <code>.internal</code> in 2024 for a private name, therefore the zone collides with no public name. The daemon rewrites no query: a query of the MagicDNS suffix reaches the same path as before. The daemon writes no <code>/etc/hosts</code> entry for the zone. The forwarder answers on the host side veth address of each tailnet, on port 53, and the link of that device carries two domains: the MagicDNS suffix and the alias zone. A link of systemd-resolved carries one server list for every domain that it holds, therefore both domains name the forwarder, and the forwarder routes a MagicDNS query onward to the namespace. An alias becomes one DNS label, therefore <code>LoadConfig</code> refuses an alias that is not a DNS label when the key is set. The key is unset by default, and an unset key leaves the link with the MagicDNS suffix alone and the namespace side address.</td></tr>
 <tr><td>2026-09-22</td><td>1</td><td><strong>A review of the alias zone found five defects, and the daemon now holds the corrections.</strong> (1) The listener opened its socket in a goroutine, therefore a port 53 that another resolver of the host holds reached the log alone. The link already named the host side address, so the tailnet lost the MagicDNS suffix as well as the alias zone. <code>SyncListeners</code> now opens each socket before it returns and reports the addresses that answer. A link whose listener did not open keeps the namespace side address and the MagicDNS suffix, and the next tick opens the socket again. (2) The veth address carries the traffic of the namespace, therefore a process inside a namespace reached the port and read the names of every other tailnet. The listener now answers a query whose source is the listen address, which is the address that systemd-resolved sends from, and it answers REFUSED to every other source. (3) A tailnet whose control server serves no MagicDNS suffix got a zone and a listener and no registration. The daemon now registers the veth device whenever the tailnet holds an alias zone. (4) The zone was keyed by <code>HostName</code>, which is the name of the operating system and not the name that MagicDNS serves. The key is now every label of <code>DNSName</code> below the MagicDNS suffix, therefore <code>a.b.tail1234.ts.net</code> answers as <code>a.b.&lt;alias&gt;.ts.internal</code> and two peers of one host name no longer name one record. (5) <code>ValidateTailnetNames</code> compared an alias with a case sensitive match, and a domain name folds case. It now refuses two aliases that differ by case alone when the key is set.</td></tr>
+<tr><td>2026-09-28</td><td>1</td><td><strong>Decision: the daemon exports the split DNS of each tailnet to the host resolver.</strong> A tailnet whose control server holds split DNS resolved the names of that domain until now only inside the tailnet: the daemon registered the MagicDNS suffix and the alias zone on the veth device, therefore a query of a split domain left the host for the default upstream. The operator decided to export the split domains on the same path. The daemon reads them with <code>tailscale dns status --json</code> inside the namespace, because the command needs the socket of that tailnet. The resolver addresses of the reply are unused: each domain reaches the veth device of its tailnet, and the DNAT rule inside the namespace sends the query to <code>100.100.100.100</code>. One domain is held by one tailnet. The MagicDNS suffix and the alias zone always win, and of two tailnets that claim one domain the first in sorted identifier order keeps it; the loser records a conflict, and the daemon records one <code>dns.split_domain_conflict</code> event. A conflict event that stays repeats not. A split DNS read that fails leaves the tailnet with no split domain and the sync fails not. The claim order is a decision, because a control server assigns the domains and one host must choose. The requirements FR-split-1 to FR-split-9 land with no issue yet, so the issue map counts them not.</td></tr>
 </table></div>
 <h2 id="issue-map">Issue map</h2>
 <p>Every epic of version 1.0 is on the tracker. Epics 5 to 9 were filed on 2026-08-05, after the security audit closed, so that each decomposition carries the audit findings it must fix.</p>

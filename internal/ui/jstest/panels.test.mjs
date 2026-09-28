@@ -171,6 +171,89 @@ test("the DNS view escapes every value that the daemon reports", () => {
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
+test("the DNS view maps the split DNS of each tailnet", () => {
+  // FR-split-9. The model reads split_dns, and it holds the domains and the conflict.
+  const model = dnsModel(
+    dnsBody({
+      split_dns: [
+        { tailnet: "alpha", domains: ["acme.example.com", "zeta.example.com"], conflict: "" },
+        { tailnet: "beta", domains: [], conflict: "the split DNS domain acme.example.com of beta is claimed by alpha" },
+      ],
+    }),
+  );
+  assert.equal(model.splitDNS.length, 2);
+  assert.deepEqual(model.splitDNS[0], {
+    tailnet: "alpha",
+    domains: ["acme.example.com", "zeta.example.com"],
+    conflict: "",
+  });
+  assert.deepEqual(model.splitDNS[1], {
+    tailnet: "beta",
+    domains: [],
+    conflict: "the split DNS domain acme.example.com of beta is claimed by alpha",
+  });
+
+  // A body before the first poll holds no split DNS.
+  assert.deepEqual(dnsModel(null).splitDNS, []);
+  assert.deepEqual(dnsModel(dnsBody({ split_dns: null })).splitDNS, []);
+});
+
+test("the DNS view draws the split DNS card with one row per domain owner", () => {
+  const model = dnsModel(
+    dnsBody({
+      split_dns: [
+        { tailnet: "alpha", domains: ["acme.example.com"], conflict: "" },
+        { tailnet: "beta", domains: ["zeta.example.com"], conflict: "" },
+      ],
+    }),
+  );
+  const markup = dnsMarkup(model);
+  assert.match(markup, /<h2>Split DNS<\/h2>/);
+  assert.match(markup, /<span class="id mono">alpha<\/span>/);
+  assert.match(markup, /<span class="id mono">beta<\/span>/);
+  assert.match(markup, /acme\.example\.com/);
+  assert.match(markup, /zeta\.example\.com/);
+});
+
+test("the DNS view draws an empty note when no tailnet reports a split domain", () => {
+  const model = dnsModel(dnsBody({ split_dns: [] }));
+  const markup = dnsMarkup(model);
+  assert.match(markup, /No tailnet reports a split DNS domain\./);
+  assert.doesNotMatch(markup, /class="domains mono"/);
+});
+
+test("the DNS view draws a conflict as a critical alert that names both tailnets", () => {
+  const model = dnsModel(
+    dnsBody({
+      split_dns: [
+        { tailnet: "alpha", domains: ["shared.example.com"], conflict: "" },
+        {
+          tailnet: "beta",
+          domains: [],
+          conflict: "the split DNS domain shared.example.com of beta is claimed by alpha",
+        },
+      ],
+    }),
+  );
+  const markup = dnsMarkup(model);
+  assert.match(markup, /class="alert crit"/);
+  assert.match(markup, /shared\.example\.com of beta is claimed by alpha/);
+});
+
+test("the DNS view escapes a hostile split DNS domain", () => {
+  // SA-19 and SA-5: the domain reaches the page only as escaped text.
+  const hostile = '<img src=x onerror="alert(1)">';
+  const model = dnsModel(
+    dnsBody({
+      split_dns: [{ tailnet: hostile, domains: [hostile], conflict: hostile }],
+    }),
+  );
+  const markup = dnsMarkup(model);
+  assert.doesNotMatch(markup, /<img/);
+  assert.doesNotMatch(markup, /onerror="/);
+  assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+});
+
 // ---------------------------------------------------------------------------
 // The activity view
 // ---------------------------------------------------------------------------

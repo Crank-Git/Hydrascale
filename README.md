@@ -707,7 +707,13 @@ This mode works on every Linux system. The daemon rewrites the block only when t
 data changes, and it writes the file atomically. It changes no other entry of `/etc/hosts`.
 
 **`resolved`.** The daemon registers a routing domain with `systemd-resolved` through
-`resolvectl`. This mode needs `systemd-resolved`, and it changes no file.
+`resolvectl`. The daemon registers the MagicDNS suffix, the alias zone, and every split
+DNS domain of each tailnet, so a query of a split domain reaches the resolver of that
+tailnet. This mode needs `systemd-resolved`, and it changes no file.
+
+The DNS forwarder routes the same split DNS domains in every mode. When a tailnet holds a
+split domain that another tailnet claims, the first tailnet in sorted identifier order
+keeps it, and the daemon records a `dns.split_domain_conflict` event.
 
 ### Teardown
 
@@ -811,7 +817,9 @@ namespace stays up, and the daemon manages it from that point.
 
 - **MagicDNS.** Host access DNS resolution depends on the DNS configuration of the control
   server. Headscale serves MagicDNS, and its suffix and its behaviour can differ from
-  Tailscale. When a name does not resolve, read the Headscale DNS configuration.
+  Tailscale. The daemon also exports the split DNS domains of each tailnet to the host
+  resolver, and a Headscale control server may serve no split DNS. When a name does not
+  resolve, read the Headscale DNS configuration.
 
 - **DERP relays.** Tailscale runs its own global DERP relay network. Headscale uses the same
   relays, its own relays, or both. When two peers cannot connect, read the DERP map of the

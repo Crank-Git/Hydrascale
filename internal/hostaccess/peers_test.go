@@ -155,6 +155,27 @@ func TestParsePeers_InvalidIPSkipped(t *testing.T) {
 	}
 }
 
+func TestParsePeers_CopiesSplitDNSRoutes(t *testing.T) {
+	status := makeStatus("example.ts.net", nil)
+	status.SplitDNSRoutes = []string{"acme.example.com", "zeta.example.com"}
+
+	result := ParsePeers("mynet", status, "10.0.0.1", "vh001", "10.0.0.2", "ns-mynet")
+
+	if len(result.SplitDNSDomains) != 2 || result.SplitDNSDomains[0] != "acme.example.com" || result.SplitDNSDomains[1] != "zeta.example.com" {
+		t.Fatalf("SplitDNSDomains = %v, want [acme.example.com zeta.example.com]", result.SplitDNSDomains)
+	}
+	// The field is a copy, therefore a later edit of the status keeps the peers unchanged.
+	status.SplitDNSRoutes[0] = "changed.example.com"
+	if result.SplitDNSDomains[0] != "acme.example.com" {
+		t.Errorf("SplitDNSDomains[0] = %q, want %q", result.SplitDNSDomains[0], "acme.example.com")
+	}
+
+	empty := ParsePeers("mynet", nil, "10.0.0.1", "vh001", "10.0.0.2", "ns-mynet")
+	if len(empty.SplitDNSDomains) != 0 {
+		t.Errorf("SplitDNSDomains on a nil status = %v, want empty", empty.SplitDNSDomains)
+	}
+}
+
 func TestBuildDNSNames(t *testing.T) {
 	peers := []Peer{
 		{Hostname: "alpha", IPv4: "100.64.0.1"},

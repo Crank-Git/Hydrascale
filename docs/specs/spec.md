@@ -6,7 +6,7 @@ status: approved
 spec_version: 2
 created: 2026-08-04
 approved: 2026-08-23
-html_generated: 2026-08-24
+html_generated: 2026-09-28
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -87,7 +87,7 @@ the operator what is allowed.
 | security audit | noun | The written review of the code that Epic 2 produces. | pentest, review, assessment |
 | finding | noun | One defect that the security audit records. | issue, bug, vulnerability |
 | brand asset | noun | One design token file, icon, or logo that the console uses. | branding, design file, resource |
-| overlay mount | noun | The OverlayFS mount that the daemon places on `/etc` inside a namespace. | shield, DNS shield, overlay hack |
+| overlay mount | noun | The OverlayFS mount that the daemon places on `/etc`, or that the CLI places on `/run`, inside a namespace. | shield, DNS shield, overlay hack |
 | test host | noun | The machine at `phobos` that verifies a change against a real kernel. | staging, dev box, lab machine |
 | crash record | noun | The kernel log that the `pstore` backend keeps across a restart. | crash dump, core dump, panic log, vmcore |
 | credential | noun | One value that authenticates the daemon to a control server: an auth key, an OAuth client identifier, an OAuth client secret, or a Headscale API key. | secret, token, key, password |
@@ -108,6 +108,7 @@ the operator what is allowed.
 | host alias | noun | A named alias for a device or a subnet that a policy document's `hosts` block defines. Distinct from `host`, the Linux machine that runs the daemon. | host, alias |
 | tailnet alias | noun | A second name for a tailnet that the configuration file declares in the key `alias`. It holds a letter, a digit, a hyphen and an underscore. Every command that takes a tailnet ID takes it. Distinct from `host alias`, which a policy document defines. | alias, nickname, short name, label |
 | alias zone | noun | The DNS zone `<tailnet alias>.ts.internal`, which the DNS forwarder answers from the peer list of that tailnet. | alias domain, short zone, internal zone |
+| split DNS | noun | The mapping of a domain name to a resolver of one tailnet, which the control server gives the client of that tailnet. | split horizon, custom DNS route, conditional forwarder |
 | autogroup | noun | A control-server-defined group that a policy document references by name, such as `autogroup:internet`. | built-in group |
 | allow rule | noun | One entry of a policy document's `acls` block: a source, a destination, and a port list. | acl, rule |
 | grant | noun | One entry of a policy document's `grants` block: a source, a destination, and an optional application capability. | acl (for a grant) |
@@ -407,6 +408,44 @@ rule engine.
 The repository is public. No file in the repository contains a secret, a private
 development note, an internal planning document, or a reference to the tools that
 generated it. Epic 1 establishes the check. Epic 9 repeats it before the release.
+
+## Split DNS export
+
+A control server can hold split DNS for a tailnet: a set of domain names, each with a
+resolver of that tailnet. Before this section, the daemon exported the MagicDNS suffix
+and the alias zone of each tailnet to the host resolver only, so a query of a split
+domain left the host for the default upstream and never reached the tailnet resolver.
+This section declares the export of the split DNS domains.
+
+- **FR-split-1.** On every host access sync the daemon runs `tailscale dns status --json`
+  inside the namespace of the tailnet, on the socket of that tailnet, and it reads the
+  field `SplitDNSRoutes`, a map of domain to resolver list. The resolver addresses are
+  unused: each domain reaches the veth device of its tailnet, and the DNAT rule inside
+  the namespace sends the query to `100.100.100.100`.
+- **FR-split-2.** The reconciler copies the domains into the status that the host access
+  manager reads, and `ParsePeers` copies them onto the peers of the tailnet.
+- **FR-split-3.** In the `resolved` DNS mode the daemon registers every surviving split
+  domain on the veth device of its tailnet. A tailnet that holds a split domain registers
+  its device even when the control server serves no MagicDNS suffix and the tailnet holds
+  no alias zone.
+- **FR-split-4.** One domain is held by one tailnet. The daemon claims the domains of the
+  active tailnets in the sorted order of their identifier, after it claims every MagicDNS
+  suffix and every active alias zone name. A later claim of a taken domain is dropped,
+  and the losing tailnet records a conflict that names the owner.
+- **FR-split-5.** The DNS forwarder routes every surviving split domain to the veth
+  gateway of its tailnet, in every DNS mode, as it routes the MagicDNS suffix.
+- **FR-split-6.** When the split DNS read fails, the daemon treats the tailnet as holding
+  no split domain, it logs a warning, and the sync fails not.
+- **FR-split-7.** The daemon validates each split domain as a DNS name before it reaches
+  `resolvectl`. An invalid domain is dropped and logged; the valid domains survive.
+- **FR-split-8.** The daemon records one `dns.split_domain_conflict` event for each new
+  conflict. A conflict that stays across every tick repeats not, and a conflict that
+  returns after it was gone reports again.
+- **FR-split-9.** The console shows the split DNS domains of each tailnet in the DNS
+  view, and each conflict as a critical alert that names both tailnets.
+
+The requirements of this section are not yet bound to an issue, so the issue map counts
+them not.
 
 ## Environments & config
 
@@ -841,6 +880,7 @@ advance to `status: built`. |
 | 2026-08-24 | 2 | Issue #389. **A warning of the control server is not a rejection.** The validate route answers status 200 with the message `warning(s) found` when the document is valid and it holds a warning. `internal/policy/tailscale.go` set `Passed` from an empty message alone, therefore a warning read as a rejection: Push stayed disabled and the result region stated "The control server rejected the document." The write route accepts that document. `features/13-visual-policy-advanced.md` gains FR-vadv-18, which keeps Push available for a warning, and FR-vadv-19, which states that the result region names a warning as a warning. The `## Terms` table gains the row `warning`. `ValidateResult` and `PolicyValidateResponse` gain the field `Warning`, which follows the `TestsFailed` pattern of issue #353. The OpenAPI schema of operationId `validateAndTestPolicyFile` names the two status 200 messages `test(s) failed` and `warning(s) found`. Verified against `https://api.tailscale.com/api/v2?outputOpenapiSchema=true` (retrieved 2026-08-24). |
 | 2026-09-22 | 1 | **Decision: the daemon answers a short name for a peer, behind the key `resolver.resolve_aliases`.** A MagicDNS name holds the suffix of the control server, such as `laptop.taildf854a.ts.net`, which the operator must remember per tailnet. The operator already names each tailnet with a tailnet alias. With the key set, the DNS forwarder answers the alias zone `<alias>.ts.internal` from the peer list of that tailnet, and it answers NXDOMAIN for a name below the zone that the zone does not hold. ICANN reserved the top level domain `.internal` in 2024 for a private name, therefore the zone collides with no public name. The daemon rewrites no query: a query of the MagicDNS suffix reaches the same path as before. The daemon writes no `/etc/hosts` entry for the zone. The forwarder answers on the host side veth address of each tailnet, on port 53, and the link of that device carries two domains: the MagicDNS suffix and the alias zone. A link of systemd-resolved carries one server list for every domain that it holds, therefore both domains name the forwarder, and the forwarder routes a MagicDNS query onward to the namespace. An alias becomes one DNS label, therefore `LoadConfig` refuses an alias that is not a DNS label when the key is set. The key is unset by default, and an unset key leaves the link with the MagicDNS suffix alone and the namespace side address. |
 | 2026-09-22 | 1 | **A review of the alias zone found five defects, and the daemon now holds the corrections.** (1) The listener opened its socket in a goroutine, therefore a port 53 that another resolver of the host holds reached the log alone. The link already named the host side address, so the tailnet lost the MagicDNS suffix as well as the alias zone. `SyncListeners` now opens each socket before it returns and reports the addresses that answer. A link whose listener did not open keeps the namespace side address and the MagicDNS suffix, and the next tick opens the socket again. (2) The veth address carries the traffic of the namespace, therefore a process inside a namespace reached the port and read the names of every other tailnet. The listener now answers a query whose source is the listen address, which is the address that systemd-resolved sends from, and it answers REFUSED to every other source. (3) A tailnet whose control server serves no MagicDNS suffix got a zone and a listener and no registration. The daemon now registers the veth device whenever the tailnet holds an alias zone. (4) The zone was keyed by `HostName`, which is the name of the operating system and not the name that MagicDNS serves. The key is now every label of `DNSName` below the MagicDNS suffix, therefore `a.b.tail1234.ts.net` answers as `a.b.<alias>.ts.internal` and two peers of one host name no longer name one record. (5) `ValidateTailnetNames` compared an alias with a case sensitive match, and a domain name folds case. It now refuses two aliases that differ by case alone when the key is set. |
+| 2026-09-28 | 1 | **Decision: the daemon exports the split DNS of each tailnet to the host resolver.** A tailnet whose control server holds split DNS resolved the names of that domain until now only inside the tailnet: the daemon registered the MagicDNS suffix and the alias zone on the veth device, therefore a query of a split domain left the host for the default upstream. The operator decided to export the split domains on the same path. The daemon reads them with `tailscale dns status --json` inside the namespace, because the command needs the socket of that tailnet. The resolver addresses of the reply are unused: each domain reaches the veth device of its tailnet, and the DNAT rule inside the namespace sends the query to `100.100.100.100`. One domain is held by one tailnet. The MagicDNS suffix and the alias zone always win, and of two tailnets that claim one domain the first in sorted identifier order keeps it; the loser records a conflict, and the daemon records one `dns.split_domain_conflict` event. A conflict event that stays repeats not. A split DNS read that fails leaves the tailnet with no split domain and the sync fails not. The claim order is a decision, because a control server assigns the domains and one host must choose. The requirements FR-split-1 to FR-split-9 land with no issue yet, so the issue map counts them not. |
 
 ## Issue map
 

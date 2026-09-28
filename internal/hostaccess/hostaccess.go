@@ -5,12 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
+	"strings"
 	"sync"
 
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
 	"hydrascale/internal/execx"
 )
+
+// SplitDNSEventConflict is the event that the daemon records when two tailnets claim one
+// split DNS domain. The losing tailnet names the event, and the message names the winner.
+const SplitDNSEventConflict = "dns.split_domain_conflict"
+
+// SplitDNSEntry holds the split DNS domains that one tailnet holds on the host, and the
+// conflict that removed a domain from it. Domains is empty when the tailnet holds none or
+// when every domain was dropped. The console reads this type through SplitDNSReport.
+type SplitDNSEntry struct {
+	TailnetID string
+	Domains   []string
+	Conflict  string
+}
 
 // DNSForwarder routes DNS queries by domain suffix to per-tailnet upstreams.
 // Implemented by *dns.Forwarder; defined here to avoid an import cycle.
@@ -52,6 +67,20 @@ type Manager struct {
 
 	// Track which tailnets have been synced so teardown knows what to clean up
 	activeTailnets map[string]TailnetPeers
+
+	// splitReport holds the surviving split DNS domains and the conflict of each tailnet,
+	// keyed by the tailnet ID. The console reads it through SplitDNSReport.
+	splitReport map[string]SplitDNSEntry
+
+	// eventRecorder records one event for each new split DNS conflict. It is nil until the
+	// reconciler wires one with SetEventRecorder.
+	eventRecorder func(kind, tailnetID, message string)
+
+	// reportedConflicts holds the message of every split DNS conflict that the daemon
+	// reported. syncDNS emits one event for a message that is absent from the set and it
+	// drops a message that is gone, so a repeat reports again and a steady state reports
+	// no event on every tick. See FR-split-8.
+	reportedConflicts map[string]bool
 }
 
 // NewManager creates a new host access Manager.
@@ -66,12 +95,14 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string, routeTable
 		infraSubnet = "10.200.0.0/16"
 	}
 	m := &Manager{
-		Runner:         execx.OSRunner{},
-		dnsMode:        dnsMode,
-		hostsPath:      hostsPath,
-		infraSubnet:    infraSubnet,
-		routeTable:     routeTable,
-		activeTailnets: make(map[string]TailnetPeers),
+		Runner:            execx.OSRunner{},
+		dnsMode:           dnsMode,
+		hostsPath:         hostsPath,
+		infraSubnet:       infraSubnet,
+		routeTable:        routeTable,
+		activeTailnets:    make(map[string]TailnetPeers),
+		splitReport:       make(map[string]SplitDNSEntry),
+		reportedConflicts: make(map[string]bool),
 	}
 	if dnsMode == "resolved" {
 		m.resolved = NewResolvedManager()
@@ -113,6 +144,35 @@ func (m *Manager) SetAliasResolution(enabled bool, aliases map[string]string) {
 	defer m.mu.Unlock()
 	m.resolveAliases = enabled
 	m.aliases = aliases
+}
+
+// SetEventRecorder wires the recorder of split DNS conflict events. The reconciler calls it
+// once, because the Manager records the event through the event log of the reconciler.
+func (m *Manager) SetEventRecorder(fn func(kind, tailnetID, message string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.eventRecorder = fn
+}
+
+// SplitDNSReport returns the surviving split DNS domains and the conflict of each tailnet,
+// sorted by tailnet ID. The console reads it through GET /api/dns.
+func (m *Manager) SplitDNSReport() []SplitDNSEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ids := make([]string, 0, len(m.splitReport))
+	for id := range m.splitReport {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	report := make([]SplitDNSEntry, 0, len(ids))
+	for _, id := range ids {
+		entry := m.splitReport[id]
+		entry.Domains = append([]string(nil), entry.Domains...)
+		report = append(report, entry)
+	}
+	return report
 }
 
 // Sync updates host routes and DNS for a tailnet's peers.
@@ -197,6 +257,17 @@ func (m *Manager) TeardownAll() error {
 	return errors.Join(errs...)
 }
 
+// normalizeSplitDomain returns the normalized form of a split DNS domain, and false when
+// the domain is empty or is not a DNS name. The conflict rule compares the normalized form,
+// therefore a value that differs in case or in a trailing dot resolves to one domain.
+func normalizeSplitDomain(raw string) (string, bool) {
+	domain := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(raw), "."))
+	if !validDNSName(domain) {
+		return "", false
+	}
+	return domain, true
+}
+
 // syncDNS writes the names of every active tailnet where the host resolver reads them.
 // syncDNS starts the alias listeners before it registers a domain with systemd-resolved,
 // because a link that names an address on which nothing answers loses the names of that
@@ -212,6 +283,97 @@ func (m *Manager) syncDNS() error {
 	var listenAddrs []string
 	registrations := make([]TailnetPeers, 0, len(m.activeTailnets))
 
+	// The conflict rule needs a fixed order, because map iteration is not deterministic.
+	// The first tailnet in sorted order keeps a domain that another tailnet also holds.
+	// See FR-split-4.
+	ids := make([]string, 0, len(m.activeTailnets))
+	for id := range m.activeTailnets {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	// Pass 1 claims every MagicDNS suffix and every active alias zone name, so that a
+	// MagicDNS suffix and an alias zone always beat a split domain. See FR-split-4.
+	owner := make(map[string]string)
+	for _, id := range ids {
+		peers := m.activeTailnets[id]
+		if peers.MagicDNSSuffix != "" {
+			if suffix, ok := normalizeSplitDomain(peers.MagicDNSSuffix); ok {
+				if _, taken := owner[suffix]; !taken {
+					owner[suffix] = id
+				}
+			}
+		}
+		alias := m.aliases[id]
+		if m.resolveAliases && alias != "" && peers.VethHostIP != "" {
+			if _, taken := owner[dns.AliasZoneName(alias)]; !taken {
+				owner[dns.AliasZoneName(alias)] = id
+			}
+		}
+	}
+
+	// surviving holds the split domains that each tailnet keeps, and currentConflicts
+	// holds the message of every conflict, keyed by the message, with the losing tailnet.
+	surviving := make(map[string][]string)
+	currentConflicts := make(map[string]string)
+	type conflictEvent struct{ tailnetID, message string }
+	var newConflicts []conflictEvent
+
+	for _, id := range ids {
+		peers := m.activeTailnets[id]
+		entry := SplitDNSEntry{TailnetID: id}
+		seen := make(map[string]bool)
+		for _, raw := range peers.SplitDNSDomains {
+			domain, ok := normalizeSplitDomain(raw)
+			if !ok {
+				// A value that is not a DNS name never reaches resolvectl. See SA-19.
+				log.Printf("host-access: split DNS domain %q of %s is not a DNS name; dropped", raw, id)
+				continue
+			}
+			if seen[domain] {
+				continue
+			}
+			seen[domain] = true
+			if ownerID, taken := owner[domain]; taken {
+				message := fmt.Sprintf("the split DNS domain %s of %s is claimed by %s", domain, id, ownerID)
+				if entry.Conflict == "" {
+					entry.Conflict = message
+				} else {
+					entry.Conflict = entry.Conflict + "; " + message
+				}
+				currentConflicts[message] = id
+				log.Printf("host-access: %s", message)
+				continue
+			}
+			owner[domain] = id
+			entry.Domains = append(entry.Domains, domain)
+		}
+		surviving[id] = entry.Domains
+		m.splitReport[id] = entry
+	}
+
+	// The report holds every active tailnet, and a tailnet that left the map leaves the
+	// report as well.
+	for id := range m.splitReport {
+		if _, active := m.activeTailnets[id]; !active {
+			delete(m.splitReport, id)
+		}
+	}
+
+	// One event for each conflict that the previous tick did not hold. The set replaces
+	// the previous set, so a conflict that is gone reports again if it returns.
+	for message, id := range currentConflicts {
+		if !m.reportedConflicts[message] {
+			newConflicts = append(newConflicts, conflictEvent{tailnetID: id, message: message})
+		}
+	}
+	reported := make(map[string]bool, len(currentConflicts))
+	for message := range currentConflicts {
+		reported[message] = true
+	}
+	m.reportedConflicts = reported
+	recorder := m.eventRecorder
+
 	for _, peers := range m.activeTailnets {
 		v4, v6 := BuildDNSRecords(peers.TailnetID, peers.Peers)
 		for k, v := range v4 {
@@ -220,10 +382,14 @@ func (m *Manager) syncDNS() error {
 		for k, v := range v6 {
 			allV6[k] = v
 		}
+	}
+
+	for _, id := range ids {
+		peers := m.activeTailnets[id]
 
 		// The alias zone needs the alias of the tailnet and the host side address, on
 		// which the forwarder answers.
-		alias := m.aliases[peers.TailnetID]
+		alias := m.aliases[id]
 		zoneOn := m.resolveAliases && alias != "" && peers.VethHostIP != ""
 		if zoneOn {
 			zv4, zv6 := BuildAliasRecords(peers.Peers)
@@ -234,11 +400,20 @@ func (m *Manager) syncDNS() error {
 		if peers.MagicDNSSuffix != "" && peers.VethGateway != "" {
 			domainRoutes[peers.MagicDNSSuffix] = peers.VethGateway
 		}
+		// A split domain reaches the veth device of its tailnet, therefore a tailnet that
+		// holds one registers even when it holds no MagicDNS suffix and no alias zone.
+		// See FR-split-3.
+		hasSplit := len(surviving[id]) > 0 && peers.VethGateway != ""
+		for _, domain := range surviving[id] {
+			if peers.VethGateway != "" {
+				domainRoutes[domain] = peers.VethGateway
+			}
+		}
 		// systemd-resolved registers the domains on the veth device of the tailnet,
 		// because it refuses a per-link domain on the loopback device. A tailnet that
 		// holds an alias zone registers the device even when the control server serves
 		// no MagicDNS suffix, so the alias zone answers on such a tailnet as well.
-		if peers.VethHost != "" && (zoneOn || (peers.MagicDNSSuffix != "" && peers.VethGateway != "")) {
+		if peers.VethHost != "" && (zoneOn || (peers.MagicDNSSuffix != "" && peers.VethGateway != "") || hasSplit) {
 			registrations = append(registrations, peers)
 		}
 	}
@@ -249,6 +424,14 @@ func (m *Manager) syncDNS() error {
 		aliasOf[k] = v
 	}
 	m.mu.Unlock()
+
+	// The event reaches the log outside the lock, because the recorder writes the log.
+	sort.Slice(newConflicts, func(i, j int) bool { return newConflicts[i].message < newConflicts[j].message })
+	if recorder != nil {
+		for _, conflict := range newConflicts {
+			recorder(SplitDNSEventConflict, conflict.tailnetID, conflict.message)
+		}
+	}
 
 	var err error
 
@@ -280,6 +463,10 @@ func (m *Manager) syncDNS() error {
 		var domains []string
 		if peers.MagicDNSSuffix != "" && peers.VethGateway != "" {
 			domains = append(domains, peers.MagicDNSSuffix)
+		}
+		// Every surviving split domain reaches the same server as the MagicDNS suffix.
+		if peers.VethGateway != "" {
+			domains = append(domains, surviving[peers.TailnetID]...)
 		}
 		if zoneUp {
 			address = peers.VethHostIP

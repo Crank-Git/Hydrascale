@@ -124,6 +124,37 @@ func TestRegisterDomainsRejectsAnAddressThatIsNotAnIPAddress(t *testing.T) {
 	}
 }
 
+func TestRegisterDomainsWritesTheSplitDomainsInTheOneDomainCommand(t *testing.T) {
+	// A link with a MagicDNS suffix and two split domains writes one domain command with
+	// all three, because `resolvectl domain` replaces the list of the link.
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{}, "systemctl", "is-active", "--quiet", "systemd-resolved")
+	rec.Script(execx.Result{}, "resolvectl", "dns", "vhcorp", "10.200.1.46")
+	rec.Script(execx.Result{}, "resolvectl", "domain", "vhcorp",
+		"~corp.ts.net", "~acme.example.com", "~zeta.example.com")
+
+	rm := NewResolvedManager()
+	rm.Runner = rec
+
+	links := []Link{{
+		Device:  "vhcorp",
+		Address: "10.200.1.46",
+		Domains: []string{"corp.ts.net", "acme.example.com", "zeta.example.com"},
+	}}
+	if err := rm.RegisterDomains(links); err != nil {
+		t.Fatalf("RegisterDomains: %v", err)
+	}
+
+	got := rec.Calls()
+	if len(got) != 3 {
+		t.Fatalf("RegisterDomains ran %d commands, want 3:\n%s", len(got), callList(got))
+	}
+	want := "resolvectl domain vhcorp ~corp.ts.net ~acme.example.com ~zeta.example.com"
+	if got[2].String() != want {
+		t.Errorf("command = %q, want %q", got[2].String(), want)
+	}
+}
+
 func TestDeregisterAllRevertsEveryDeviceThatItRegistered(t *testing.T) {
 	rec := execx.NewRecorder(t)
 	rec.Script(execx.Result{}, "systemctl", "is-active", "--quiet", "systemd-resolved")

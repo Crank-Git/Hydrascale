@@ -27,11 +27,15 @@ type Peer struct {
 type TailnetPeers struct {
 	TailnetID      string
 	MagicDNSSuffix string
-	Peers          []Peer
-	VethGateway    string
-	VethHost       string
-	VethHostIP     string
-	NsName         string
+	// SplitDNSDomains holds the split DNS domains of the tailnet, as the control server
+	// reported them. The daemon registers each one on the veth device of the tailnet, so
+	// that the host resolver sends a query of that domain to the tailnet. See FR-split-2.
+	SplitDNSDomains []string
+	Peers           []Peer
+	VethGateway     string
+	VethHost        string
+	VethHostIP      string
+	NsName          string
 }
 
 func ParsePeers(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHost, vethHostIP, nsName string) TailnetPeers {
@@ -46,6 +50,9 @@ func ParsePeers(tailnetID string, status *daemon.TailscaleStatus, vethGW, vethHo
 		return result
 	}
 	result.MagicDNSSuffix = status.MagicDNSSuffix
+	if len(status.SplitDNSRoutes) > 0 {
+		result.SplitDNSDomains = append([]string(nil), status.SplitDNSRoutes...)
+	}
 
 	for _, node := range status.Peer {
 		// Sanitize hostname: lowercase, replace spaces with dashes
