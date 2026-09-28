@@ -330,6 +330,13 @@ func (m *Manager) syncDNS() error {
 				log.Printf("host-access: split DNS domain %q of %s is not a DNS name; dropped", raw, id)
 				continue
 			}
+			if domain == "ts.net" || strings.HasSuffix(domain, ".ts.net") {
+				// ts.net is the reserved base zone of MagicDNS. One tailnet holds no claim on the
+				// zone: the MagicDNS suffix of every tailnet already reaches its own resolver, and
+				// an export of the zone would send the names of every tailnet to one of them.
+				log.Printf("host-access: split DNS domain %q of %s names the reserved ts.net zone; dropped", domain, id)
+				continue
+			}
 			if seen[domain] {
 				continue
 			}
@@ -460,17 +467,18 @@ func (m *Manager) syncDNS() error {
 		alias := aliasOf[peers.TailnetID]
 		zoneUp := resolveAliases && alias != "" && peers.VethHostIP != "" && live[peers.VethHostIP]
 		address := peers.VethGateway
+		// The order is: MagicDNS suffix, alias zone, split DNS domains.
 		var domains []string
 		if peers.MagicDNSSuffix != "" && peers.VethGateway != "" {
 			domains = append(domains, peers.MagicDNSSuffix)
 		}
-		// Every surviving split domain reaches the same server as the MagicDNS suffix.
-		if peers.VethGateway != "" {
-			domains = append(domains, surviving[peers.TailnetID]...)
-		}
 		if zoneUp {
 			address = peers.VethHostIP
 			domains = append(domains, dns.AliasZoneName(alias))
+		}
+		// Every surviving split domain reaches the same server as the MagicDNS suffix.
+		if peers.VethGateway != "" {
+			domains = append(domains, surviving[peers.TailnetID]...)
 		}
 		if address == "" || len(domains) == 0 {
 			continue

@@ -398,6 +398,41 @@ func TestSyncDNS_InvalidSplitDomainIsDropped(t *testing.T) {
 	}
 }
 
+// TestSyncDNS_TSNetIsDropped verifies that a split domain below the reserved ts.net zone
+// reaches neither the forwarder routes nor the conflict events, while a valid domain
+// survives.
+func TestSyncDNS_TSNetIsDropped(t *testing.T) {
+	fwd := &mockForwarder{}
+	m := NewManager("hosts", t.TempDir()+"/hosts", "10.200.0.0/16", 0)
+	m.Runner = quietRunner{}
+	m.SetForwarder(fwd)
+	record, captured := eventRecorder()
+	m.SetEventRecorder(record)
+
+	status := &daemon.TailscaleStatus{SplitDNSRoutes: []string{"ts.net", "tail1234.ts.net", "acme.example.com"}}
+	m.Sync("corp", status, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+
+	if got := fwd.lastRoutes["acme.example.com"]; got != "10.200.0.2" {
+		t.Errorf("acme.example.com route = %q, want %q", got, "10.200.0.2")
+	}
+	for _, domain := range []string{"ts.net", "tail1234.ts.net"} {
+		if _, ok := fwd.lastRoutes[domain]; ok {
+			t.Errorf("the reserved domain %q reached the routes", domain)
+		}
+	}
+	if events := captured(); len(events) != 0 {
+		t.Errorf("the recorder captured %d events, want 0: %v", len(events), events)
+	}
+
+	report := m.SplitDNSReport()
+	if len(report) != 1 || report[0].TailnetID != "corp" {
+		t.Fatalf("report = %v, want one entry for corp", report)
+	}
+	if len(report[0].Domains) != 1 || report[0].Domains[0] != "acme.example.com" {
+		t.Errorf("report domains = %v, want [acme.example.com]", report[0].Domains)
+	}
+}
+
 // TestSyncDNS_SteadyStateEmitsOneEventOnly verifies that a conflict that stays across
 // every tick reports one event, and that a repeat after the conflict is gone reports
 // again.

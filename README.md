@@ -709,7 +709,8 @@ data changes, and it writes the file atomically. It changes no other entry of `/
 **`resolved`.** The daemon registers a routing domain with `systemd-resolved` through
 `resolvectl`. The daemon registers the MagicDNS suffix, the alias zone, and every split
 DNS domain of each tailnet, so a query of a split domain reaches the resolver of that
-tailnet. This mode needs `systemd-resolved`, and it changes no file.
+tailnet. Names below the reserved `ts.net` zone are not exported. This mode needs
+`systemd-resolved`, and it changes no file.
 
 The DNS forwarder routes the same split DNS domains in every mode. When a tailnet holds a
 split domain that another tailnet claims, the first tailnet in sorted identifier order

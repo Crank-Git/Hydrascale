@@ -119,6 +119,21 @@ func TestSyncDNSWritesBothDomainsWhenAliasResolutionIsOn(t *testing.T) {
 	wantResolvectl(t, rec, "dns", []string{"dns", "vh001", "10.200.0.1"})
 }
 
+// The link lists the domains in the order: MagicDNS suffix, alias zone, split domains.
+func TestSyncDNSOrdersTheDomainsSuffixAliasSplit(t *testing.T) {
+	m, rec := aliasManager(t)
+	m.SetForwarder(&mockForwarder{})
+	m.SetAliasResolution(true, map[string]string{"Ta1a1a1a1a1CNTRL": "mmo"})
+
+	status := aliasStatus("tail1.ts.net", "laptop", "100.64.0.1")
+	status.SplitDNSRoutes = []string{"acme.example.com"}
+	m.Sync("Ta1a1a1a1a1CNTRL", status, "10.200.0.2", "vh001", "10.200.0.1", "ns-t")
+
+	wantResolvectl(t, rec, "domain",
+		[]string{"domain", "vh001", "~tail1.ts.net", "~mmo.ts.internal", "~acme.example.com"})
+	wantResolvectl(t, rec, "dns", []string{"dns", "vh001", "10.200.0.1"})
+}
+
 // A tailnet whose control server serves no MagicDNS suffix still answers its alias zone.
 func TestSyncDNSRegistersTheAliasZoneOfATailnetWithNoMagicDNSSuffix(t *testing.T) {
 	m, rec := aliasManager(t)

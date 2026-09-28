@@ -437,7 +437,9 @@ This section declares the export of the split DNS domains.
 - **FR-split-6.** When the split DNS read fails, the daemon treats the tailnet as holding
   no split domain, it logs a warning, and the sync fails not.
 - **FR-split-7.** The daemon validates each split domain as a DNS name before it reaches
-  `resolvectl`. An invalid domain is dropped and logged; the valid domains survive.
+  `resolvectl`. An invalid domain is dropped and logged; the valid domains survive. The
+  `ts.net` zone and every name below it are dropped and logged, because the zone is the
+  reserved base zone of MagicDNS.
 - **FR-split-8.** The daemon records one `dns.split_domain_conflict` event for each new
   conflict. A conflict that stays across every tick repeats not, and a conflict that
   returns after it was gone reports again.

@@ -487,7 +487,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <li><strong>FR-split-7.</strong> The daemon validates each split domain as a DNS name before it reaches
 </li>
 </ul>
-<p><code>resolvectl</code>. An invalid domain is dropped and logged; the valid domains survive.</p>
+<p><code>resolvectl</code>. An invalid domain is dropped and logged; the valid domains survive. The <code>ts.net</code> zone and every name below it are dropped and logged, because the zone is the reserved base zone of MagicDNS.</p>
 <ul>
 <li><strong>FR-split-8.</strong> The daemon records one <code>dns.split_domain_conflict</code> event for each new
 </li>
