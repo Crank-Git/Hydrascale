@@ -12,6 +12,10 @@ tailnets:
   # HYDRASCALE_AUTHKEY_<ID> (uppercased id), e.g. HYDRASCALE_AUTHKEY_PERSONAL
   - id: personal
     auth_key: tskey-auth-xxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    # An alias is a second name for this tailnet. Every command that takes an id takes the
+    # alias, for example `hydrascale exec home -- ping 4.2.2.2`. An alias holds letters,
+    # digits, hyphens and underscores, it is unique, and it is the id of no tailnet.
+    alias: home
 
   # Example 2: Work tailnet that routes all traffic through an exit node.
   # exit_node is the hostname (or IP) of the Tailscale node to use as an
@@ -38,6 +42,14 @@ resolver:
   # Default: 127.0.0.53:5354
   bind_address: "127.0.0.53:5354"
 
+  # Answer <peer>.<alias>.ts.internal with the tailnet address of that peer.
+  # The name below the alias holds every label that the MagicDNS name holds below the
+  # suffix of the tailnet, therefore a.b.tailXXXX.ts.net gives a.b.<alias>.ts.internal.
+  # The daemon needs host_dns.mode resolved. Each tailnet needs host_access: true and an
+  # alias that is a DNS label. A tailnet with no alias gets no zone.
+  # Default: false
+  resolve_aliases: false
+
 # Reconciler settings.
 reconciler:
   # How often Hydrascale checks the desired state against the actual state
@@ -45,6 +57,15 @@ reconciler:
   # Accepts Go duration strings: 5s, 30s, 1m, etc.
   # Default: 10s
   interval: 10s
+
+# The routing table that holds every route the daemon writes on the host.
+# Leave this key out to keep the main table, which is the behaviour of version 0.9.
+# A declared table makes the daemon own one `ip rule` per address family, at the
+# priority 32000, which sends a lookup to that table. The daemon adds each rule at
+# start and it removes each rule at shutdown.
+# 53 is the suggested value, because tailscaled already uses the table 52 inside
+# each namespace. The kernel reserves 253, 254 and 255.
+# route_table: 53
 
 # Optional path for a JSON-lines event log.
 # Each reconcile action is written as a JSON object with a timestamp, type,

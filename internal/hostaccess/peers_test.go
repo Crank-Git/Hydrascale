@@ -28,7 +28,7 @@ func TestParsePeers_MultiplePeers(t *testing.T) {
 		},
 	})
 
-	result := ParsePeers("mynet", status, "10.0.0.1", "10.0.0.2", "ns-mynet")
+	result := ParsePeers("mynet", status, "10.0.0.1", "10.0.0.2", "10.0.0.3", "ns-mynet")
 
 	if result.TailnetID != "mynet" {
 		t.Errorf("TailnetID = %q, want %q", result.TailnetID, "mynet")
@@ -76,7 +76,7 @@ func TestParsePeers_MultiplePeers(t *testing.T) {
 
 func TestParsePeers_EmptyPeerList(t *testing.T) {
 	status := makeStatus("example.ts.net", map[string]daemon.StatusNode{})
-	result := ParsePeers("mynet", status, "", "", "ns-mynet")
+	result := ParsePeers("mynet", status, "", "", "", "ns-mynet")
 	if len(result.Peers) != 0 {
 		t.Errorf("expected 0 peers, got %d", len(result.Peers))
 	}
@@ -93,7 +93,7 @@ func TestParsePeers_OfflinePeersIncluded(t *testing.T) {
 			Online:       false,
 		},
 	})
-	result := ParsePeers("net", status, "", "", "ns-net")
+	result := ParsePeers("net", status, "", "", "", "ns-net")
 	if len(result.Peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(result.Peers))
 	}
@@ -103,7 +103,7 @@ func TestParsePeers_OfflinePeersIncluded(t *testing.T) {
 }
 
 func TestParsePeers_NilStatus(t *testing.T) {
-	result := ParsePeers("mynet", nil, "gw", "host", "ns-mynet")
+	result := ParsePeers("mynet", nil, "gw", "host", "hostip", "ns-mynet")
 	if result.TailnetID != "mynet" {
 		t.Errorf("TailnetID = %q, want %q", result.TailnetID, "mynet")
 	}
@@ -122,7 +122,7 @@ func TestParsePeers_MissingMagicDNSSuffix(t *testing.T) {
 	status := makeStatus("", map[string]daemon.StatusNode{
 		"a": {HostName: "Node", TailscaleIPs: []string{"100.64.0.5"}},
 	})
-	result := ParsePeers("net", status, "", "", "ns-net")
+	result := ParsePeers("net", status, "", "", "", "ns-net")
 	if result.MagicDNSSuffix != "" {
 		t.Errorf("expected empty MagicDNSSuffix, got %q", result.MagicDNSSuffix)
 	}
@@ -133,7 +133,7 @@ func TestParsePeers_PeerWithNoIPs_Excluded(t *testing.T) {
 		"noip":  {HostName: "NoIP", TailscaleIPs: []string{}},
 		"hasip": {HostName: "HasIP", TailscaleIPs: []string{"100.64.0.9"}},
 	})
-	result := ParsePeers("net", status, "", "", "ns-net")
+	result := ParsePeers("net", status, "", "", "", "ns-net")
 	if len(result.Peers) != 1 {
 		t.Fatalf("expected 1 peer (no-IP excluded), got %d", len(result.Peers))
 	}
@@ -146,12 +146,33 @@ func TestParsePeers_InvalidIPSkipped(t *testing.T) {
 	status := makeStatus("", map[string]daemon.StatusNode{
 		"bad": {HostName: "Bad", TailscaleIPs: []string{"not-an-ip", "100.64.0.3"}},
 	})
-	result := ParsePeers("net", status, "", "", "ns-net")
+	result := ParsePeers("net", status, "", "", "", "ns-net")
 	if len(result.Peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(result.Peers))
 	}
 	if result.Peers[0].IPv4 != "100.64.0.3" {
 		t.Errorf("IPv4 = %q, want %q", result.Peers[0].IPv4, "100.64.0.3")
+	}
+}
+
+func TestParsePeers_CopiesSplitDNSRoutes(t *testing.T) {
+	status := makeStatus("example.ts.net", nil)
+	status.SplitDNSRoutes = []string{"acme.example.com", "zeta.example.com"}
+
+	result := ParsePeers("mynet", status, "10.0.0.1", "vh001", "10.0.0.2", "ns-mynet")
+
+	if len(result.SplitDNSDomains) != 2 || result.SplitDNSDomains[0] != "acme.example.com" || result.SplitDNSDomains[1] != "zeta.example.com" {
+		t.Fatalf("SplitDNSDomains = %v, want [acme.example.com zeta.example.com]", result.SplitDNSDomains)
+	}
+	// The field is a copy, therefore a later edit of the status keeps the peers unchanged.
+	status.SplitDNSRoutes[0] = "changed.example.com"
+	if result.SplitDNSDomains[0] != "acme.example.com" {
+		t.Errorf("SplitDNSDomains[0] = %q, want %q", result.SplitDNSDomains[0], "acme.example.com")
+	}
+
+	empty := ParsePeers("mynet", nil, "10.0.0.1", "vh001", "10.0.0.2", "ns-mynet")
+	if len(empty.SplitDNSDomains) != 0 {
+		t.Errorf("SplitDNSDomains on a nil status = %v, want empty", empty.SplitDNSDomains)
 	}
 }
 

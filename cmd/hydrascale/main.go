@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -270,11 +272,16 @@ func printStatusTable(
 	}
 
 	fmt.Println("Tailnet Status:")
-	fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "ID", "NAMESPACE", "DAEMON", "STATE", "ERROR")
-	fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", "----", "---------", "------", "-----", "-----")
+	fmt.Printf("  %-20s %-12s %-22s %-10s %-12s %s\n", "ID", "ALIAS", "NAMESPACE", "DAEMON", "STATE", "ERROR")
+	fmt.Printf("  %-20s %-12s %-22s %-10s %-12s %s\n", "----", "-----", "---------", "------", "-----", "-----")
 
 	for id := range desired {
 		nsName := namespaces.GetNamespaceName(id)
+		// A tailnet that holds no alias keeps the column aligned with a dash.
+		alias := desired[id].Alias
+		if alias == "" {
+			alias = "-"
+		}
 		daemonStatus := "unknown"
 		state := "desired"
 
@@ -305,13 +312,14 @@ func printStatusTable(
 			errMsg = le
 		}
 
-		fmt.Printf("  %-20s %-15s %-10s %-12s %s\n", id, nsName, daemonStatus, state, errMsg)
+		fmt.Printf("  %-20s %-12s %-22s %-10s %-12s %s\n", id, alias, nsName, daemonStatus, state, errMsg)
 	}
 
-	// Show extra tailnets not in config
+	// Show extra tailnets not in config. The configuration file declares no such tailnet,
+	// therefore it holds no alias either.
 	for id, s := range actual {
 		if _, wanted := desired[id]; !wanted {
-			fmt.Printf("  %-20s %-15s %-10s %-12s\n", id, s.NsName, "orphan", "removing")
+			fmt.Printf("  %-20s %-12s %-22s %-10s %-12s\n", id, "-", s.NsName, "orphan", "removing")
 		}
 	}
 }
@@ -332,11 +340,14 @@ func addCmd() *cobra.Command {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			// Check for duplicates
-			for _, tn := range cfg.Tailnets {
-				if tn.ID == tailnetID {
+			// The check reads the alias as well as the ID. A tailnet whose ID is the alias
+			// of another tailnet makes the file unreadable, and every later command then
+			// fails on the load.
+			if existing, err := cfg.ResolveTailnetRef(tailnetID); err == nil {
+				if existing == tailnetID {
 					return fmt.Errorf("tailnet %s already exists", tailnetID)
 				}
+				return fmt.Errorf("%s is the alias of the tailnet %s, so no tailnet takes it as an ID", tailnetID, existing)
 			}
 
 			cfg.Tailnets = append(cfg.Tailnets, config.Tailnet{ID: tailnetID})
@@ -357,7 +368,6 @@ func removeCmd() *cobra.Command {
 		Short: "Remove a tailnet",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tailnetID := args[0]
 			path := configPath()
 
 			cfg, err := loadConfig()
@@ -365,16 +375,18 @@ func removeCmd() *cobra.Command {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			found := false
+			tailnetID, err := cfg.ResolveTailnetRef(args[0])
+			if err != nil {
+				return err
+			}
+
+			// ResolveTailnetRef returned this ID from the same slice, therefore the loop
+			// always finds it.
 			for i, tn := range cfg.Tailnets {
 				if tn.ID == tailnetID {
 					cfg.Tailnets = append(cfg.Tailnets[:i], cfg.Tailnets[i+1:]...)
-					found = true
 					break
 				}
-			}
-			if !found {
-				return fmt.Errorf("tailnet %s not found", tailnetID)
 			}
 
 			if err := config.SaveConfig(path, cfg); err != nil {
@@ -406,8 +418,11 @@ func listCmd() *cobra.Command {
 			fmt.Println("Configured tailnets:")
 			for _, tn := range cfg.Tailnets {
 				extra := ""
+				if tn.Alias != "" {
+					extra = fmt.Sprintf(" (alias: %s)", tn.Alias)
+				}
 				if tn.ExitNode != "" {
-					extra = fmt.Sprintf(" (exit: %s)", tn.ExitNode)
+					extra += fmt.Sprintf(" (exit: %s)", tn.ExitNode)
 				}
 				fmt.Printf("  - %s%s\n", tn.ID, extra)
 			}
@@ -422,21 +437,14 @@ func switchCmd() *cobra.Command {
 		Short: "Print the namespace name for a tailnet (changes no state)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tailnetID := args[0]
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
 			}
 
-			found := false
-			for _, tn := range cfg.Tailnets {
-				if tn.ID == tailnetID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("tailnet %s not found", tailnetID)
+			tailnetID, err := cfg.ResolveTailnetRef(args[0])
+			if err != nil {
+				return err
 			}
 
 			// A child process cannot move its parent shell into a namespace.
@@ -513,7 +521,7 @@ func serveCmd() *cobra.Command {
 			var ha *hostaccess.Manager
 			dnsMode := cfg.EffectiveHostDNSMode()
 			if dnsMode != "" {
-				ha = hostaccess.NewManager(dnsMode, "/etc/hosts", cfg.InfraSubnet)
+				ha = hostaccess.NewManager(dnsMode, "/etc/hosts", cfg.InfraSubnet, cfg.RouteTable)
 				if forwarder != nil {
 					ha.SetForwarder(forwarder)
 				}
@@ -600,7 +608,9 @@ func serveCmd() *cobra.Command {
 
 			// Stop DNS forwarder
 			if forwarder != nil {
-				forwarder.Stop()
+				if err := forwarder.Stop(); err != nil {
+					fmt.Fprintf(os.Stderr, "DNS forwarder shutdown warning: %v\n", err)
+				}
 			}
 
 			// Close event log
@@ -610,6 +620,31 @@ func serveCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// resolveRef returns the tailnet ID that ref names. ref is an ID or an alias.
+// The commands exec, ping, ssh, tailscale, wrap and env call resolveRef, so that an alias
+// reaches the tailnet that the ID reaches.
+// When the configuration names no match, resolveRef returns ref unchanged. These commands
+// read no configuration file before the alias, therefore each one still reaches a
+// namespace that the configuration no longer declares, and `ip netns exec` reports a
+// namespace that it cannot find.
+// resolveRef returns an error when it cannot read the configuration file. A file that
+// holds a syntax error would otherwise appear as a missing namespace. When the operator
+// has no read access, the error names the file and tells the operator to use sudo,
+// because the configuration directory of a host is readable by root alone.
+func resolveRef(ref string) (string, error) {
+	cfg, err := loadConfig()
+	if errors.Is(err, fs.ErrPermission) {
+		return "", fmt.Errorf("cannot read %s to resolve the tailnet %q; run the command with sudo: %w", configPath(), ref, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to load config: %w", err)
+	}
+	if id, err := cfg.ResolveTailnetRef(ref); err == nil {
+		return id, nil
+	}
+	return ref, nil
 }
 
 // --- Namespace execution helpers ---
@@ -657,7 +692,10 @@ func execCmd() *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("exec requires a tailnet-id")
 			}
-			tailnetID := args[0]
+			tailnetID, err := resolveRef(args[0])
+			if err != nil {
+				return err
+			}
 			dashIdx := cmd.ArgsLenAtDash()
 			if dashIdx < 0 {
 				return fmt.Errorf("exec requires a -- separator before the command")
@@ -677,7 +715,11 @@ func pingCmd() *cobra.Command {
 		Short: "Ping a Tailscale peer from within a tailnet's namespace",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTailscaleInNamespace(args[0], append([]string{"ping"}, args[1:]...))
+			tailnetID, err := resolveRef(args[0])
+			if err != nil {
+				return err
+			}
+			return runTailscaleInNamespace(tailnetID, append([]string{"ping"}, args[1:]...))
 		},
 	}
 }
@@ -688,7 +730,11 @@ func sshCmd() *cobra.Command {
 		Short: "SSH to a Tailscale peer via a tailnet's namespace",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTailscaleInNamespace(args[0], append([]string{"ssh"}, args[1:]...))
+			tailnetID, err := resolveRef(args[0])
+			if err != nil {
+				return err
+			}
+			return runTailscaleInNamespace(tailnetID, append([]string{"ssh"}, args[1:]...))
 		},
 	}
 }
@@ -702,7 +748,10 @@ func tailscaleCmd() *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("tailscale requires a tailnet-id")
 			}
-			tailnetID := args[0]
+			tailnetID, err := resolveRef(args[0])
+			if err != nil {
+				return err
+			}
 			dashIdx := cmd.ArgsLenAtDash()
 			if dashIdx < 0 {
 				return fmt.Errorf("tailscale requires a -- separator before the arguments")
@@ -739,7 +788,10 @@ This creates /etc/systemd/system/<service>.service.d/hydrascale.conf`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			serviceName := args[0]
-			tailnetID := args[1]
+			tailnetID, err := resolveRef(args[1])
+			if err != nil {
+				return err
+			}
 			apply, _ := cmd.Flags().GetBool("apply")
 
 			validServiceName := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,255}$`)
@@ -816,7 +868,10 @@ The direct form needs no function:
   sudo hydrascale exec personal -- curl http://my-tailscale-host:8080`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tailnetID := args[0]
+			tailnetID, err := resolveRef(args[0])
+			if err != nil {
+				return err
+			}
 			nsName := namespaces.GetNamespaceName(tailnetID)
 			socketPath := daemon.SocketPath(tailnetID)
 

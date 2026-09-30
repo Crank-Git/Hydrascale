@@ -533,7 +533,8 @@ access:
 
 1. **Host routes.** The daemon adds a host route for the Tailscale address of each peer,
    for IPv4 and for IPv6, through the veth pair of the namespace. The kernel then sends a
-   packet to the right namespace.
+   packet to the right namespace. The daemon writes each route into the main table, or into
+   the table that `route_table` declares. See "A dedicated route table" below.
 
 2. **Namespace masquerade.** The daemon adds an iptables masquerade rule inside the
    namespace on `tailscale0`. Traffic of the host then carries the Tailscale address of the
@@ -548,8 +549,84 @@ access:
    MagicDNS resolver of that namespace at `100.100.100.100`. Several tailnets therefore
    answer MagicDNS queries on one host.
 
+5. **A short name per tailnet.** With `resolver.resolve_aliases` set, the daemon answers
+   `<peer>.<alias>.ts.internal` with the tailnet address of that peer. See "Short names
+   for a peer" below.
+
 The daemon syncs the routes and the DNS entries on every tick. It removes them at shutdown,
 and when host access is disabled.
+
+### Short names for a peer
+
+A MagicDNS name holds the suffix of the control server, such as
+`laptop.taildf854a.ts.net`. The operator gives a tailnet a second name with the key
+`alias`, and the daemon answers a name under that alias for the same peer:
+
+```yaml
+resolver:
+  mode: unified
+  resolve_aliases: true
+host_dns:
+  mode: resolved
+tailnets:
+  - id: Ta1a1a1a1a1CNTRL
+    alias: mmo
+    host_access: true
+```
+
+With this file, `laptop.mmo.ts.internal` resolves to the tailnet address of the peer
+`laptop` of that tailnet. The daemon answers an A record and an AAAA record with a time to
+live of 30 seconds. It writes no entry in `/etc/hosts` for this name.
+
+ICANN reserved the top level domain `.internal` in 2024 for a private name, therefore a
+name under `ts.internal` never collides with a name of the public domain name system.
+
+The name below the alias holds every label that the MagicDNS name holds below the suffix
+of the tailnet. A control server that names a peer `a.b.taildf854a.ts.net` therefore gives
+`a.b.mmo.ts.internal`, and a nested name keeps its shape.
+
+Three conditions apply, and the daemon answers no alias name when one of them is absent:
+
+- `resolver.resolve_aliases` is `true`.
+- `host_dns.mode` is `resolved`. The `hosts` mode writes a file, and a file holds no zone.
+- The tailnet holds an `alias` and `host_access: true`.
+
+An alias becomes one DNS label, therefore `LoadConfig` refuses an alias that is not a DNS
+label when `resolve_aliases` is set. An alias may hold `_`, and a DNS label may not.
+`LoadConfig` also refuses two aliases that differ by case alone, because a domain name
+folds case.
+
+The daemon builds the zone as follows:
+
+- The DNS forwarder answers on the host side veth address of each tailnet, on port 53, for
+  UDP and for TCP.
+- The daemon registers two domains on the veth device of that tailnet: the MagicDNS suffix
+  and `<alias>.ts.internal`. A link of systemd-resolved carries one server list for every
+  domain that it holds, therefore both domains reach the forwarder, and the forwarder
+  routes a MagicDNS query onward to the namespace.
+- A query of a name below the alias that the zone does not hold returns NXDOMAIN. The
+  forwarder sends no such query to an upstream server.
+- The reconciler rebuilds the zone on each tick, therefore a peer that the control server
+  adds resolves within one interval of `reconciler.interval`.
+
+The veth address carries the traffic of the namespace as well as the traffic of the host,
+so a process inside a namespace can send a packet to this port. The listener therefore
+answers the host alone: the host holds one end of every veth pair, and the namespace holds
+the other end, which the host does not hold. A query from an address that no interface of
+the host holds gets REFUSED, and the daemon logs the refusal with that address. A namespace
+reads no name of another tailnet through this port.
+
+Port 53 of the veth address may already belong to another resolver of the host. The daemon
+opens the socket before it registers a domain. If the socket does not open, the daemon logs
+the failure, registers the MagicDNS suffix alone, and points the link at the namespace side
+address, therefore MagicDNS keeps working and the alias zone alone is absent. The daemon
+opens the socket again on the next tick.
+
+A name that the key does not cover, such as `laptop.taildf854a.ts.net`, reaches
+systemd-resolved on the same path as before. The daemon rewrites no query.
+
+The key is unset by default, and an unset key changes nothing: the veth device carries the
+MagicDNS suffix alone, and the link names the namespace side address.
 
 ### The DNS lifecycle of tailscaled
 
@@ -647,7 +724,16 @@ This mode works on every Linux system. The daemon rewrites the block only when t
 data changes, and it writes the file atomically. It changes no other entry of `/etc/hosts`.
 
 **`resolved`.** The daemon registers a routing domain with `systemd-resolved` through
-`resolvectl`. This mode needs `systemd-resolved`, and it changes no file.
+`resolvectl`. The daemon registers the MagicDNS suffix, the alias zone, and every split
+DNS domain of each tailnet, so a query of a split domain reaches the resolver of that
+tailnet. Names below the reserved `ts.net` zone are not exported. This mode needs
+`systemd-resolved`, and it changes no file.
+
+The DNS forwarder routes the same split DNS domains in every mode. When a tailnet holds a
+split domain that another tailnet claims, the first tailnet in sorted identifier order
+keeps it, and the daemon records a `dns.split_domain_conflict` event. The Settings view of
+the console shows the domains of each tailnet in the Split DNS card, and it shows each
+conflict as a critical alert that names both tailnets.
 
 ### Teardown
 
@@ -658,7 +744,34 @@ daemon removes:
 - The masquerade rule and the DNS DNAT rule inside the namespace.
 - The entries of that tailnet in `/etc/hosts`, or the `systemd-resolved` registration.
 
-A graceful shutdown removes the same state.
+A graceful shutdown removes the same state. A graceful shutdown also removes the two
+routing policy rules and empties the route table, when `route_table` declares one.
+
+### A dedicated route table
+
+The key `route_table` names the routing table that holds every route the daemon writes on
+the host. Leave the key out to keep the main table, which is the behaviour of version 0.9.
+
+53 is the suggested value, because `tailscaled` already uses the table 52 inside each
+namespace. The kernel reserves 253, 254 and 255, and the daemon refuses each of them.
+
+```yaml
+route_table: 53
+```
+
+A route in a table other than the main table reaches no packet until a routing policy rule
+sends a lookup to that table. The daemon therefore owns one rule per address family:
+
+```
+ip rule add priority 32000 from all lookup 53
+ip -6 rule add priority 32000 from all lookup 53
+```
+
+The priority 32000 comes after every rule of `tailscaled`, which holds 5210 to 5270, and
+before the main table, which the kernel consults at 32766. A host that runs its own
+`tailscaled` therefore keeps its precedence, and a route of the daemon still wins over the
+main table. The daemon reads the rule list on each tick and it adds no second copy. A
+shutdown removes each rule and empties the table.
 
 ### Compatibility
 
@@ -724,7 +837,9 @@ namespace stays up, and the daemon manages it from that point.
 
 - **MagicDNS.** Host access DNS resolution depends on the DNS configuration of the control
   server. Headscale serves MagicDNS, and its suffix and its behaviour can differ from
-  Tailscale. When a name does not resolve, read the Headscale DNS configuration.
+  Tailscale. The daemon also exports the split DNS domains of each tailnet to the host
+  resolver, and a Headscale control server may serve no split DNS. When a name does not
+  resolve, read the Headscale DNS configuration.
 
 - **DERP relays.** Tailscale runs its own global DERP relay network. Headscale uses the same
   relays, its own relays, or both. When two peers cannot connect, read the DERP map of the
@@ -749,6 +864,13 @@ host_access: false
 # the network. It must be an IPv4 CIDR of at least /16.
 # infra_subnet: "10.200.0.0/16"
 
+# The routing table that holds every route the daemon writes on the host
+# (default: absent, which is the main table). A declared table makes the daemon own
+# one `ip rule` per address family, at the priority 32000, which sends a lookup to
+# that table. 53 is the suggested value, because tailscaled already uses the table 52
+# inside each namespace. The kernel reserves 253, 254 and 255.
+# route_table: 53
+
 # The Unix group that reaches the control socket (default: empty, which is root only).
 # Warning: membership of this group is equivalent to root access on this host, because a
 # member sends a command to the daemon and the daemon runs as root.
@@ -765,6 +887,7 @@ host_access: false
 # The tailnets that the daemon manages
 tailnets:
   - id: "corp-prod"                # unique; letters, digits, dots, hyphens, underscores; 63 characters at most
+    alias: "prod"                  # optional second name; letters, digits, hyphens, underscores
     exit_node: "node1.example.com" # optional exit node name
     auth_key: "tskey-auth-xxxxx"   # optional auth key for an unattended setup
     host_access: true              # optional, and it overrides the global value
@@ -792,6 +915,7 @@ dns:
 resolver:
   mode: unified                    # the one mode the daemon runs
   bind_address: "127.0.0.53:5354"  # optional, and it defaults to 127.0.0.53:5354
+  resolve_aliases: false           # default: false. See "Short names for a peer" above.
 
 # The host DNS mode, which host access uses
 host_dns:
@@ -928,6 +1052,13 @@ hydrascale wrap <service> <tailnet-id>
 Pass `--config <path>` on any command to name another configuration file. The default is
 `/etc/hydrascale/config.yaml`, which the systemd unit also passes.
 
+Each command that takes a `<tailnet-id>` also takes the `alias` of that tailnet. An alias
+is unique, and it is the identifier of no tailnet. `hydrascale list` prints the alias, and
+`hydrascale status` shows it in the column `ALIAS`.
+
+`env` reads the configuration file to resolve an alias. On a host where only root can read
+`/etc/hydrascale`, run `sudo hydrascale env <tailnet-id>`.
+
 The namespace-scoped subcommands `exec`, `ping`, `ssh`, and `tailscale` replace a raw
 `ip netns exec` line:
 
@@ -999,7 +1130,7 @@ control socket. Every mutating route on the console listener requires the header
 | `/api/tailnet/{id}/removal-plan` | GET | What a removal of one tailnet deletes |
 | `/api/config` | GET | The current configuration, with every credential removed |
 | `/api/config/dns` | POST | Change the resolver configuration |
-| `/api/dns` | GET | The resolver state and the DNS protection state per namespace |
+| `/api/dns` | GET | The resolver state, the DNS protection state, and the split DNS domains and conflict per namespace |
 | `/api/access` | GET, PUT | Read and write the local rule set |
 | `/api/policy` | GET | The control server kind and the write availability per tailnet |
 | `/api/policy/{id}` | GET, PUT | Read and write the policy of one tailnet |
@@ -1203,6 +1334,20 @@ infra_subnet: "10.201.0.0/16"
 ```
 Then restart the daemon. It deletes the namespaces and builds them again with the new
 addresses.
+
+**A host route does not carry traffic**
+A route in a table other than the main table reaches no packet until a routing policy rule
+sends a lookup to that table. Read the rules and the table:
+```bash
+ip rule
+ip -6 rule
+ip route show table 53
+ip -6 route show table 53
+```
+The rule list holds `32000: from all lookup 53` for IPv4 and for IPv6, and the table holds
+one route per peer. When the rule is absent, read the log for `hostaccess`. When another
+rule of the operator already holds the priority 32000, the daemon adds none and it states
+the table that the rule looks up.
 
 **`name not a valid ifname`**
 An older version used the whole tailnet identifier as the interface name, which passes the

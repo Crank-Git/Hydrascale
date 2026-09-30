@@ -127,6 +127,10 @@ func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*
 	return m.statusResult, m.statusErr
 }
 
+func (m *mockDaemon) GetSplitDNSRoutes(ctx context.Context, nsName, tailnetID string) ([]string, error) {
+	return nil, nil
+}
+
 type mockRouting struct{}
 
 func (m *mockRouting) PollStatus(nsName, socketPath string) ([]routing.Route, error) {

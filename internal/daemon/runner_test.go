@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,6 +169,69 @@ func TestGetStatusRunsTheStatusCommandThroughTheRunner(t *testing.T) {
 	}
 	if len(rec.Calls()) != 1 {
 		t.Errorf("GetStatus ran %d commands, want 1", len(rec.Calls()))
+	}
+}
+
+func TestGetSplitDNSRoutesRunsTheDNSStatusCommandThroughTheRunner(t *testing.T) {
+	base := t.TempDir()
+	socketPath := filepath.Join(base, "corp", "tailscaled.sock")
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(`{"SplitDNSRoutes":{"zeta.example.com":[{"Addr":"100.100.100.100"}],"acme.example.com":[{"Addr":"100.100.100.100"}]}}`)},
+		"ip", "netns", "exec", "ns-corp",
+		"tailscale", "--socket="+socketPath, "dns", "status", "--json")
+
+	m := &RealManager{Runner: rec, Starter: rec, StateDir: base}
+	domains, err := m.GetSplitDNSRoutes(t.Context(), "ns-corp", "corp")
+	if err != nil {
+		t.Fatalf("GetSplitDNSRoutes: %v", err)
+	}
+	if len(domains) != 2 || domains[0] != "acme.example.com" || domains[1] != "zeta.example.com" {
+		t.Errorf("domains = %v, want [acme.example.com zeta.example.com]", domains)
+	}
+
+	want := execx.Call{Name: "ip", Args: []string{"netns", "exec", "ns-corp",
+		"tailscale", "--socket=" + socketPath, "dns", "status", "--json"}}
+	got := rec.Calls()
+	if len(got) != 1 {
+		t.Fatalf("GetSplitDNSRoutes ran %d commands, want 1", len(got))
+	}
+	if got[0].String() != want.String() {
+		t.Errorf("command = %q, want %q", got[0].String(), want.String())
+	}
+}
+
+func TestGetSplitDNSRoutesReturnsEmptyForAMissingField(t *testing.T) {
+	base := t.TempDir()
+	socketPath := filepath.Join(base, "corp", "tailscaled.sock")
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(`{"MissingMagicDNS":null}`)},
+		"ip", "netns", "exec", "ns-corp",
+		"tailscale", "--socket="+socketPath, "dns", "status", "--json")
+
+	m := &RealManager{Runner: rec, Starter: rec, StateDir: base}
+	domains, err := m.GetSplitDNSRoutes(t.Context(), "ns-corp", "corp")
+	if err != nil {
+		t.Fatalf("GetSplitDNSRoutes: %v", err)
+	}
+	if len(domains) != 0 {
+		t.Errorf("domains = %v, want empty", domains)
+	}
+}
+
+func TestGetSplitDNSRoutesReturnsTheCommandFailure(t *testing.T) {
+	base := t.TempDir()
+	socketPath := filepath.Join(base, "corp", "tailscaled.sock")
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Err: fmt.Errorf("exit status 1")},
+		"ip", "netns", "exec", "ns-corp",
+		"tailscale", "--socket="+socketPath, "dns", "status", "--json")
+
+	m := &RealManager{Runner: rec, Starter: rec, StateDir: base}
+	if _, err := m.GetSplitDNSRoutes(t.Context(), "ns-corp", "corp"); err == nil {
+		t.Fatal("GetSplitDNSRoutes returned no error for a failed command")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +16,43 @@ import (
 // not return blocks the reconcile cycle, so every command carries this deadline.
 // See SA-21.
 const hostCommandTimeout = 5 * time.Second
+
+// hostRouteRulePriority is the priority of the routing policy rule that sends a lookup to
+// the route table. A route in that table reaches no packet until the rule exists.
+//
+// The kernel consults the main table at the priority 32766, and tailscaled installs its own
+// rules between the priorities 5210 and 5270. The value 32000 therefore comes after every
+// rule of tailscaled and before the main table. A host that runs its own tailscaled keeps
+// its precedence, and a route of the daemon still wins over the main table.
+const hostRouteRulePriority = "32000"
+
+// routeTableName returns the route table number as text, for an `ip` argument.
+func (m *Manager) routeTableName() string {
+	return strconv.Itoa(m.routeTable)
+}
+
+// tableArgs returns the `table <n>` arguments that every host route command of the daemon
+// carries.
+//
+// tableArgs returns no argument when the configuration declares no `route_table`. The
+// command then reads and writes the main table, which is the behaviour of version 0.9.
+func (m *Manager) tableArgs() []string {
+	if m.routeTable == 0 {
+		return nil
+	}
+	return []string{"table", m.routeTableName()}
+}
+
+// routeArgs returns the argument list of one host route command, with the address family
+// and the route table applied.
+func (m *Manager) routeArgs(v6 bool, args ...string) []string {
+	out := make([]string, 0, len(args)+3)
+	if v6 {
+		out = append(out, "-6")
+	}
+	out = append(out, args...)
+	return append(out, m.tableArgs()...)
+}
 
 var (
 	cgnatNet *net.IPNet
@@ -81,8 +119,24 @@ func isTailscaleV6(dest string) bool {
 	return false
 }
 
-// parseHostRoutes parses `ip route show` output and returns route destinations
+// tableIsEmpty reports whether the output of `ip route show` states that the routing
+// table holds no route.
+//
+// The kernel creates an IPv4 FIB table with the first route that reaches it, therefore
+// `ip route show table 53` fails with the status 2 and the text
+// "Error: ipv4: FIB table does not exist." until the daemon writes its first route. A
+// table that holds no route is the state that the daemon starts from, and it is not a
+// failure. The IPv6 command answers with an empty list instead, so this reads the IPv4
+// text alone.
+func tableIsEmpty(output string) bool {
+	return strings.Contains(output, "FIB table does not exist")
+}
+
+// parseHostRoutes parses `ip route show [table <n>]` output and returns route destinations
 // on vethDev, excluding MagicDNS and infra routes.
+//
+// A route that `ip` shows out of one named table carries no `table` keyword, so the first
+// field of every line stays the destination.
 func parseHostRoutes(output string, vethDev string, infraSubnet string) []string {
 	var routes []string
 	_, infraNet, _ := net.ParseCIDR(infraSubnet)
@@ -126,8 +180,11 @@ func parseHostRoutes(output string, vethDev string, infraSubnet string) []string
 	return routes
 }
 
-// parseHostRoutesV6 parses `ip -6 route show` output and returns route destinations
-// on vethDev, excluding default routes.
+// parseHostRoutesV6 parses `ip -6 route show [table <n>]` output and returns route
+// destinations on vethDev, excluding default routes.
+//
+// The kernel appends `metric 1024 pref medium` to an IPv6 route that carries no metric, and
+// the destination stays the first field of the line.
 func parseHostRoutesV6(output string, vethDev string) []string {
 	var routes []string
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
@@ -335,6 +392,11 @@ func parseRouteGetOutput(output string) (dev string, hasVia bool, table string) 
 //     daemon would take that traffic. See issue #21.
 //
 // A device that the daemon owns is neither condition: a replace of its own route is safe.
+//
+// Both conditions hold when the configuration declares a `route_table`. The kernel consults
+// that table at the priority 32000, which comes after every rule of tailscaled and before
+// the main table. A table that answers first still hides a route of the daemon, and a route
+// of the daemon now wins over a directly connected network of the main table.
 func (m *Manager) skipReasonForRoute(dest string, v6 bool) string {
 	addr := dest
 	if i := strings.Index(addr, "/"); i >= 0 {
@@ -404,14 +466,153 @@ func (m *Manager) filterWritableRoutes(candidates []string, v6 bool) []string {
 	return out
 }
 
-// SyncHostRoutes synchronises host routing table entries for all peers in the
+// hostRouteRuleArgs returns the arguments of one `ip rule` command of the daemon. The
+// action is `add` or `del`. The argument list names the priority and the table, so the
+// kernel matches the rule of the daemon and no rule of the operator.
+func (m *Manager) hostRouteRuleArgs(v6 bool, action string) []string {
+	args := []string{"rule", action, "priority", hostRouteRulePriority, "from", "all", "lookup", m.routeTableName()}
+	if v6 {
+		return append([]string{"-6"}, args...)
+	}
+	return args
+}
+
+// hostRouteRuleState reads `ip [-6] rule show` output and returns the table that the rule
+// at the priority of the daemon looks up. The second result is false when the output holds
+// no rule at that priority.
+//
+// One line of the output reads `32000:\tfrom all lookup 53`. The priority carries a colon.
+func hostRouteRuleState(output string) (table string, present bool) {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.TrimSuffix(fields[0], ":") != hostRouteRulePriority {
+			continue
+		}
+		for i, f := range fields {
+			if f == "lookup" && i+1 < len(fields) {
+				return fields[i+1], true
+			}
+		}
+		return "", true
+	}
+	return "", false
+}
+
+// ruleNotPresent reports whether the output of `ip rule del` states that the rule is not
+// present. The convention of the project treats "rule does not exist" as success.
+func ruleNotPresent(output string) bool {
+	return strings.Contains(strings.ToLower(output), "no such file or directory")
+}
+
+// ensureHostRouteRule writes the routing policy rule that sends a lookup to the route
+// table, for one address family. A route in that table reaches no packet until the rule
+// exists.
+//
+// ensureHostRouteRule runs no command when the configuration declares no `route_table`,
+// because the daemon then writes into the main table and the kernel already looks that
+// table up.
+//
+// ensureHostRouteRule reads the rule list first, because `ip rule add` writes a second copy
+// of a rule that is already present and the reconcile cycle runs every ten seconds.
+// ensureHostRouteRule returns an error when the read fails, when the write fails, or when
+// another rule already holds the priority of the daemon.
+func (m *Manager) ensureHostRouteRule(v6 bool) error {
+	if m.routeTable == 0 {
+		return nil
+	}
+	showArgs := []string{"rule", "show"}
+	if v6 {
+		showArgs = []string{"-6", "rule", "show"}
+	}
+	out, err := m.run("ip", showArgs...)
+	if err != nil {
+		return fmt.Errorf("ip %s: %w (%s)", strings.Join(showArgs, " "), err, out)
+	}
+	if table, present := hostRouteRuleState(string(out)); present {
+		if table != m.routeTableName() {
+			return fmt.Errorf("the rule at the priority %s looks up the table %q, not the table %s",
+				hostRouteRulePriority, table, m.routeTableName())
+		}
+		return nil
+	}
+	args := m.hostRouteRuleArgs(v6, "add")
+	if out, err := m.run("ip", args...); err != nil {
+		return fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), err, out)
+	}
+	log.Printf("hostaccess: added the rule %s, which sends a lookup to the table %s",
+		strings.Join(args, " "), m.routeTableName())
+	return nil
+}
+
+// removeHostRouteRule removes the routing policy rule of the daemon for one address family.
+// A rule that is not present is a success. removeHostRouteRule returns any other failure.
+func (m *Manager) removeHostRouteRule(v6 bool) error {
+	args := m.hostRouteRuleArgs(v6, "del")
+	out, err := m.run("ip", args...)
+	if err != nil && !ruleNotPresent(string(out)) {
+		return fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), err, out)
+	}
+	return nil
+}
+
+// flushHostRouteTable empties the route table for one address family.
+func (m *Manager) flushHostRouteTable(v6 bool) error {
+	args := m.routeArgs(v6, "route", "flush")
+	if out, err := m.run("ip", args...); err != nil {
+		return fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), err, out)
+	}
+	return nil
+}
+
+// RemoveHostRouteTable removes the routing policy rules of the daemon and empties the route
+// table, for IPv4 and for IPv6.
+//
+// RemoveHostRouteTable runs no command when the configuration declares no `route_table`.
+// The daemon then holds no rule of its own, and the main table belongs to the operator.
+//
+// RemoveHostRouteTable removes each rule before it empties the table, so that no packet
+// reaches a table that holds a part of the routes. A step that fails does not stop the
+// remaining steps. RemoveHostRouteTable collects every failure and returns the failures
+// together.
+func (m *Manager) RemoveHostRouteTable() error {
+	if m.routeTable == 0 {
+		return nil
+	}
+	var errs []error
+	for _, v6 := range []bool{false, true} {
+		if err := m.removeHostRouteRule(v6); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, v6 := range []bool{false, true} {
+		if err := m.flushHostRouteTable(v6); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// SyncHostRoutes synchronises the entries of the route table for all peers in the
 // TailnetPeers set and for any accepted subnet routes from table 52 in the namespace.
 // Both desired sets are merged before diffing so that peer routes don't remove
 // subnet routes (or vice versa).
+//
+// SyncHostRoutes writes the routing policy rule of the route table first, because a route
+// in a table other than the main table reaches no packet until the rule exists.
 func (m *Manager) SyncHostRoutes(peers TailnetPeers) error {
 	infraSubnet := m.infraSubnet
 	vethDev := peers.VethHost
 	gw := peers.VethGateway
+
+	var errs []error
+	for _, v6 := range []bool{false, true} {
+		if err := m.ensureHostRouteRule(v6); err != nil {
+			errs = append(errs, err)
+		}
+	}
 
 	// Build the combined desired set: peer IPs + accepted routes from table 52
 	wantV4, wantV6 := desiredPeerRoutes(peers)
@@ -436,14 +637,21 @@ func (m *Manager) SyncHostRoutes(peers TailnetPeers) error {
 	wantV4 = m.filterWritableRoutes(wantV4, false)
 	wantV6 = m.filterWritableRoutes(wantV6, true)
 
-	// Gather current host routes
-	v4Out, err := m.run("ip", "route", "show")
-	if err != nil {
-		return fmt.Errorf("ip route show: %w", err)
+	// Gather the routes that the route table holds now
+	showV4 := m.routeArgs(false, "route", "show")
+	v4Out, err := m.run("ip", showV4...)
+	if err != nil && !tableIsEmpty(string(v4Out)) {
+		errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(showV4, " "), err, v4Out))
+		return errors.Join(errs...)
+	} else if err != nil {
+		// The table holds no route yet, therefore the host route list is empty.
+		v4Out = nil
 	}
-	v6Out, err := m.run("ip", "-6", "route", "show")
+	showV6 := m.routeArgs(true, "route", "show")
+	v6Out, err := m.run("ip", showV6...)
 	if err != nil {
-		return fmt.Errorf("ip -6 route show: %w", err)
+		errs = append(errs, fmt.Errorf("ip %s: %w", strings.Join(showV6, " "), err))
+		return errors.Join(errs...)
 	}
 
 	actualV4 := parseHostRoutes(string(v4Out), vethDev, infraSubnet)
@@ -452,34 +660,34 @@ func (m *Manager) SyncHostRoutes(peers TailnetPeers) error {
 	addV4, delV4 := diffRoutes(wantV4, actualV4)
 	addV6, delV6 := diffRoutes(wantV6, actualV6)
 
-	var errs []error
-
 	for _, ip := range addV4 {
-		args := []string{"route", "replace", ip, "via", gw, "dev", vethDev}
+		args := m.routeArgs(false, "route", "replace", ip, "via", gw, "dev", vethDev)
 		if out, e := m.run("ip", args...); e != nil {
-			errs = append(errs, fmt.Errorf("ip route replace %s: %w (%s)", ip, e, out))
+			errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), e, out))
 		} else {
 			log.Printf("hostaccess: added route %s via %s dev %s", ip, gw, vethDev)
 		}
 	}
 	for _, ip := range delV4 {
-		if out, e := m.run("ip", "route", "del", ip); e != nil {
-			errs = append(errs, fmt.Errorf("ip route del %s: %w (%s)", ip, e, out))
+		args := m.routeArgs(false, "route", "del", ip)
+		if out, e := m.run("ip", args...); e != nil {
+			errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), e, out))
 		} else {
 			log.Printf("hostaccess: removed route %s", ip)
 		}
 	}
 	for _, ip := range addV6 {
-		args := []string{"-6", "route", "replace", ip, "dev", vethDev}
+		args := m.routeArgs(true, "route", "replace", ip, "dev", vethDev)
 		if out, e := m.run("ip", args...); e != nil {
-			errs = append(errs, fmt.Errorf("ip -6 route replace %s: %w (%s)", ip, e, out))
+			errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), e, out))
 		} else {
 			log.Printf("hostaccess: added v6 route %s dev %s", ip, vethDev)
 		}
 	}
 	for _, ip := range delV6 {
-		if out, e := m.run("ip", "-6", "route", "del", ip); e != nil {
-			errs = append(errs, fmt.Errorf("ip -6 route del %s: %w (%s)", ip, e, out))
+		args := m.routeArgs(true, "route", "del", ip)
+		if out, e := m.run("ip", args...); e != nil {
+			errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), e, out))
 		} else {
 			log.Printf("hostaccess: removed v6 route %s", ip)
 		}
@@ -507,31 +715,41 @@ func mergeRoutes(a, b []string) []string {
 	return result
 }
 
-// RemoveAllHostRoutes removes all host routes on vethDev (excluding MagicDNS and infra).
+// RemoveAllHostRoutes removes every route of the route table on vethDev (excluding MagicDNS
+// and infra).
+//
+// RemoveAllHostRoutes removes the routes of one tailnet, therefore it empties no table and
+// it removes no routing policy rule. Another tailnet keeps its own routes in the table.
+// TeardownAll removes the rule and empties the table.
+//
 // A step that fails does not stop the remaining steps. RemoveAllHostRoutes collects every
 // failure and returns the failures together.
 func (m *Manager) RemoveAllHostRoutes(vethDev string) error {
 	infraSubnet := m.infraSubnet
 	var errs []error
 
-	v4Out, err := m.run("ip", "route", "show")
-	if err != nil {
-		errs = append(errs, fmt.Errorf("ip route show: %w", err))
-	} else {
+	showV4 := m.routeArgs(false, "route", "show")
+	v4Out, err := m.run("ip", showV4...)
+	if err != nil && !tableIsEmpty(string(v4Out)) {
+		errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(showV4, " "), err, v4Out))
+	} else if err == nil {
 		for _, ip := range parseHostRoutes(string(v4Out), vethDev, infraSubnet) {
-			if out, e := m.run("ip", "route", "del", ip); e != nil {
-				errs = append(errs, fmt.Errorf("ip route del %s: %w (%s)", ip, e, out))
+			args := m.routeArgs(false, "route", "del", ip)
+			if out, e := m.run("ip", args...); e != nil {
+				errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), e, out))
 			}
 		}
 	}
 
-	v6Out, err := m.run("ip", "-6", "route", "show")
+	showV6 := m.routeArgs(true, "route", "show")
+	v6Out, err := m.run("ip", showV6...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("ip -6 route show: %w", err))
+		errs = append(errs, fmt.Errorf("ip %s: %w", strings.Join(showV6, " "), err))
 	} else {
 		for _, ip := range parseHostRoutesV6(string(v6Out), vethDev) {
-			if out, e := m.run("ip", "-6", "route", "del", ip); e != nil {
-				errs = append(errs, fmt.Errorf("ip -6 route del %s: %w (%s)", ip, e, out))
+			args := m.routeArgs(true, "route", "del", ip)
+			if out, e := m.run("ip", args...); e != nil {
+				errs = append(errs, fmt.Errorf("ip %s: %w (%s)", strings.Join(args, " "), e, out))
 			}
 		}
 	}

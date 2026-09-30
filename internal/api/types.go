@@ -282,6 +282,18 @@ type DNSResponse struct {
 	HostResolvSHA256    string              `json:"host_resolv_sha256"`
 	HostResolvChangedAt string              `json:"host_resolv_changed_at"`
 	Namespaces          []DNSNamespaceState `json:"namespaces"`
+	// SplitDNS holds the split DNS domains that the host holds for each tailnet, and the
+	// conflict of each. It is never null, because the console reads the field as a list.
+	SplitDNS []SplitDNSEntry `json:"split_dns"`
+}
+
+// SplitDNSEntry is the split DNS state of one tailnet: the domains that the host holds
+// for it, and the conflict that removed a domain from it. Conflict names the two
+// tailnets, and it is empty when the tailnet holds no conflict.
+type SplitDNSEntry struct {
+	Tailnet  string   `json:"tailnet"`
+	Domains  []string `json:"domains"`
+	Conflict string   `json:"conflict"`
 }
 
 // PeerInfo is a single peer within a tailnet, derived from tailscale status --json.
