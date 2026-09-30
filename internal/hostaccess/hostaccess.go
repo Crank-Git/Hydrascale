@@ -81,6 +81,11 @@ type Manager struct {
 	// drops a message that is gone, so a repeat reports again and a steady state reports
 	// no event on every tick. See FR-split-8.
 	reportedConflicts map[string]bool
+
+	// reportedDrops holds the log line of every split domain that syncDNS dropped on the
+	// previous tick. syncDNS writes a line that is absent from the set and it drops a line
+	// that is gone, so the reconcile loop does not repeat the line on every tick.
+	reportedDrops map[string]bool
 }
 
 // NewManager creates a new host access Manager.
@@ -103,6 +108,7 @@ func NewManager(dnsMode string, hostsPath string, infraSubnet string, routeTable
 		activeTailnets:    make(map[string]TailnetPeers),
 		splitReport:       make(map[string]SplitDNSEntry),
 		reportedConflicts: make(map[string]bool),
+		reportedDrops:     make(map[string]bool),
 	}
 	if dnsMode == "resolved" {
 		m.resolved = NewResolvedManager()
@@ -318,6 +324,7 @@ func (m *Manager) syncDNS() error {
 	currentConflicts := make(map[string]string)
 	type conflictEvent struct{ tailnetID, message string }
 	var newConflicts []conflictEvent
+	currentDrops := make(map[string]bool)
 
 	for _, id := range ids {
 		peers := m.activeTailnets[id]
@@ -327,14 +334,14 @@ func (m *Manager) syncDNS() error {
 			domain, ok := normalizeSplitDomain(raw)
 			if !ok {
 				// A value that is not a DNS name never reaches resolvectl. See SA-19.
-				log.Printf("host-access: split DNS domain %q of %s is not a DNS name; dropped", raw, id)
+				currentDrops[fmt.Sprintf("host-access: split DNS domain %q of %s is not a DNS name; dropped", raw, id)] = true
 				continue
 			}
 			if domain == "ts.net" || strings.HasSuffix(domain, ".ts.net") {
 				// ts.net is the reserved base zone of MagicDNS. One tailnet holds no claim on the
 				// zone: the MagicDNS suffix of every tailnet already reaches its own resolver, and
 				// an export of the zone would send the names of every tailnet to one of them.
-				log.Printf("host-access: split DNS domain %q of %s names the reserved ts.net zone; dropped", domain, id)
+				currentDrops[fmt.Sprintf("host-access: split DNS domain %q of %s names the reserved ts.net zone; dropped", domain, id)] = true
 				continue
 			}
 			if seen[domain] {
@@ -349,7 +356,7 @@ func (m *Manager) syncDNS() error {
 					entry.Conflict = entry.Conflict + "; " + message
 				}
 				currentConflicts[message] = id
-				log.Printf("host-access: %s", message)
+				currentDrops["host-access: "+message] = true
 				continue
 			}
 			owner[domain] = id
@@ -358,6 +365,20 @@ func (m *Manager) syncDNS() error {
 		surviving[id] = entry.Domains
 		m.splitReport[id] = entry
 	}
+
+	// A drop that the previous tick did not hold reaches the log. The set replaces the
+	// previous set, so a drop that is gone reaches the log again if it returns.
+	drops := make([]string, 0, len(currentDrops))
+	for line := range currentDrops {
+		if !m.reportedDrops[line] {
+			drops = append(drops, line)
+		}
+	}
+	sort.Strings(drops)
+	for _, line := range drops {
+		log.Print(line)
+	}
+	m.reportedDrops = currentDrops
 
 	// The report holds every active tailnet, and a tailnet that left the map leaves the
 	// report as well.

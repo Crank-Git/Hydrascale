@@ -3,6 +3,7 @@ package hostaccess
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -430,6 +431,38 @@ func TestSyncDNS_TSNetIsDropped(t *testing.T) {
 	}
 	if len(report[0].Domains) != 1 || report[0].Domains[0] != "acme.example.com" {
 		t.Errorf("report domains = %v, want [acme.example.com]", report[0].Domains)
+	}
+}
+
+// TestSyncDNS_DroppedDomainLogsOnceWhileItStays verifies that a dropped split domain
+// reaches the log on the first tick alone, and that it reaches the log again when it
+// returns after it was gone. The reconciler syncs every 10 seconds, so a log line on each
+// tick fills the journal.
+func TestSyncDNS_DroppedDomainLogsOnceWhileItStays(t *testing.T) {
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	m := NewManager("hosts", t.TempDir()+"/hosts", "10.200.0.0/16", 0)
+	m.Runner = quietRunner{}
+	m.SetForwarder(&mockForwarder{})
+
+	dropped := &daemon.TailscaleStatus{SplitDNSRoutes: []string{"ts.net", "-bad", "acme.example.com"}}
+	clean := &daemon.TailscaleStatus{SplitDNSRoutes: []string{"acme.example.com"}}
+	count := func() (reserved, invalid int) {
+		return strings.Count(buf.String(), "reserved ts.net zone"), strings.Count(buf.String(), "is not a DNS name")
+	}
+
+	m.Sync("corp", dropped, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	m.Sync("corp", dropped, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	if r, i := count(); r != 1 || i != 1 {
+		t.Errorf("after two ticks: reserved lines = %d, invalid lines = %d, want 1 and 1", r, i)
+	}
+
+	m.Sync("corp", clean, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	m.Sync("corp", dropped, "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	if r, i := count(); r != 2 || i != 2 {
+		t.Errorf("after the return: reserved lines = %d, invalid lines = %d, want 2 and 2", r, i)
 	}
 }
 
