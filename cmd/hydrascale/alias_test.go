@@ -190,3 +190,25 @@ func TestPrintStatusTable_keeps_the_namespace_in_the_third_column(t *testing.T) 
 		t.Errorf("the namespace column holds %q, want the namespace name", got)
 	}
 }
+
+func TestResolveRef_names_the_need_for_read_access_when_the_file_is_unreadable(t *testing.T) {
+	// The configuration directory of a host is readable by root alone, and `hydrascale env`
+	// runs as the operator. The error must name the cause, not only "permission denied".
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file that has no permission bits")
+	}
+	path := withConfig(t, configWithAlias)
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+
+	_, err := resolveRef("alias1")
+	if err == nil {
+		t.Fatal("resolveRef returned no error, want the read failure")
+	}
+	for _, want := range []string{path, "sudo"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
+	}
+}

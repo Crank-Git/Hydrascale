@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -628,9 +630,14 @@ func serveCmd() *cobra.Command {
 // namespace that the configuration no longer declares, and `ip netns exec` reports a
 // namespace that it cannot find.
 // resolveRef returns an error when it cannot read the configuration file. A file that
-// holds a syntax error would otherwise appear as a missing namespace.
+// holds a syntax error would otherwise appear as a missing namespace. When the operator
+// has no read access, the error names the file and tells the operator to use sudo,
+// because the configuration directory of a host is readable by root alone.
 func resolveRef(ref string) (string, error) {
 	cfg, err := loadConfig()
+	if errors.Is(err, fs.ErrPermission) {
+		return "", fmt.Errorf("cannot read %s to resolve the tailnet %q; run the command with sudo: %w", configPath(), ref, err)
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to load config: %w", err)
 	}
