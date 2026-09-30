@@ -6,7 +6,7 @@ status: approved
 spec_version: 2
 created: 2026-08-04
 approved: 2026-08-23
-html_generated: 2026-09-28
+html_generated: 2026-09-29
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -87,7 +87,7 @@ the operator what is allowed.
 | security audit | noun | The written review of the code that Epic 2 produces. | pentest, review, assessment |
 | finding | noun | One defect that the security audit records. | issue, bug, vulnerability |
 | brand asset | noun | One design token file, icon, or logo that the console uses. | branding, design file, resource |
-| overlay mount | noun | The OverlayFS mount that the daemon places on `/etc`, or that the CLI places on `/run`, inside a namespace. | shield, DNS shield, overlay hack |
+| overlay mount | noun | The OverlayFS mount that the daemon places on `/etc` inside a namespace. | shield, DNS shield, overlay hack |
 | test host | noun | The machine at `phobos` that verifies a change against a real kernel. | staging, dev box, lab machine |
 | crash record | noun | The kernel log that the `pstore` backend keeps across a restart. | crash dump, core dump, panic log, vmcore |
 | credential | noun | One value that authenticates the daemon to a control server: an auth key, an OAuth client identifier, an OAuth client secret, or a Headscale API key. | secret, token, key, password |
