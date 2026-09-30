@@ -628,6 +628,23 @@ systemd-resolved on the same path as before. The daemon rewrites no query.
 The key is unset by default, and an unset key changes nothing: the veth device carries the
 MagicDNS suffix alone, and the link names the namespace side address.
 
+### The DNS lifecycle of tailscaled
+
+Two subtleties matter for a MagicDNS route per tailnet, and the daemon handles both.
+
+**Namespace upstreams.** Each namespace gets `/etc/netns/<ns>/resolv.conf` with the real
+upstream resolvers of the host. The daemon reads them from
+`/run/systemd/resolve/resolv.conf` or from `/etc/resolv.conf`, it removes a loopback
+address, and it falls back to `1.1.1.1`. The address `100.100.100.100` must not go into
+that file: `tailscaled` removes its own address as a self-loop, an empty resolver chain
+returns SERVFAIL for every query, and the daemon then answers no name at all.
+
+**A refresh after a restart.** The reconciler restarts an unhealthy `tailscaled`. The new
+process loads its state from disk and does not read `resolv.conf` again, which can leave
+its MagicDNS proxy stopped. The daemon waits for `BackendState=Running`, then sets
+`--accept-dns=false` and `--accept-dns=true`, which rebuilds the resolver chain. DNS
+therefore recovers on every restart, and the operator runs no `tailscale set` by hand.
+
 ### The overlay mount on /etc
 
 `tailscaled` replaces `/etc/resolv.conf` with a temporary file and a rename whenever its
@@ -714,7 +731,9 @@ tailnet. Names below the reserved `ts.net` zone are not exported. This mode need
 
 The DNS forwarder routes the same split DNS domains in every mode. When a tailnet holds a
 split domain that another tailnet claims, the first tailnet in sorted identifier order
-keeps it, and the daemon records a `dns.split_domain_conflict` event.
+keeps it, and the daemon records a `dns.split_domain_conflict` event. The Settings view of
+the console shows the domains of each tailnet in the Split DNS card, and it shows each
+conflict as a critical alert that names both tailnets.
 
 ### Teardown
 
@@ -1033,6 +1052,13 @@ hydrascale wrap <service> <tailnet-id>
 Pass `--config <path>` on any command to name another configuration file. The default is
 `/etc/hydrascale/config.yaml`, which the systemd unit also passes.
 
+Each command that takes a `<tailnet-id>` also takes the `alias` of that tailnet. An alias
+is unique, and it is the identifier of no tailnet. `hydrascale list` prints the alias, and
+`hydrascale status` shows it in the column `ALIAS`.
+
+`env` reads the configuration file to resolve an alias. On a host where only root can read
+`/etc/hydrascale`, run `sudo hydrascale env <tailnet-id>`.
+
 The namespace-scoped subcommands `exec`, `ping`, `ssh`, and `tailscale` replace a raw
 `ip netns exec` line:
 
@@ -1104,7 +1130,7 @@ control socket. Every mutating route on the console listener requires the header
 | `/api/tailnet/{id}/removal-plan` | GET | What a removal of one tailnet deletes |
 | `/api/config` | GET | The current configuration, with every credential removed |
 | `/api/config/dns` | POST | Change the resolver configuration |
-| `/api/dns` | GET | The resolver state and the DNS protection state per namespace |
+| `/api/dns` | GET | The resolver state, the DNS protection state, and the split DNS domains and conflict per namespace |
 | `/api/access` | GET, PUT | Read and write the local rule set |
 | `/api/policy` | GET | The control server kind and the write availability per tailnet |
 | `/api/policy/{id}` | GET, PUT | Read and write the policy of one tailnet |
