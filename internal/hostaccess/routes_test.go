@@ -319,3 +319,64 @@ func TestMergeRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestParseHostRoutesReadsTheOutputOfADeclaredRouteTable(t *testing.T) {
+	// `ip route show table 53` repeats no `table` keyword on a line, because every line of
+	// the output comes out of the table that the command names. The daemon writes each
+	// route with `via <gw> dev <veth>`, and `ip` hides the default protocol and scope.
+	const vethDev = "vh123456"
+	const infraSubnet = "10.200.0.0/16"
+	input := `100.64.0.1 via 10.200.0.1 dev vh123456
+100.64.0.2 via 10.200.0.1 dev vh123456
+192.168.1.0/24 via 10.200.0.1 dev vh123456
+100.100.100.100 via 10.200.0.1 dev vh123456
+100.64.9.9 via 10.200.4.1 dev vh999999
+`
+	got := parseHostRoutes(input, vethDev, infraSubnet)
+	want := []string{"100.64.0.1", "100.64.0.2", "192.168.1.0/24"}
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("parseHostRoutes: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseHostRoutes[%d]: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseHostRoutesV6ReadsTheMetricAndPreferenceThatTheKernelAppends(t *testing.T) {
+	// The kernel appends `metric 1024 pref medium` to an IPv6 route that carries no
+	// metric, and the destination stays the first field of the line.
+	const vethDev = "vh123456"
+	input := `fd7a:115c:a1e0::1 dev vh123456 metric 1024 pref medium
+fd7a:115c:a1e0::2 dev vh123456 metric 1024 pref medium
+fd7a:115c:a1e0::9 dev vh999999 metric 1024 pref medium
+default dev vh123456 metric 1024 pref medium
+`
+	got := parseHostRoutesV6(input, vethDev)
+	want := []string{"fd7a:115c:a1e0::1", "fd7a:115c:a1e0::2"}
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("parseHostRoutesV6: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseHostRoutesV6[%d]: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRuleNotPresentReadsTheAnswerOfTheKernel(t *testing.T) {
+	if !ruleNotPresent("RTNETLINK answers: No such file or directory\n") {
+		t.Error("ruleNotPresent returned false for the answer that names a missing rule")
+	}
+	if ruleNotPresent("RTNETLINK answers: Operation not permitted\n") {
+		t.Error("ruleNotPresent returned true for a failure that is not a missing rule")
+	}
+	if ruleNotPresent("") {
+		t.Error("ruleNotPresent returned true for empty output")
+	}
+}

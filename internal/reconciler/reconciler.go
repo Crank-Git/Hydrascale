@@ -346,7 +346,37 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		// a namespace manager double gets no prober, and it sets one with SetProber.
 		r.prober = reach.New()
 	}
+	if ha != nil {
+		ha.SetEventRecorder(r.RecordEvent)
+	}
 	return r
+}
+
+// SplitDNSEntry is the split DNS state of one tailnet: the domains that the host holds
+// for it and the conflict that removed a domain from it. internal/api does not import
+// internal/hostaccess, therefore this package maps the hostaccess type to its own.
+type SplitDNSEntry struct {
+	TailnetID string
+	Domains   []string
+	Conflict  string
+}
+
+// SplitDNSReport returns the split DNS state of each tailnet, or nil when the reconciler
+// holds no host access manager. GET /api/dns reads it.
+func (r *Reconciler) SplitDNSReport() []SplitDNSEntry {
+	if r.ha == nil {
+		return nil
+	}
+	report := r.ha.SplitDNSReport()
+	out := make([]SplitDNSEntry, 0, len(report))
+	for _, entry := range report {
+		out = append(out, SplitDNSEntry{
+			TailnetID: entry.TailnetID,
+			Domains:   entry.Domains,
+			Conflict:  entry.Conflict,
+		})
+	}
+	return out
 }
 
 // SetHostFileMonitor replaces the monitor of the host resolv.conf file.
@@ -749,20 +779,54 @@ func (r *Reconciler) executeAction(action Action) error {
 			return fmt.Errorf("host-access: setup failed for %s: %w", nsName, err)
 		}
 		r.setHostAccessRules(action.TailnetID, true)
-		status, err := r.dm.GetStatus(context.Background(), nsName, action.TailnetID)
+		status, err := r.fetchStatus(nsName, action.TailnetID)
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get status for %s: %w", action.TailnetID, err)
 		}
-		_, _, _, vethGW, err := namespaces.VethIPs(r.infraSubnet, index)
+		// VethIPs returns the first two addresses with the prefix length and the last two
+		// without it. The DNS forwarder binds an address and systemd-resolved names one,
+		// therefore both need the address alone.
+		_, _, vethHostIP, vethGW, err := namespaces.VethIPs(r.infraSubnet, index)
 		if err != nil {
 			return fmt.Errorf("host-access: failed to get veth IPs: %w", err)
 		}
 		vethHost, _ := namespaces.VethNames(nsName)
-		r.ha.Sync(action.TailnetID, status, vethGW, vethHost, nsName)
+		// The alias of a tailnet lives in the configuration file, which the operator
+		// changes while the daemon runs, therefore the reconciler reads it each cycle.
+		cfg, cfgErr := config.LoadConfig(r.configPath)
+		if cfgErr != nil {
+			return fmt.Errorf("host-access: failed to read the alias of each tailnet: %w", cfgErr)
+		}
+		aliases := make(map[string]string, len(cfg.Tailnets))
+		for _, tn := range cfg.Tailnets {
+			if tn.Alias != "" {
+				aliases[tn.ID] = tn.Alias
+			}
+		}
+		r.ha.SetAliasResolution(cfg.Resolver.ResolveAliases, aliases)
+		r.ha.Sync(action.TailnetID, status, vethGW, vethHost, vethHostIP, nsName)
 		return nil
 	default:
 		return fmt.Errorf("unknown action type: %s", action.Type)
 	}
+}
+
+// fetchStatus returns the live status of one tailnet, with the split DNS domains of its
+// control server. A failure to read the split DNS is a warning only, because a client
+// without `tailscale dns status` keeps the current behaviour and the sync drops no state.
+// See FR-split-6.
+func (r *Reconciler) fetchStatus(nsName, tailnetID string) (*daemon.TailscaleStatus, error) {
+	status, err := r.dm.GetStatus(context.Background(), nsName, tailnetID)
+	if err != nil {
+		return nil, err
+	}
+	split, splitErr := r.dm.GetSplitDNSRoutes(context.Background(), nsName, tailnetID)
+	if splitErr != nil {
+		log.Printf("host-access: failed to get the split DNS of %s: %v", tailnetID, splitErr)
+	} else {
+		status.SplitDNSRoutes = split
+	}
+	return status, nil
 }
 
 // Reconcile runs a single reconciliation cycle.

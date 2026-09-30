@@ -30,6 +30,18 @@ type Forwarder struct {
 	domainRoutes map[string]string // domain suffix -> upstream address (e.g., "tail1234.ts.net" -> "100.100.100.100")
 	hostDNS      []string          // original host DNS servers from /etc/resolv.conf
 
+	// aliasZones holds the zones that the forwarder answers itself, keyed by the zone
+	// name, for example "mmo.ts.internal". The forwarder is authoritative for a zone.
+	aliasZones map[string]AliasZone
+
+	// listenerMu guards listeners. It is a separate lock from mu, because a listener
+	// start holds the lock across a bind and a query must not wait for that.
+	listenerMu listenerMutex
+	listeners  map[string]*listenerPair
+	// hostAddrs holds every address that the host holds now, which SyncListeners reads on
+	// each tick. listenerMu guards it. The veth listener answers the host alone.
+	hostAddrs map[string]bool
+
 	client     *dns.Client
 	udpServer  *dns.Server
 	tcpServer  *dns.Server
@@ -117,11 +129,12 @@ func (f *Forwarder) Start() error {
 }
 
 // Stop gracefully stops the DNS forwarder.
+// Stop stops every veth listener as well, and it returns the failures of those stops.
 func (f *Forwarder) Stop() error {
 	f.cancelFunc()
 	f.udpServer.Shutdown()
 	f.tcpServer.Shutdown()
-	return nil
+	return f.stopAllListeners()
 }
 
 // SetUpstreams hot-swaps the upstream DNS servers used for non-domain-routed queries.
@@ -156,7 +169,18 @@ func (f *Forwarder) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	f.mu.RLock()
 	upstreams := f.upstreams
 	routes := f.domainRoutes
+	zones := f.aliasZones
 	f.mu.RUnlock()
+
+	// An alias zone belongs to the forwarder, therefore the forwarder answers it and
+	// sends it to no upstream server. The check comes first, so a zone name never
+	// reaches the round-robin fallback.
+	if len(zones) > 0 && len(r.Question) == 1 && r.Question[0].Qclass == dns.ClassINET {
+		if zone, host, ok := matchAliasZone(zones, r.Question[0].Name); ok {
+			f.answerAlias(w, r, zone, host, r.Question[0])
+			return
+		}
+	}
 
 	if len(upstreams) == 0 {
 		msg := new(dns.Msg)

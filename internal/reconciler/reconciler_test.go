@@ -136,6 +136,9 @@ type mockDaemon struct {
 	refreshErr   map[string]error // tailnetID -> the error that the refresh returns
 	refreshCalls []string         // the tailnet of each refresh call, in order
 
+	splitRoutes map[string][]string // tailnetID -> split DNS domains
+	splitErr    error               // returned by GetSplitDNSRoutes; non-nil = error
+
 	// log records the order of the calls of a test that observes two doubles.
 	log *callLog
 }
@@ -148,6 +151,7 @@ func newMockDaemon() *mockDaemon {
 		allowedStart: make(map[string]bool),
 		refreshReady: make(map[string]bool),
 		refreshErr:   make(map[string]error),
+		splitRoutes:  make(map[string][]string),
 	}
 }
 
@@ -253,6 +257,15 @@ func (m *mockDaemon) GetStatus(ctx context.Context, nsName, tailnetID string) (*
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.statusResult, m.statusErr
+}
+
+func (m *mockDaemon) GetSplitDNSRoutes(ctx context.Context, nsName, tailnetID string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.splitErr != nil {
+		return nil, m.splitErr
+	}
+	return m.splitRoutes[tailnetID], nil
 }
 
 type mockRouting struct {

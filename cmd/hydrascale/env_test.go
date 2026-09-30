@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,6 +30,12 @@ func runEnv(t *testing.T, tailnetID string) (string, error) {
 }
 
 func TestEnvCmd(t *testing.T) {
+	// The env command reads the configuration file to resolve an alias. The test names a
+	// file that does not exist, so the configuration of the host does not change the result.
+	previous := cfgFile
+	cfgFile = filepath.Join(t.TempDir(), "absent.yaml")
+	t.Cleanup(func() { cfgFile = previous })
+
 	t.Run("prints a function that runs the command in the namespace", func(t *testing.T) {
 		out, err := runEnv(t, envTailnet)
 		if err != nil {

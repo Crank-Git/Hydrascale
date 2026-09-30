@@ -326,6 +326,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .nsrow .id{min-width:120px}
 .nsrow .st{display:flex; align-items:center; gap:var(--sp-2); color:var(--text-secondary); font-size:var(--fs-sm)}
 .nsrow .err{margin-left:auto; text-align:right; color:var(--text-secondary); font-size:var(--fs-micro)}
+.nsrow .domains{margin-left:auto; text-align:right}
+.nsrows + .alert{margin-top:var(--sp-3)}
 
 /* A banner states one fact that the operator acts on. The dot carries the state and the
    border carries the tone, so no rule fills a region with a state colour. */

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -31,6 +32,11 @@ type TailscaleStatus struct {
 	MagicDNSSuffix string                `json:"MagicDNSSuffix"`
 	BackendState   string                `json:"BackendState"`
 	AuthURL        string                `json:"AuthURL"`
+
+	// SplitDNSRoutes holds the split DNS domains of the tailnet. The field is not part of
+	// `tailscale status --json`; the reconciler fills it from GetSplitDNSRoutes, so that
+	// ParsePeers reads the domains with the rest of the status. See FR-split-2.
+	SplitDNSRoutes []string `json:"-"`
 }
 
 // StatusNode represents a node in tailscale status.
@@ -82,6 +88,7 @@ type Manager interface {
 	AuthorizeDaemon(tailnetID, nsName, authKey, controlURL string) error
 	RefreshDNSConfigIfReady(tailnetID, nsName string) (bool, error)
 	GetStatus(ctx context.Context, nsName, tailnetID string) (*TailscaleStatus, error)
+	GetSplitDNSRoutes(ctx context.Context, nsName, tailnetID string) ([]string, error)
 }
 
 // RealManager implements Manager using real system calls.
@@ -174,6 +181,39 @@ func (m *RealManager) GetStatus(ctx context.Context, namespaceName string, tailn
 	}
 
 	return &status, nil
+}
+
+// GetSplitDNSRoutes returns the sorted split DNS domains of a tailnet.
+// It runs `tailscale dns status --json` inside the namespace, because the command needs the
+// socket of that tailscaled. The command reports a map of domain to resolver list; the
+// daemon needs the domains alone, because each domain reaches the veth device of its tailnet
+// and the DNAT rule inside the namespace sends the query to 100.100.100.100. See FR-split-1.
+// A missing or empty SplitDNSRoutes field returns an empty slice and no error.
+func (m *RealManager) GetSplitDNSRoutes(ctx context.Context, namespaceName string, tailnetID string) ([]string, error) {
+	socketPath := m.socketPath(tailnetID)
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	output, err := m.runner().Run(ctx, "ip", "netns", "exec", namespaceName,
+		"tailscale", "--socket="+socketPath, "dns", "status", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get split DNS of %s: %w", tailnetID, err)
+	}
+
+	var body struct {
+		SplitDNSRoutes map[string]json.RawMessage `json:"SplitDNSRoutes"`
+	}
+	if err := json.Unmarshal(output, &body); err != nil {
+		return nil, fmt.Errorf("failed to parse split DNS JSON for %s: %w", tailnetID, err)
+	}
+
+	domains := make([]string, 0, len(body.SplitDNSRoutes))
+	for domain := range body.SplitDNSRoutes {
+		domains = append(domains, domain)
+	}
+	sort.Strings(domains)
+	return domains, nil
 }
 
 // StartDaemon launches tailscaled inside a network namespace.
