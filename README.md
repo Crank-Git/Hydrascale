@@ -657,6 +657,11 @@ Every write to `/etc`, including that rename, stays inside the namespace, and th
 still reads the `/etc` of the host through the lower layer. The daemon never changes
 `/etc/resolv.conf` on the host.
 
+`tailscaled` also restarts `systemd-resolved` after each write of its `resolv.conf`, and the
+namespace reaches the systemd of the host. Five restarts within ten seconds stop the host
+resolver. The daemon therefore places `/dev/null` over `systemctl` inside the mount
+namespace of each `tailscaled`, so that `tailscaled` restarts no service of the host.
+
 A host that cannot mount OverlayFS fails the start of the namespace, because a namespace
 without the overlay mount can replace the resolver configuration of the host. To start such
 a namespace anyway, set:
