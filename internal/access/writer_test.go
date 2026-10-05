@@ -538,3 +538,100 @@ func countName(rec *execx.Recorder, name string) int {
 	}
 	return n
 }
+
+// checkFixture returns a Writer whose host reports the fingerprint in each chain and the
+// position of each jump rule. An empty fingerprint makes the chain absent.
+func checkFixture(t *testing.T, present string, position int) (*execx.Recorder, *Writer) {
+	t.Helper()
+
+	rec := execx.NewRecorder(t)
+	for _, j := range jumps {
+		if present == "" {
+			rec.Script(absentChain, "iptables", "-S", j.chain)
+		} else {
+			out := "-N " + j.chain + "\n-A " + j.chain + " -m comment --comment " + markerPrefix + present + "\n"
+			rec.Script(execx.Result{Output: []byte(out)}, "iptables", "-S", j.chain)
+		}
+		rec.Script(execx.Result{Output: []byte(listing(j, position))}, "iptables", "-S", j.parent)
+	}
+	return rec, &Writer{Runner: rec}
+}
+
+// writes counts the commands of the recorder that change the host.
+func writes(rec *execx.Recorder) int {
+	n := 0
+	for _, c := range rec.Calls() {
+		if c.Name != "iptables" || c.Args[0] != "-S" {
+			n++
+		}
+	}
+	return n
+}
+
+func TestCheckReportsNoDifferenceForAHostThatHoldsTheCompiledRuleSet(t *testing.T) {
+	rec, w := checkFixture(t, fingerprint(testSet()), 1)
+
+	diffs, err := w.Check(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("Check reported differences for a converged host: %v", diffs)
+	}
+	if writes(rec) != 0 {
+		t.Errorf("Check ran %d commands that change the host, want 0", writes(rec))
+	}
+}
+
+func TestCheckReportsEachAbsentChainAndEachAbsentJumpRule(t *testing.T) {
+	rec, w := checkFixture(t, "", 0)
+
+	diffs, err := w.Check(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	got := strings.Join(diffs, "\n")
+	for _, want := range []string{ChainForward, ChainOut, "FORWARD", "INPUT"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the differences name no %s:\n%s", want, got)
+		}
+	}
+	if len(diffs) != 4 {
+		t.Errorf("Check reported %d differences, want 4:\n%s", len(diffs), got)
+	}
+	if writes(rec) != 0 {
+		t.Errorf("Check ran %d commands that change the host, want 0", writes(rec))
+	}
+}
+
+func TestCheckReportsAChainThatHoldsAnotherRuleSet(t *testing.T) {
+	_, w := checkFixture(t, "0000000000000000", 1)
+
+	diffs, err := w.Check(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(diffs) != 2 {
+		t.Fatalf("Check reported %d differences, want 2: %v", len(diffs), diffs)
+	}
+	if !strings.Contains(diffs[0], "0000000000000000") || !strings.Contains(diffs[0], fingerprint(testSet())) {
+		t.Errorf("the difference names no fingerprint: %q", diffs[0])
+	}
+}
+
+func TestCheckReturnsAFailedReadWithTheOutputOfTheCommand(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{
+		Output: []byte("iptables: Permission denied (you must be root).\n"),
+		Err:    errors.New("exit status 4"),
+	}, "iptables", "-S", ChainForward)
+
+	w := &Writer{Runner: rec}
+	_, err := w.Check(context.Background(), testSet())
+	if err == nil {
+		t.Fatal("Check returned no error for a failed read")
+	}
+	if !strings.Contains(err.Error(), "you must be root") {
+		t.Errorf("the error = %q, want the output of the command", err)
+	}
+}

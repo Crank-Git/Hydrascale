@@ -123,6 +123,41 @@ func (w *Writer) Apply(ctx context.Context, c Compiled) (Result, error) {
 	return res, errors.Join(errs...)
 }
 
+// Check returns each difference between the host and the compiled rule set, as one
+// sentence each. Check reads the chains and writes nothing.
+// ctx bounds every command, and c is the output of Compile.
+// Check returns an error when a read fails, because a failed read states no difference.
+func (w *Writer) Check(ctx context.Context, c Compiled) ([]string, error) {
+	want := fingerprint(c)
+
+	live, err := w.liveFingerprints(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var diffs []string
+	for _, j := range jumps {
+		switch live[j.chain] {
+		case want:
+		case "":
+			diffs = append(diffs, fmt.Sprintf("write chain %s: the host holds no chain or no marker rule", j.chain))
+		default:
+			diffs = append(diffs, fmt.Sprintf("write chain %s: the chain holds rule set %s, the configuration file compiles to %s",
+				j.chain, live[j.chain], want))
+		}
+	}
+	for _, j := range jumps {
+		placement, err := w.readPlacement(ctx, j)
+		if err != nil {
+			return nil, err
+		}
+		if placement.Position == 0 {
+			diffs = append(diffs, fmt.Sprintf("insert jump rule: %s holds no rule -j %s", j.parent, j.chain))
+		}
+	}
+	return diffs, nil
+}
+
 // Teardown removes both chains and both jump rules.
 // Teardown treats an absent rule and an absent chain as success, because an operator who
 // already removed one reached the wanted result. A step that fails does not stop the
@@ -146,19 +181,23 @@ func (w *Writer) Teardown(ctx context.Context) error {
 // no guarantee that another service keeps its jump rule at position 1. An operator
 // firewall that reloads and removes the jump gets the jump back on this tick.
 func (w *Writer) ensureJump(ctx context.Context, j jump) (Placement, error) {
-	out, err := w.runner().Run(ctx, "iptables", "-S", j.parent)
-	if err != nil {
-		return Placement{Parent: j.parent}, fmt.Errorf("iptables -S %s: %v (%s)", j.parent, err, out)
-	}
-
-	placement := placementOf(string(out), j)
-	if placement.Position > 0 {
-		return placement, nil
+	placement, err := w.readPlacement(ctx, j)
+	if err != nil || placement.Position > 0 {
+		return placement, err
 	}
 	if out, err := w.runner().Run(ctx, "iptables", "-I", j.parent, "1", "-j", j.chain); err != nil {
 		return placement, fmt.Errorf("iptables -I %s 1 -j %s: %v (%s)", j.parent, j.chain, err, out)
 	}
 	return placement, nil
+}
+
+// readPlacement returns where the jump rule of the daemon sits in the parent chain.
+func (w *Writer) readPlacement(ctx context.Context, j jump) (Placement, error) {
+	out, err := w.runner().Run(ctx, "iptables", "-S", j.parent)
+	if err != nil {
+		return Placement{Parent: j.parent}, fmt.Errorf("iptables -S %s: %v (%s)", j.parent, err, out)
+	}
+	return placementOf(string(out), j), nil
 }
 
 // placementOf returns where the jump rule of the daemon sits in the output of
