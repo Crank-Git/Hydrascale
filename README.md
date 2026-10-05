@@ -108,15 +108,12 @@ sudo install hydrascale /usr/local/bin/
 
 ### A build from source
 
-```bash
-go install hydrascale/cmd/hydrascale@latest
-```
-
-Or clone the repository and build it:
+Clone the repository and build it. `go install` does not work, because the module path
+`hydrascale` is not a path that the Go module proxy can fetch.
 
 ```bash
 git clone https://github.com/Crank-Git/Hydrascale.git
-cd hydrascale
+cd Hydrascale
 go build -o hydrascale ./cmd/hydrascale
 sudo install hydrascale /usr/local/bin/
 ```
