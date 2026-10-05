@@ -122,6 +122,10 @@ type Config struct {
 	// sends a lookup to that table. The suggested value is 53, because tailscaled already
 	// owns the table 52 inside each namespace.
 	RouteTable int `yaml:"route_table,omitempty"`
+	// IPv6 lets the daemon set net.ipv6.conf.all.forwarding on a kernel that does not hold
+	// force_forwarding, which Linux 6.17 adds. A kernel that holds force_forwarding gets the
+	// IPv6 path of each namespace without this key. See issue #406.
+	IPv6 bool `yaml:"ipv6,omitempty"`
 	// SocketGroup, when set, makes the API control socket group-accessible:
 	// the daemon chowns /var/lib/hydrascale + api.sock to root:<group> with
 	// group-traversable/rw modes. Add a trusted user to that group to let it

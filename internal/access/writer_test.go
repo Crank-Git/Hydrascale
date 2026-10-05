@@ -635,3 +635,45 @@ func TestCheckReturnsAFailedReadWithTheOutputOfTheCommand(t *testing.T) {
 		t.Errorf("the error = %q, want the output of the command", err)
 	}
 }
+
+func TestTheIPv6WriterRunsIp6tablesAndWritesTheGuardBeforeTheReturnRule(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	for _, j := range jumps {
+		rec.Script(absentChain, "ip6tables", "-S", j.chain)
+		rec.Script(execx.Result{Output: []byte(listing(j, 0))}, "ip6tables", "-S", j.parent)
+		rec.Script(execx.Result{}, "ip6tables", "-I", j.parent, "1", "-j", j.chain)
+	}
+	rec.Script(execx.Result{}, "ip6tables-restore", "--noflush")
+
+	c := testSet()
+	c.Guard = [][]string{{"-A", ChainForward, "-i", "enp1s0f0", "!", "-o", "vh+", "-j", "DROP"}}
+
+	w := &Writer{Runner: rec, IPv6: true}
+	if _, err := w.Apply(context.Background(), c); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	var file string
+	for _, call := range rec.Calls() {
+		if call.Name == "iptables" || call.Name == "iptables-restore" {
+			t.Errorf("the IPv6 writer ran an IPv4 command: %s", call)
+		}
+		if call.Name == "ip6tables-restore" {
+			file = string(call.Stdin)
+		}
+	}
+	guard := strings.Index(file, "-A HYDRASCALE-FWD -i enp1s0f0 ! -o vh+ -j DROP\n")
+	ret := strings.Index(file, "-A HYDRASCALE-FWD ! -i vh+ ! -o vh+ -j RETURN\n")
+	if guard < 0 || ret < 0 || guard > ret {
+		t.Errorf("the rule file does not hold the guard before the return rule:\n%s", file)
+	}
+}
+
+func TestTheGuardChangesTheFingerprint(t *testing.T) {
+	c := testSet()
+	guarded := testSet()
+	guarded.Guard = [][]string{{"-A", ChainForward, "-i", "enp1s0f0", "!", "-o", "vh+", "-j", "DROP"}}
+	if fingerprint(c) == fingerprint(guarded) {
+		t.Error("a new guard leaves the fingerprint unchanged, so the Writer never writes it")
+	}
+}

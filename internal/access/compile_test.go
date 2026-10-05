@@ -2,6 +2,7 @@ package access
 
 import (
 	"net"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -488,4 +489,79 @@ func TestValidate(t *testing.T) {
 			t.Errorf("Validate returned %v, want no error", err)
 		}
 	})
+}
+
+// topologyIPv6 returns an IPv6 topology of two tailnets, one host prefix, and one guarded
+// uplink.
+func topologyIPv6() TopologyIPv6 {
+	return TopologyIPv6{
+		Devices:        map[string]string{"alpha": "vh0123456789ab", "beta": "vhba9876543210"},
+		HostPrefixes:   []string{"2001:db8:1:2::/64"},
+		GuardedUplinks: []string{"enp1s0f0"},
+	}
+}
+
+func TestCompileIPv6ExcludesTheUniqueLocalRangeAndTheHostPrefixFromTheInternet(t *testing.T) {
+	set := RuleSet{Rules: []Rule{{From: "alpha", To: Internet}}}
+
+	c, err := CompileIPv6(set, topologyIPv6(), EnforceTail)
+	if err != nil {
+		t.Fatalf("CompileIPv6: %v", err)
+	}
+
+	want := "-A HYDRASCALE-FWD -i vh0123456789ab ! -o vh+" +
+		" -m iprange ! --dst-range fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff" +
+		" -m iprange ! --dst-range fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff" +
+		" -m iprange ! --dst-range ::1-::1" +
+		" -m iprange ! --dst-range 2001:db8:1:2::-2001:db8:1:2:ffff:ffff:ffff:ffff" +
+		" -j ACCEPT"
+	got := lines(c.Forward)
+	if !slices.Contains(got, want) {
+		t.Errorf("the forward chain holds no rule %q:\n%s", want, strings.Join(got, "\n"))
+	}
+}
+
+func TestCompileIPv6WritesNoDNSRule(t *testing.T) {
+	c, err := CompileIPv6(RuleSet{}, topologyIPv6(), EnforceTail)
+	if err != nil {
+		t.Fatalf("CompileIPv6: %v", err)
+	}
+	for _, line := range lines(c.Out) {
+		if strings.Contains(line, "--dport") {
+			t.Errorf("the IPv6 out chain holds a DNS rule: %q", line)
+		}
+	}
+	if got := len(c.Out); got != 3 {
+		t.Errorf("the IPv6 out chain holds %d rules, want 3 (established and one drop per device):\n%s",
+			got, strings.Join(lines(c.Out), "\n"))
+	}
+}
+
+func TestCompileIPv6GuardsEachUplinkThatForwardsOnlyForTheDaemon(t *testing.T) {
+	c, err := CompileIPv6(RuleSet{}, topologyIPv6(), EnforceTail)
+	if err != nil {
+		t.Fatalf("CompileIPv6: %v", err)
+	}
+	want := []string{"-A HYDRASCALE-FWD -i enp1s0f0 ! -o vh+ -j DROP"}
+	if got := lines(c.Guard); !slices.Equal(got, want) {
+		t.Errorf("the guard = %v, want %v", got, want)
+	}
+}
+
+func TestCompileIPv6RejectsAHostPrefixThatIsNotACIDRPrefix(t *testing.T) {
+	topo := topologyIPv6()
+	topo.HostPrefixes = []string{"2001:db8::1"}
+	if _, err := CompileIPv6(RuleSet{}, topo, EnforceTail); err == nil {
+		t.Error("CompileIPv6 accepted a host prefix with no length")
+	}
+}
+
+func TestCompileWritesNoGuard(t *testing.T) {
+	c, err := Compile(RuleSet{}, Topology{Devices: map[string]string{"alpha": "vh0123456789ab"}, DNSAddress: "127.0.0.53:53"}, EnforceTail)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(c.Guard) != 0 {
+		t.Errorf("the IPv4 rule set holds a guard: %v", c.Guard)
+	}
 }
