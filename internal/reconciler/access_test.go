@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,10 @@ type fakeChainWriter struct {
 	// jumps holds the placement that Apply reports. A writer with no placement reports
 	// the jump rule at the head of each parent chain.
 	jumps []access.Placement
+	// checked holds each compiled set that Check received, and diffs holds the
+	// differences that Check reports.
+	checked []access.Compiled
+	diffs   []string
 }
 
 func (w *fakeChainWriter) Apply(ctx context.Context, c access.Compiled) (access.Result, error) {
@@ -49,6 +54,11 @@ func (w *fakeChainWriter) Apply(ctx context.Context, c access.Compiled) (access.
 func (w *fakeChainWriter) Teardown(ctx context.Context) error {
 	w.teardown++
 	return nil
+}
+
+func (w *fakeChainWriter) Check(ctx context.Context, c access.Compiled) ([]string, error) {
+	w.checked = append(w.checked, c)
+	return w.diffs, w.err
 }
 
 // writeAccessConfig writes a configuration file that declares the tailnets and holds the
@@ -240,6 +250,10 @@ func (w *deadlineWriter) Apply(ctx context.Context, c access.Compiled) (access.R
 }
 
 func (w *deadlineWriter) Teardown(ctx context.Context) error { return nil }
+
+func (w *deadlineWriter) Check(ctx context.Context, c access.Compiled) ([]string, error) {
+	return nil, nil
+}
 
 func TestShutdownRemovesTheChainsAndTheJumpRules(t *testing.T) {
 	cfgPath := writeAccessConfig(t, "", "alpha")
@@ -646,5 +660,57 @@ func TestThePeriodicSyncActionsAreTheTwoThatEveryCycleEmits(t *testing.T) {
 		if a.IsPeriodicSync() {
 			t.Errorf("%s reports that it is a periodic sync action", a)
 		}
+	}
+}
+
+func TestAccessDiffChecksTheRuleSetThatATickWrites(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "access:\n  mode: enforce\n  rules:\n    - from: alpha\n      to: beta\n", "alpha", "beta")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	w := &fakeChainWriter{diffs: []string{"write chain HYDRASCALE-FWD: the host holds no chain or no marker rule"}}
+	r.SetChainWriter(w)
+
+	diffs, err := r.AccessDiff()
+	if err != nil {
+		t.Fatalf("AccessDiff: %v", err)
+	}
+	if len(diffs) != 1 || diffs[0] != w.diffs[0] {
+		t.Errorf("AccessDiff = %v, want %v", diffs, w.diffs)
+	}
+	if len(w.applied) != 0 {
+		t.Errorf("AccessDiff wrote the chains %d times, want 0", len(w.applied))
+	}
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(w.checked) != 1 || len(w.applied) != 1 {
+		t.Fatalf("checked %d and applied %d rule sets, want 1 and 1", len(w.checked), len(w.applied))
+	}
+	if fmt.Sprint(w.checked[0]) != fmt.Sprint(w.applied[0]) {
+		t.Errorf("AccessDiff checked a rule set other than the one a tick writes:\n%v\n%v", w.checked[0], w.applied[0])
+	}
+}
+
+func TestAccessDiffReturnsAFailedRead(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "access:\n  mode: enforce\n", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	r.SetChainWriter(&fakeChainWriter{err: errors.New("iptables -S HYDRASCALE-FWD: exit status 4")})
+
+	if _, err := r.AccessDiff(); err == nil {
+		t.Error("AccessDiff returned no error for a failed read")
+	}
+}
+
+func TestAccessDiffReturnsAFailedCompile(t *testing.T) {
+	cfgPath := writeAccessConfig(t, "access:\n  mode: guess\n", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	w := &fakeChainWriter{}
+	r.SetChainWriter(w)
+
+	if _, err := r.AccessDiff(); err == nil {
+		t.Error("AccessDiff returned no error for an invalid mode")
+	}
+	if len(w.checked) != 0 {
+		t.Errorf("AccessDiff checked %d rule sets after a failed compile, want 0", len(w.checked))
 	}
 }

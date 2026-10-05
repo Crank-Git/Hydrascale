@@ -189,6 +189,9 @@ type ChainWriter interface {
 	Apply(ctx context.Context, c access.Compiled) (access.Result, error)
 	// Teardown removes both chains and both jump rules.
 	Teardown(ctx context.Context) error
+	// Check returns each difference between the chains and the compiled rule set, and
+	// it writes nothing.
+	Check(ctx context.Context, c access.Compiled) ([]string, error)
 }
 
 // NamespaceProber measures the reachability of one namespace with one packet.
@@ -904,37 +907,9 @@ func (r *Reconciler) applyAccess() {
 		return
 	}
 
-	cfg, err := config.LoadConfig(r.configPath)
-	if err != nil {
-		r.emit("access.write_failed", "", fmt.Sprintf("load the configuration file: %v", err))
-		return
-	}
-
-	devices := make(map[string]string, len(cfg.Tailnets))
-	for _, tn := range cfg.Tailnets {
-		hostVeth, _ := namespaces.VethNames(namespaces.GetNamespaceName(tn.ID))
-		devices[tn.ID] = hostVeth
-	}
-
-	bindAddress := cfg.Resolver.BindAddress
-	if bindAddress == "" {
-		bindAddress = dns.DefaultBindAddress
-	}
-
-	set := access.RuleSet{Mode: cfg.AccessMode()}
-	if cfg.Access != nil {
-		set.Rules = r.declaredRules(cfg.Access.Rules, devices)
-	}
-
-	tail, err := access.TailForMode(set.EffectiveMode())
+	set, compiled, err := r.compileAccess()
 	if err != nil {
 		r.emit("access.write_failed", "", err.Error())
-		return
-	}
-
-	compiled, err := access.Compile(set, access.Topology{Devices: devices, DNSAddress: bindAddress}, tail)
-	if err != nil {
-		r.emit("access.write_failed", "", fmt.Sprintf("compile the local rule set: %v", err))
 		return
 	}
 
@@ -956,6 +931,64 @@ func (r *Reconciler) applyAccess() {
 	if set.EffectiveMode() == access.ModeEnforce {
 		r.removeLegacyRules()
 	}
+}
+
+// AccessDiff returns each difference between the chains of the host and the local rule
+// set of the configuration file, as one sentence each. AccessDiff writes nothing.
+// AccessDiff returns no difference for a Reconciler that drives no live host.
+// AccessDiff returns an error when the compile fails or when a read of a chain fails.
+func (r *Reconciler) AccessDiff() ([]string, error) {
+	r.mu.Lock()
+	writer := r.access
+	r.mu.Unlock()
+	if writer == nil {
+		return nil, nil
+	}
+
+	_, compiled, err := r.compileAccess()
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), accessTimeout)
+	defer cancel()
+	return writer.Check(ctx, compiled)
+}
+
+// compileAccess returns the local rule set of the configuration file and its compiled
+// rules. Each tick and AccessDiff call it, so that a diff checks the rules a tick writes.
+func (r *Reconciler) compileAccess() (access.RuleSet, access.Compiled, error) {
+	cfg, err := config.LoadConfig(r.configPath)
+	if err != nil {
+		return access.RuleSet{}, access.Compiled{}, fmt.Errorf("load the configuration file: %w", err)
+	}
+
+	devices := make(map[string]string, len(cfg.Tailnets))
+	for _, tn := range cfg.Tailnets {
+		hostVeth, _ := namespaces.VethNames(namespaces.GetNamespaceName(tn.ID))
+		devices[tn.ID] = hostVeth
+	}
+
+	bindAddress := cfg.Resolver.BindAddress
+	if bindAddress == "" {
+		bindAddress = dns.DefaultBindAddress
+	}
+
+	set := access.RuleSet{Mode: cfg.AccessMode()}
+	if cfg.Access != nil {
+		set.Rules = r.declaredRules(cfg.Access.Rules, devices)
+	}
+
+	tail, err := access.TailForMode(set.EffectiveMode())
+	if err != nil {
+		return access.RuleSet{}, access.Compiled{}, err
+	}
+
+	compiled, err := access.Compile(set, access.Topology{Devices: devices, DNSAddress: bindAddress}, tail)
+	if err != nil {
+		return access.RuleSet{}, access.Compiled{}, fmt.Errorf("compile the local rule set: %w", err)
+	}
+	return set, compiled, nil
 }
 
 // declaredRules returns the rules whose endpoints the configuration file still declares.
