@@ -36,6 +36,7 @@ func testOptions(t *testing.T) (nsDaemonOptions, *[]string) {
 		upper:           filepath.Join(dir, "etc-upper"),
 		work:            filepath.Join(dir, "etc-work"),
 		unprotectedFile: filepath.Join(dir, "dns-unprotected"),
+		hideSystemctl:   func() error { return nil },
 		execChild: func(args []string) error {
 			started = args
 			return nil
@@ -172,5 +173,74 @@ func TestHasEtcOverlay_reads_past_an_optional_field(t *testing.T) {
 func TestHasEtcOverlay_rejects_an_empty_stream(t *testing.T) {
 	if hasEtcOverlay(strings.NewReader("")) {
 		t.Error("hasEtcOverlay = true, want false")
+	}
+}
+
+func TestNsDaemon_hides_systemctl_after_the_overlay_mount_and_before_the_child(t *testing.T) {
+	// Issue #410. tailscaled restarts the host systemd-resolved through systemctl after
+	// each write of its resolv.conf, and five restarts within ten seconds stop the host
+	// resolver.
+	opts, _ := testOptions(t)
+	var order []string
+	opts.mountEtc = func(upper, work string) error { order = append(order, "mount"); return nil }
+	opts.hideSystemctl = func() error { order = append(order, "hide"); return nil }
+	opts.execChild = func(args []string) error { order = append(order, "exec"); return nil }
+
+	if err := runNsDaemon(opts, []string{"tailscaled"}); err != nil {
+		t.Fatalf("runNsDaemon: %v", err)
+	}
+	if got := strings.Join(order, ","); got != "mount,hide,exec" {
+		t.Errorf("order = %s, want mount,hide,exec", got)
+	}
+}
+
+func TestNsDaemon_starts_no_child_when_systemctl_stays_visible(t *testing.T) {
+	opts, started := testOptions(t)
+	opts.mountEtc = func(upper, work string) error { return nil }
+	opts.hideSystemctl = func() error { return errors.New("bind /dev/null over /usr/bin/systemctl: permission denied") }
+
+	err := runNsDaemon(opts, []string{"tailscaled"})
+	if err == nil || !strings.Contains(err.Error(), "dns.allow_unprotected") {
+		t.Fatalf("error = %v, want one that names dns.allow_unprotected", err)
+	}
+	if *started != nil {
+		t.Errorf("the child started with %v, want no child", *started)
+	}
+	rec, ok := daemon.ReadUnprotected(opts.unprotectedFile)
+	if !ok || !strings.Contains(rec.Reason, "systemctl") {
+		t.Errorf("record = %+v, want a reason that names systemctl", rec)
+	}
+}
+
+func TestNsDaemon_starts_the_child_without_hidden_systemctl_when_allowed(t *testing.T) {
+	opts, started := testOptions(t)
+	opts.allowUnprotected = true
+	opts.mountEtc = func(upper, work string) error { return nil }
+	opts.hideSystemctl = func() error { return errors.New("permission denied") }
+
+	if err := runNsDaemon(opts, []string{"tailscaled"}); err != nil {
+		t.Fatalf("runNsDaemon: %v", err)
+	}
+	if *started == nil {
+		t.Error("the child did not start, want a start because dns.allow_unprotected is true")
+	}
+	if rec, ok := daemon.ReadUnprotected(opts.unprotectedFile); !ok || !rec.Allowed {
+		t.Errorf("record = %+v, want an allowed record", rec)
+	}
+}
+
+func TestSystemctlPathsNamesEachRealFileOnce(t *testing.T) {
+	// /bin is a symbolic link to /usr/bin on a merged /usr system, so two PATH entries
+	// name one file. A bind mount over the real file covers both names.
+	resolve := func(path string) (string, error) {
+		switch path {
+		case "/usr/bin/systemctl", "/bin/systemctl":
+			return "/usr/bin/systemctl", nil
+		}
+		return "", os.ErrNotExist
+	}
+	got := systemctlPaths("/usr/local/sbin:/usr/local/bin:/usr/bin:/bin", resolve)
+	if strings.Join(got, ",") != "/usr/bin/systemctl" {
+		t.Errorf("systemctlPaths = %v, want [/usr/bin/systemctl]", got)
 	}
 }

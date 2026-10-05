@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -34,8 +36,9 @@ func nsDaemonCmd() *cobra.Command {
 		Args:   cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := nsDaemonOptions{
-				mountEtc:  mountEtcOverlay,
-				execChild: execChild,
+				mountEtc:      mountEtcOverlay,
+				hideSystemctl: hideSystemctl,
+				execChild:     execChild,
 			}
 			opts.upper, _ = cmd.Flags().GetString("etc-upper")
 			opts.work, _ = cmd.Flags().GetString("etc-work")
@@ -63,6 +66,8 @@ type nsDaemonOptions struct {
 	allowUnprotected bool
 	// mountEtc places the overlay mount on /etc and verifies it. A test replaces it.
 	mountEtc func(upper, work string) error
+	// hideSystemctl hides each systemctl from the child. A test replaces it.
+	hideSystemctl func() error
 	// execChild replaces the process image with the child. A test replaces it.
 	execChild func(args []string) error
 }
@@ -72,18 +77,29 @@ type nsDaemonOptions struct {
 // file, so runNsDaemon returns an error and starts no child when the mount does not
 // hold. Only dns.allow_unprotected lets the child start in that state, and runNsDaemon
 // records the mount error either way. See issue #76.
+//
+// runNsDaemon also hides systemctl from the child. tailscaled restarts the host
+// systemd-resolved after each write of its own resolv.conf, and five restarts within ten
+// seconds stop the host resolver. A child that holds a private /etc must not restart a
+// service of the host, so a failure to hide systemctl counts as an unprotected namespace.
+// See issue #410.
 func runNsDaemon(o nsDaemonOptions, cmdArgs []string) error {
 	if o.upper != "" && o.work != "" {
-		if mountErr := o.mountEtc(o.upper, o.work); mountErr != nil {
-			reason := fmt.Sprintf("overlay /etc failed: %v", mountErr)
+		var reason string
+		if err := o.mountEtc(o.upper, o.work); err != nil {
+			reason = fmt.Sprintf("overlay /etc failed: %v", err)
+		} else if err := o.hideSystemctl(); err != nil {
+			reason = fmt.Sprintf("hide systemctl failed: %v", err)
+		}
+		if reason != "" {
 			writeErr := writeUnprotectedFile(o.unprotectedFile, reason, o.allowUnprotected)
 			if !o.allowUnprotected {
-				return errors.Join(fmt.Errorf("%s; set dns.allow_unprotected to true to start the tailnet without the overlay mount", reason), writeErr)
+				return errors.Join(fmt.Errorf("%s; set dns.allow_unprotected to true to start the tailnet unprotected", reason), writeErr)
 			}
 			if writeErr != nil {
 				return writeErr
 			}
-			fmt.Fprintf(os.Stderr, "hydrascale __nsdaemon: %s; dns.allow_unprotected is true, so the tailnet starts without the overlay mount\n", reason)
+			fmt.Fprintf(os.Stderr, "hydrascale __nsdaemon: %s; dns.allow_unprotected is true, so the tailnet starts unprotected\n", reason)
 		}
 	}
 	return o.execChild(cmdArgs)
@@ -162,6 +178,36 @@ func hasEtcOverlay(r io.Reader) bool {
 		}
 	}
 	return false
+}
+
+// hideSystemctl places /dev/null over each systemctl that PATH names, inside the private
+// mount namespace of the child. /dev/null holds no execute bit, so tailscaled finds no
+// systemctl, reports systemd-resolved as stopped, and restarts no service of the host.
+// The mount does not reach the host, because ip netns exec makes the mounts of the
+// namespace a slave of the host mounts.
+// hideSystemctl returns an error when a bind mount fails. A host without systemctl needs
+// no mount.
+func hideSystemctl() error {
+	for _, path := range systemctlPaths(os.Getenv("PATH"), filepath.EvalSymlinks) {
+		if err := syscall.Mount("/dev/null", path, "", syscall.MS_BIND, ""); err != nil {
+			return fmt.Errorf("bind /dev/null over %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// systemctlPaths returns the real file of each systemctl that the PATH value names, once
+// each. resolve returns the real path of a file, or an error for a file that is absent.
+func systemctlPaths(pathEnv string, resolve func(string) (string, error)) []string {
+	var paths []string
+	for _, dir := range filepath.SplitList(pathEnv) {
+		file, err := resolve(filepath.Join(dir, "systemctl"))
+		if err != nil || slices.Contains(paths, file) {
+			continue
+		}
+		paths = append(paths, file)
+	}
+	return paths
 }
 
 // execChild replaces the process image with the child command.
