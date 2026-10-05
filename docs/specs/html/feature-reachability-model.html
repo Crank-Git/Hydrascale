@@ -340,6 +340,73 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p>rule set produces, without applying it, when the query parameter <code>dry_run=true</code> is set.</p>
+<h4 id="reachability-model-ipv6">IPv6</h4>
+<p>The operator decided the IPv6 model on 2026-10-05, in issue #406. The test host measured each kernel fact that this section names.</p>
+<ul>
+<li><strong>FR-access-29</strong> — The daemon gives each namespace an IPv6 address from the unique
+</li>
+</ul>
+<p>local prefix <code>fd5c:9a3e:7b10::/48</code>. The fourth group of the address is the veth index.</p>
+<ul>
+<li><strong>FR-access-30</strong> — The daemon gives each namespace an IPv6 default route through the
+</li>
+</ul>
+<p>host side veth device.</p>
+<ul>
+<li><strong>FR-access-31</strong> — The daemon writes one NAT66 rule for each namespace in the <code>nat</code>
+</li>
+</ul>
+<p>table of <code>ip6tables</code>.</p>
+<ul>
+<li><strong>FR-access-32</strong> — The daemon opens the IPv6 path only when the host holds an IPv6
+</li>
+</ul>
+<p>default route in the main table.</p>
+<ul>
+<li><strong>FR-access-33</strong> — If the kernel holds <code>force_forwarding</code>, the daemon sets it on each
+</li>
+</ul>
+<p>upstream device and on each host side veth device. Linux 6.17 adds the key.</p>
+<ul>
+<li><strong>FR-access-34</strong> — If the kernel does not hold <code>force_forwarding</code>, the daemon opens the
+</li>
+</ul>
+<p>IPv6 path only when the configuration file sets <code>ipv6: true</code>.</p>
+<ul>
+<li><strong>FR-access-35</strong> — With <code>ipv6: true</code>, the daemon changes <code>accept_ra</code> from 1 to 2 on each
+</li>
+</ul>
+<p>device. Then it sets <code>net.ipv6.conf.all.forwarding</code> to 1.</p>
+<ul>
+<li><strong>FR-access-36</strong> — The daemon writes <code>HYDRASCALE-FWD</code> and <code>HYDRASCALE-OUT</code> in the IPv6
+</li>
+</ul>
+<p>filter table before it changes a forwarding key.</p>
+<ul>
+<li><strong>FR-access-37</strong> — The IPv6 internet destination excludes the unique local range, the
+</li>
+</ul>
+<p>link-local range, the loopback address, and each global prefix of the host.</p>
+<ul>
+<li><strong>FR-access-38</strong> — The IPv6 <code>HYDRASCALE-OUT</code> chain accepts the neighbor solicitation
+</li>
+</ul>
+<p>and the neighbor advertisement of each namespace device.</p>
+<ul>
+<li><strong>FR-access-39</strong> — If the host did not forward IPv6 before the daemon set
+</li>
+</ul>
+<p><code>force_forwarding</code>, then the IPv6 forward chain drops a packet from an upstream device to a device that is not a namespace device.</p>
+<ul>
+<li><strong>FR-access-40</strong> — A shutdown resets <code>force_forwarding</code> on each upstream device before
+</li>
+</ul>
+<p>it removes the IPv6 chains.</p>
+<ul>
+<li><strong>FR-access-41</strong> — The daemon records <code>ipv6.state</code> when the state of the IPv6 path
+</li>
+</ul>
+<p>changes. The message names the mode, or the reason that the path is off.</p>
 <h3 id="reachability-model-user-flows">User flows</h3>
 <h4 id="reachability-model-the-operator-upgrades-from-version-0-9">The operator upgrades from version 0.9</h4>
 <ol>
@@ -493,7 +560,10 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>Two tailnets use overlapping peer address ranges.</td><td>The rules match on the veth device rather than on the address, so overlap does not matter. This is why the compiler uses interfaces.</td></tr>
 <tr><td>The operator sets <code>access.mode: observe</code> on a busy host.</td><td>The <code>LOG</code> rule can fill the journal. The compiler adds <code>-m limit --limit 60/minute</code> to the <code>LOG</code> rule.</td></tr>
 <tr><td>The operator sets <code>access.mode: observe</code> on a host that runs Docker.</td><td>The tail accepts, therefore the packet reaches no later chain of <code>FORWARD</code>, and <code>ts-forward</code>, <code>DOCKER-USER</code> and <code>DOCKER-FORWARD</code> do not see it. Version 0.9 wrote <code>ACCEPT</code> rules into <code>FORWARD</code> and had the same behaviour. The mode <code>enforce</code> is the default and it does not change.</td></tr>
-<tr><td>IPv6 traffic.</td><td>Version 1.0 writes IPv4 rules only. The daemon logs at start that IPv6 forwarding is not filtered, so the gap is stated rather than hidden.</td></tr>
+<tr><td>IPv6 traffic.</td><td>The daemon writes the same two chains in the IPv6 filter table, and FR-access-29 to FR-access-41 state the path. A host with no IPv6 default route gets no IPv6 path, and the daemon records <code>ipv6.state</code> with the reason.</td></tr>
+<tr><td><code>net.ipv6.conf.all.forwarding</code> on a host that accepts router advertisements.</td><td>A device with <code>accept_ra</code> 1 ignores each router advertisement while the host forwards, so the host loses its own IPv6 default route. <code>force_forwarding</code> keeps the advertisement. The daemon uses <code>all.forwarding</code> only with <code>ipv6: true</code>, and it changes <code>accept_ra</code> to 2 first. The test host measured both on 2026-10-05.</td></tr>
+<tr><td>A namespace sends a neighbor solicitation for its IPv6 gateway.</td><td>Neighbor discovery is ICMPv6, so <code>HYDRASCALE-OUT</code> sees it. ARP never enters the IPv4 chain. FR-access-38 accepts it, because the closing drop otherwise stops every IPv6 packet of the namespace.</td></tr>
+<tr><td><code>force_forwarding</code> on the upstream device.</td><td>A reply from the internet enters on the upstream device, and the kernel forwards an IPv6 packet only when the input device forwards. The host then also forwards from the upstream device to its other devices. FR-access-39 drops that traffic.</td></tr>
 </table></div>
 <h3 id="reachability-model-acceptance-criteria">Acceptance criteria</h3>
 <ul>
@@ -555,9 +625,26 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p>the daemon records <code>access.jump_displaced</code> within one tick.</p>
+<ul>
+<li>[ ] On the test host with a simulated IPv6 upstream, a namespace reaches an address
+</li>
+</ul>
+<p>beyond the upstream device, and the upstream sees the global address of the host.</p>
+<ul>
+<li>[ ] On the test host, a namespace does not reach a global prefix of the host.
+</li>
+<li>[ ] On the test host, the upstream does not reach another host device through the
+</li>
+</ul>
+<p>forward chain.</p>
+<ul>
+<li>[ ] On the test host, a shutdown resets <code>force_forwarding</code> and removes the IPv6 chains,
+</li>
+</ul>
+<p>also after the upstream device is gone.</p>
 <h3 id="reachability-model-out-of-scope">Out of scope</h3>
 <ul>
-<li>IPv6 rules. The gap is recorded and logged.
+<li>A routed IPv6 prefix for each namespace. The operator chose NAT66 on 2026-10-05.
 </li>
 <li>Per-peer rules. A rule names a tailnet, not a device inside it. Per-peer control is
 </li>

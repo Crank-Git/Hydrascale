@@ -254,6 +254,7 @@ func TestTeardownVethRunsTheFullCommandListInOrder(t *testing.T) {
 		{Name: "iptables", Args: []string{"-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"}},
 		{Name: "iptables", Args: []string{"-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"}},
 		{Name: "iptables", Args: []string{"-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
+		{Name: "ip6tables", Args: nat66Delete(nsName)},
 		{Name: "ip", Args: []string{"link", "del", hostVeth}},
 	}
 
@@ -293,15 +294,16 @@ func TestTeardownVethRemovesEveryRuleWhenADeleteFails(t *testing.T) {
 	rec.Script(fail, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(fail, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(fail, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(fail, "ip6tables", nat66Delete(nsName)...)
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
 	// A failed delete does not stop the remaining steps, and TeardownVeth reports it.
 	if err := m.TeardownVeth(nsName, infraSubnet); err == nil {
-		t.Fatal("TeardownVeth returned no error for three failed rule deletes")
+		t.Fatal("TeardownVeth returned no error for four failed rule deletes")
 	}
-	if len(rec.Calls()) != 4 {
-		t.Errorf("TeardownVeth ran %d commands, want 4", len(rec.Calls()))
+	if len(rec.Calls()) != 5 {
+		t.Errorf("TeardownVeth ran %d commands, want 5", len(rec.Calls()))
 	}
 }
 

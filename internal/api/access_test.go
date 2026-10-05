@@ -427,6 +427,10 @@ func (displacedWriter) Apply(ctx context.Context, c access.Compiled) (access.Res
 
 func (displacedWriter) Teardown(ctx context.Context) error { return nil }
 
+func (displacedWriter) Check(ctx context.Context, c access.Compiled) ([]string, error) {
+	return nil, nil
+}
+
 func TestTheStatusResponseCarriesThePositionOfTheJumpRule(t *testing.T) {
 	cfgPath := writeAccessConfig(t, &access.RuleSet{Mode: access.ModeEnforce}, "alpha")
 	r := newTestReconciler(cfgPath)

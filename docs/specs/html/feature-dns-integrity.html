@@ -218,6 +218,16 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p>it is <code>true</code>, the child process starts without the overlay mount and the daemon records the event.</p>
+<ul>
+<li><strong>FR-dns-17</strong> — After the overlay mount, the helper places <code>/dev/null</code> over each
+</li>
+</ul>
+<p><code>systemctl</code> that <code>PATH</code> names, inside the mount namespace of the child. <code>tailscaled</code> then finds no <code>systemctl</code> and restarts no service of the host. Issue #410 measured 26 restarts of the host <code>systemd-resolved</code> in 30 minutes before this requirement.</p>
+<ul>
+<li><strong>FR-dns-18</strong> — When the helper cannot hide <code>systemctl</code>, FR-dns-3 to FR-dns-6 apply as
+</li>
+</ul>
+<p>they apply to a failed overlay mount.</p>
 <h4 id="dns-integrity-the-host-file-check">The host file check</h4>
 <ul>
 <li><strong>FR-dns-7</strong> — At start, the daemon records a SHA-256 checksum of the host

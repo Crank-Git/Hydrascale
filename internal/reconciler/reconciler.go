@@ -144,6 +144,15 @@ type Reconciler struct {
 	// A test replaces it.
 	access ChainWriter
 
+	// access6 writes the IPv6 chains, and ipv6 writes the IPv6 path of each namespace.
+	// New sets both for a Reconciler that drives the live host. ipv6State holds the last
+	// reported state of the IPv6 path, so that a tick records an event only on a change.
+	// forcedUpstreams holds each upstream device that forwards for the daemon, which Shutdown resets.
+	access6         ChainWriter
+	ipv6            IPv6PathWriter
+	ipv6State       string
+	forcedUpstreams []string
+
 	// path writes the host rules of the forward path of a namespace that the host does
 	// not hold. New sets it when the namespace manager carries that ability.
 	path ForwardPathWriter
@@ -189,6 +198,28 @@ type ChainWriter interface {
 	Apply(ctx context.Context, c access.Compiled) (access.Result, error)
 	// Teardown removes both chains and both jump rules.
 	Teardown(ctx context.Context) error
+	// Check returns each difference between the chains and the compiled rule set, and
+	// it writes nothing.
+	Check(ctx context.Context, c access.Compiled) ([]string, error)
+}
+
+// IPv6PathWriter reads the IPv6 facts of the host and writes the IPv6 path of a namespace.
+// namespaces.RealManager carries the ability. A test double does not have to.
+type IPv6PathWriter interface {
+	// ReadIPv6Host returns the IPv6 default routes, the global prefixes, and the
+	// forwarding state of the host.
+	ReadIPv6Host() (namespaces.IPv6Host, error)
+	// EnableForceForwarding sets force_forwarding on each upstream device, and it returns the
+	// devices whose value it changed.
+	EnableForceForwarding(upstreams []string) ([]string, error)
+	// DisableForceForwarding resets force_forwarding on each upstream device.
+	DisableForceForwarding(upstreams []string) error
+	// EnableAllForwarding sets net.ipv6.conf.all.forwarding, and it returns the devices
+	// whose accept_ra value it changed.
+	EnableAllForwarding() ([]string, error)
+	// EnsureIPv6Path gives the namespace its IPv6 addresses, its IPv6 default route, and
+	// its NAT66 rule, and it returns the NAT66 rule when it wrote it.
+	EnsureIPv6Path(nsName string, index int, forceForwarding bool) ([]string, error)
 }
 
 // NamespaceProber measures the reachability of one namespace with one packet.
@@ -340,8 +371,10 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 	}
 	// Only a Reconciler that drives the live host writes the chains. A test that passes a
 	// namespace manager double gets no writer, and it sets one with SetChainWriter.
-	if _, ok := ns.(*namespaces.RealManager); ok {
+	if real, ok := ns.(*namespaces.RealManager); ok {
 		r.access = access.NewWriter()
+		r.access6 = access.NewWriterIPv6()
+		r.ipv6 = real
 		// Only a Reconciler that drives the live host sends a packet. A test that passes
 		// a namespace manager double gets no prober, and it sets one with SetProber.
 		r.prober = reach.New()
@@ -864,8 +897,11 @@ func (r *Reconciler) Reconcile() error {
 	// finds no daemon to refresh. Issue #223 names the defect. The compiler reads the
 	// configuration file and not the live host, so a namespace that this tick creates gets
 	// its rules on this tick.
-	r.applyAccess()
+	in, compiled := r.applyAccess()
 	r.ensureForwardPath(desired, actual)
+	if compiled {
+		r.applyIPv6(in, desired, actual)
+	}
 
 	actions := r.Diff(desired, actual)
 	if len(actions) > 0 {
@@ -896,18 +932,100 @@ const accessTimeout = time.Second
 // applyAccess records access.written when it wrote the chains, and access.write_failed when
 // a command failed. It records one event and it returns; a failed write leaves the previous
 // chains in place, therefore the host keeps the rules of the last cycle.
-func (r *Reconciler) applyAccess() {
+// applyAccess returns the compile input and true when the compile succeeded, so that the
+// IPv6 step of the tick reads the configuration file once with it.
+func (r *Reconciler) applyAccess() (accessInput, bool) {
 	r.mu.Lock()
 	writer := r.access
 	r.mu.Unlock()
 	if writer == nil {
-		return
+		return accessInput{}, false
 	}
 
+	in, err := r.compileAccess()
+	if err != nil {
+		r.emit("access.write_failed", "", err.Error())
+		return accessInput{}, false
+	}
+	set, compiled := in.set, in.compiled
+
+	ctx, cancel := context.WithTimeout(context.Background(), accessTimeout)
+	defer cancel()
+
+	res, err := writer.Apply(ctx, compiled)
+	if err != nil {
+		r.emit("access.write_failed", "", err.Error())
+		return in, true
+	}
+	if res.Wrote {
+		r.emit("access.written", "", fmt.Sprintf("mode %s, %d forward rules, %d out rules",
+			set.EffectiveMode(), len(compiled.Forward), len(compiled.Out)))
+	}
+	r.reportJumps(res.Jumps)
+	// The chain now holds the rules of the operator, therefore the version 0.9 rules are
+	// no longer the path that accepts the traffic of a namespace.
+	if set.EffectiveMode() == access.ModeEnforce {
+		r.removeLegacyRules()
+	}
+	return in, true
+}
+
+// AccessDiff returns each difference between the chains of the host and the local rule
+// set of the configuration file, as one sentence each. AccessDiff writes nothing.
+// AccessDiff returns no difference for a Reconciler that drives no live host.
+// AccessDiff returns an error when the compile fails or when a read of a chain fails.
+func (r *Reconciler) AccessDiff() ([]string, error) {
+	r.mu.Lock()
+	writer := r.access
+	r.mu.Unlock()
+	if writer == nil {
+		return nil, nil
+	}
+
+	in, err := r.compileAccess()
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), accessTimeout)
+	defer cancel()
+	diffs, err := writer.Check(ctx, in.compiled)
+	if err != nil {
+		return nil, err
+	}
+
+	plan, err := r.planIPv6(in)
+	if err != nil {
+		return nil, err
+	}
+	if plan.mode == "" {
+		return diffs, nil
+	}
+	diffs6, err := r.access6.Check(ctx, plan.compiled)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range diffs6 {
+		diffs = append(diffs, "IPv6: "+d)
+	}
+	return diffs, nil
+}
+
+// accessInput holds what one tick reads from the configuration file for the local rule
+// set, and the compiled IPv4 rules.
+type accessInput struct {
+	set      access.RuleSet
+	devices  map[string]string
+	ipv6     bool
+	compiled access.Compiled
+}
+
+// compileAccess returns the local rule set of the configuration file and its compiled
+// rules. Each tick and AccessDiff call it, so that a diff checks the rules a tick writes.
+func (r *Reconciler) compileAccess() (accessInput, error) {
 	cfg, err := config.LoadConfig(r.configPath)
 	if err != nil {
-		r.emit("access.write_failed", "", fmt.Sprintf("load the configuration file: %v", err))
-		return
+		return accessInput{}, fmt.Errorf("load the configuration file: %w", err)
 	}
 
 	devices := make(map[string]string, len(cfg.Tailnets))
@@ -928,34 +1046,14 @@ func (r *Reconciler) applyAccess() {
 
 	tail, err := access.TailForMode(set.EffectiveMode())
 	if err != nil {
-		r.emit("access.write_failed", "", err.Error())
-		return
+		return accessInput{}, err
 	}
 
 	compiled, err := access.Compile(set, access.Topology{Devices: devices, DNSAddress: bindAddress}, tail)
 	if err != nil {
-		r.emit("access.write_failed", "", fmt.Sprintf("compile the local rule set: %v", err))
-		return
+		return accessInput{}, fmt.Errorf("compile the local rule set: %w", err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), accessTimeout)
-	defer cancel()
-
-	res, err := writer.Apply(ctx, compiled)
-	if err != nil {
-		r.emit("access.write_failed", "", err.Error())
-		return
-	}
-	if res.Wrote {
-		r.emit("access.written", "", fmt.Sprintf("mode %s, %d forward rules, %d out rules",
-			set.EffectiveMode(), len(compiled.Forward), len(compiled.Out)))
-	}
-	r.reportJumps(res.Jumps)
-	// The chain now holds the rules of the operator, therefore the version 0.9 rules are
-	// no longer the path that accepts the traffic of a namespace.
-	if set.EffectiveMode() == access.ModeEnforce {
-		r.removeLegacyRules()
-	}
+	return accessInput{set: set, devices: devices, ipv6: cfg.IPv6, compiled: compiled}, nil
 }
 
 // declaredRules returns the rules whose endpoints the configuration file still declares.
@@ -1394,21 +1492,34 @@ func (r *Reconciler) Shutdown() error {
 	}
 
 	r.mu.Lock()
-	writer := r.access
+	writer, writer6, ipv6, forced := r.access, r.access6, r.ipv6, r.forcedUpstreams
 	r.mu.Unlock()
+	// The upstream device stops forwarding before the IPv6 chains go, because the guard of the
+	// chain is the only rule that keeps a forwarding upstream device off the other host devices.
+	// A step that fails does not stop the remaining steps, because a chain that stays on
+	// the host after the daemon stops is a rule that nobody owns.
+	var errs []error
+	if ipv6 != nil && len(forced) > 0 {
+		if err := ipv6.DisableForceForwarding(forced); err != nil {
+			errs = append(errs, fmt.Errorf("reset IPv6 forwarding on the upstream devices: %w", err))
+		}
+	}
+	if writer6 != nil {
+		if err := writer6.Teardown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("remove the IPv6 local rule chains: %w", err))
+		}
+	}
 	if writer != nil {
 		if err := writer.Teardown(ctx); err != nil {
-			return r.reportTeardown("", []error{fmt.Errorf("remove the local rule chains: %w", err)})
+			errs = append(errs, fmt.Errorf("remove the local rule chains: %w", err))
 		}
 	}
-
 	if r.ha != nil {
 		if err := r.ha.TeardownAll(); err != nil {
-			return r.reportTeardown("", []error{fmt.Errorf("remove the host access state: %w", err)})
+			errs = append(errs, fmt.Errorf("remove the host access state: %w", err))
 		}
 	}
-
-	return nil
+	return r.reportTeardown("", errs)
 }
 
 // RecordEvent adds one event to the event log.

@@ -70,8 +70,25 @@ type Topology struct {
 	DNSAddress string
 }
 
+// TopologyIPv6 holds the host facts that CompileIPv6 needs. CompileIPv6 takes them as an
+// argument, so that it stays a pure function.
+type TopologyIPv6 struct {
+	// Devices maps a tailnet identifier to the host side veth device of its namespace.
+	Devices map[string]string
+	// HostPrefixes holds each global IPv6 prefix of the host local network, in CIDR form.
+	// The internet destination excludes them, as it excludes the RFC 1918 ranges for IPv4.
+	HostPrefixes []string
+	// GuardedUpstreams holds each upstream device that forwards only because the daemon set
+	// force_forwarding on it. The forward chain drops a packet from such a device to a
+	// device that is not a namespace device, so the host forwards no new path.
+	GuardedUpstreams []string
+}
+
 // Compiled holds the rules of both chains, in the order that the daemon writes them.
+// Guard holds the forward rules that the Writer puts before the rule that returns a packet
+// that touches no namespace device.
 type Compiled struct {
+	Guard   [][]string
 	Forward [][]string
 	Out     [][]string
 }
@@ -89,16 +106,39 @@ var privateRanges = []string{
 	"127.0.0.0-127.255.255.255",
 }
 
-// excludePrivate returns the matches that keep a rule off every private range.
+// privateRangesIPv6 holds the IPv6 address ranges that the internet destination excludes:
+// the unique local range, the link-local range, and the loopback address. The unique local
+// range holds the tailnet addresses and the veth addresses of every namespace.
+var privateRangesIPv6 = []string{
+	"fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+	"fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+	"::1-::1",
+}
+
+// excludeRanges returns the matches that keep a rule off every range.
 // One iptables rule holds one -d option, therefore the compiler uses the iprange match,
 // which a rule holds more than once. Every match must fail for the rule to accept the
 // packet, so the exclusions combine as the operator expects.
-func excludePrivate() []string {
-	args := make([]string, 0, len(privateRanges)*4)
-	for _, r := range privateRanges {
+func excludeRanges(ranges []string) []string {
+	args := make([]string, 0, len(ranges)*5)
+	for _, r := range ranges {
 		args = append(args, "-m", "iprange", "!", "--dst-range", r)
 	}
 	return args
+}
+
+// prefixRange returns the CIDR prefix as the first and the last address, in the form that
+// the iprange match reads.
+func prefixRange(prefix string) (string, error) {
+	_, ipnet, err := net.ParseCIDR(prefix)
+	if err != nil {
+		return "", fmt.Errorf("invalid host prefix %q: %w", prefix, err)
+	}
+	last := make(net.IP, len(ipnet.IP))
+	for i := range ipnet.IP {
+		last[i] = ipnet.IP[i] | ^ipnet.Mask[i]
+	}
+	return ipnet.IP.String() + "-" + last.String(), nil
 }
 
 // establishedMatch allows return traffic for a connection that a rule already allowed.
@@ -114,12 +154,7 @@ var establishedMatch = []string{"-m", "conntrack", "--ctstate", "RELATED,ESTABLI
 // Compile returns an empty result together with an error, because a rule set that fails
 // validation is never applied in part.
 func Compile(set RuleSet, topo Topology, tail Tail) (Compiled, error) {
-	ids := make([]string, 0, len(topo.Devices))
-	for id := range topo.Devices {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-
+	ids := sortedIDs(topo.Devices)
 	if err := set.Validate(ids); err != nil {
 		return Compiled{}, err
 	}
@@ -129,20 +164,80 @@ func Compile(set RuleSet, topo Topology, tail Tail) (Compiled, error) {
 		return Compiled{}, fmt.Errorf("invalid DNS forwarder bind address %q: %w", topo.DNSAddress, err)
 	}
 
-	forward := [][]string{appendRule(ChainForward, establishedMatch)}
-	out := [][]string{appendRule(ChainOut, establishedMatch)}
-
 	// FR-access-14: a namespace reaches the DNS forwarder without a rule, because DNS is
 	// how the product works.
+	var dns [][]string
 	for _, id := range ids {
 		for _, protocol := range []string{"udp", "tcp"} {
-			out = append(out, appendRule(ChainOut,
+			dns = append(dns, appendRule(ChainOut,
 				[]string{"-i", topo.Devices[id], "-d", dnsHost, "-p", protocol, "--dport", dnsPort, "-j", "ACCEPT"}))
 		}
 	}
 
+	return compile(set, ids, topo.Devices, dns, privateRanges, tail)
+}
+
+// CompileIPv6 returns the ip6tables arguments that the rule set requires.
+// set is the rule set, topo holds the veth device of each tailnet and the IPv6 facts of
+// the host, and tail holds the rules that close each chain.
+// CompileIPv6 is pure, as Compile is. The IPv6 chains hold no DNS rule, because a
+// namespace reaches the DNS forwarder over IPv4. The out chain opens neighbor discovery
+// from each namespace device, because neighbor discovery is ICMPv6 and the closing drop
+// would stop the solicitation for the gateway. ARP never enters the IPv4 chain.
+// CompileIPv6 returns an error when a rule fails validation, when the topology names no
+// device for a tailnet, or when a host prefix is not a CIDR prefix.
+func CompileIPv6(set RuleSet, topo TopologyIPv6, tail Tail) (Compiled, error) {
+	ids := sortedIDs(topo.Devices)
+	if err := set.Validate(ids); err != nil {
+		return Compiled{}, err
+	}
+
+	ranges := append([]string{}, privateRangesIPv6...)
+	for _, prefix := range topo.HostPrefixes {
+		r, err := prefixRange(prefix)
+		if err != nil {
+			return Compiled{}, err
+		}
+		ranges = append(ranges, r)
+	}
+
+	var ndp [][]string
+	for _, id := range ids {
+		for _, kind := range []string{"neighbour-solicitation", "neighbour-advertisement"} {
+			ndp = append(ndp, appendRule(ChainOut,
+				[]string{"-i", topo.Devices[id], "-p", "ipv6-icmp", "--icmpv6-type", kind, "-j", "ACCEPT"}))
+		}
+	}
+
+	c, err := compile(set, ids, topo.Devices, ndp, ranges, tail)
+	if err != nil {
+		return Compiled{}, err
+	}
+	for _, upstream := range topo.GuardedUpstreams {
+		c.Guard = append(c.Guard, appendRule(ChainForward, []string{"-i", upstream, "!", "-o", devicePrefix + "+", "-j", "DROP"}))
+	}
+	return c, nil
+}
+
+// sortedIDs returns the tailnet identifiers of the device map in a fixed order.
+func sortedIDs(devices map[string]string) []string {
+	ids := make([]string, 0, len(devices))
+	for id := range devices {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// compile returns the rules of both chains for one address family.
+// open holds the out rules that every namespace needs without a rule of the operator, and
+// private holds the ranges that the internet destination excludes.
+func compile(set RuleSet, ids []string, devices map[string]string, open [][]string, private []string, tail Tail) (Compiled, error) {
+	forward := [][]string{appendRule(ChainForward, establishedMatch)}
+	out := append([][]string{appendRule(ChainOut, establishedMatch)}, open...)
+
 	for _, rule := range set.Rules {
-		chain, match, err := compileRule(rule, topo)
+		chain, match, err := compileRule(rule, devices, private)
 		if err != nil {
 			return Compiled{}, err
 		}
@@ -166,7 +261,7 @@ func Compile(set RuleSet, topo Topology, tail Tail) (Compiled, error) {
 	// the out chain names one namespace device rather than every packet.
 	for _, id := range ids {
 		for _, closing := range tail {
-			out = append(out, appendRule(ChainOut, append([]string{"-i", topo.Devices[id]}, closing...)))
+			out = append(out, appendRule(ChainOut, append([]string{"-i", devices[id]}, closing...)))
 		}
 	}
 
@@ -183,11 +278,13 @@ func appendRule(chain string, args []string) []string {
 // compileRule returns the chain and the match of one rule.
 // compileRule returns an empty chain for a rule whose source is the host, because the
 // host originates that traffic on the OUTPUT chain, which version 1.0 does not filter.
-func compileRule(rule Rule, topo Topology) (string, []string, error) {
+// devices maps a tailnet identifier to its device, and private holds the ranges that the
+// internet destination excludes.
+func compileRule(rule Rule, devices map[string]string, private []string) (string, []string, error) {
 	if rule.From == Host {
 		return "", nil, nil
 	}
-	source, ok := topo.Devices[rule.From]
+	source, ok := devices[rule.From]
 	if !ok {
 		return "", nil, fmt.Errorf("rule %s: the topology names no device for the tailnet %q", rule, rule.From)
 	}
@@ -201,9 +298,9 @@ func compileRule(rule Rule, topo Topology) (string, []string, error) {
 		// loopback range. Without the range exclusion a namespace reaches the host local
 		// network, which is the finding SA-9.
 		match := []string{"-i", source, "!", "-o", devicePrefix + "+"}
-		return ChainForward, append(match, excludePrivate()...), nil
+		return ChainForward, append(match, excludeRanges(private)...), nil
 	default:
-		destination, ok := topo.Devices[rule.To]
+		destination, ok := devices[rule.To]
 		if !ok {
 			return "", nil, fmt.Errorf("rule %s: the topology names no device for the tailnet %q", rule, rule.To)
 		}

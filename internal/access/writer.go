@@ -36,11 +36,27 @@ type Writer struct {
 	// Runner runs every command that the Writer sends to the host. A test replaces
 	// Runner with an execx.Recorder and asserts the exact argument list.
 	Runner CommandRunner
+	// IPv6 selects ip6tables and ip6tables-restore. The IPv6 chains carry the same names
+	// as the IPv4 chains, in the filter table of the IPv6 family.
+	IPv6 bool
 }
 
 // NewWriter returns a Writer that runs each command on the host.
 func NewWriter() *Writer {
 	return &Writer{Runner: execx.OSRunner{}}
+}
+
+// NewWriterIPv6 returns a Writer that writes the IPv6 chains on the host.
+func NewWriterIPv6() *Writer {
+	return &Writer{Runner: execx.OSRunner{}, IPv6: true}
+}
+
+// tool returns the iptables command of the address family of the Writer.
+func (w *Writer) tool() string {
+	if w.IPv6 {
+		return "ip6tables"
+	}
+	return "iptables"
 }
 
 // runner returns the command runner. A Writer with no Runner runs on the host.
@@ -108,8 +124,8 @@ func (w *Writer) Apply(ctx context.Context, c Compiled) (Result, error) {
 	var res Result
 	if live[ChainForward] != want || live[ChainOut] != want {
 		file := restoreFile(c, want)
-		if out, err := w.runner().RunInput(ctx, file, "iptables-restore", "--noflush"); err != nil {
-			return Result{}, fmt.Errorf("iptables-restore --noflush: %v (%s)", err, out)
+		if out, err := w.runner().RunInput(ctx, file, w.tool()+"-restore", "--noflush"); err != nil {
+			return Result{}, fmt.Errorf("%s-restore --noflush: %v (%s)", w.tool(), err, out)
 		}
 		res.Wrote = true
 	}
@@ -121,6 +137,41 @@ func (w *Writer) Apply(ctx context.Context, c Compiled) (Result, error) {
 		errs = append(errs, err)
 	}
 	return res, errors.Join(errs...)
+}
+
+// Check returns each difference between the host and the compiled rule set, as one
+// sentence each. Check reads the chains and writes nothing.
+// ctx bounds every command, and c is the output of Compile.
+// Check returns an error when a read fails, because a failed read states no difference.
+func (w *Writer) Check(ctx context.Context, c Compiled) ([]string, error) {
+	want := fingerprint(c)
+
+	live, err := w.liveFingerprints(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var diffs []string
+	for _, j := range jumps {
+		switch live[j.chain] {
+		case want:
+		case "":
+			diffs = append(diffs, fmt.Sprintf("write chain %s: the host holds no chain or no marker rule", j.chain))
+		default:
+			diffs = append(diffs, fmt.Sprintf("write chain %s: the chain holds rule set %s, the configuration file compiles to %s",
+				j.chain, live[j.chain], want))
+		}
+	}
+	for _, j := range jumps {
+		placement, err := w.readPlacement(ctx, j)
+		if err != nil {
+			return nil, err
+		}
+		if placement.Position == 0 {
+			diffs = append(diffs, fmt.Sprintf("insert jump rule: %s holds no rule -j %s", j.parent, j.chain))
+		}
+	}
+	return diffs, nil
 }
 
 // Teardown removes both chains and both jump rules.
@@ -146,19 +197,23 @@ func (w *Writer) Teardown(ctx context.Context) error {
 // no guarantee that another service keeps its jump rule at position 1. An operator
 // firewall that reloads and removes the jump gets the jump back on this tick.
 func (w *Writer) ensureJump(ctx context.Context, j jump) (Placement, error) {
-	out, err := w.runner().Run(ctx, "iptables", "-S", j.parent)
-	if err != nil {
-		return Placement{Parent: j.parent}, fmt.Errorf("iptables -S %s: %v (%s)", j.parent, err, out)
+	placement, err := w.readPlacement(ctx, j)
+	if err != nil || placement.Position > 0 {
+		return placement, err
 	}
-
-	placement := placementOf(string(out), j)
-	if placement.Position > 0 {
-		return placement, nil
-	}
-	if out, err := w.runner().Run(ctx, "iptables", "-I", j.parent, "1", "-j", j.chain); err != nil {
-		return placement, fmt.Errorf("iptables -I %s 1 -j %s: %v (%s)", j.parent, j.chain, err, out)
+	if out, err := w.runner().Run(ctx, w.tool(), "-I", j.parent, "1", "-j", j.chain); err != nil {
+		return placement, fmt.Errorf("%s -I %s 1 -j %s: %v (%s)", w.tool(), j.parent, j.chain, err, out)
 	}
 	return placement, nil
+}
+
+// readPlacement returns where the jump rule of the daemon sits in the parent chain.
+func (w *Writer) readPlacement(ctx context.Context, j jump) (Placement, error) {
+	out, err := w.runner().Run(ctx, w.tool(), "-S", j.parent)
+	if err != nil {
+		return Placement{Parent: j.parent}, fmt.Errorf("%s -S %s: %v (%s)", w.tool(), j.parent, err, out)
+	}
+	return placementOf(string(out), j), nil
 }
 
 // placementOf returns where the jump rule of the daemon sits in the output of
@@ -201,11 +256,11 @@ func targetOf(fields []string) string {
 // deleteRule returns nil when the command succeeds, when the rule is absent, and when the
 // chain is absent. Any other failure carries the command line and the output.
 func (w *Writer) deleteRule(ctx context.Context, args ...string) error {
-	out, err := w.runner().Run(ctx, "iptables", args...)
+	out, err := w.runner().Run(ctx, w.tool(), args...)
 	if err == nil || absent(out) {
 		return nil
 	}
-	return fmt.Errorf("iptables %s: %v (%s)", strings.Join(args, " "), err, out)
+	return fmt.Errorf("%s %s: %v (%s)", w.tool(), strings.Join(args, " "), err, out)
 }
 
 // liveFingerprints returns the fingerprint that the marker rule of each chain holds.
@@ -214,13 +269,13 @@ func (w *Writer) deleteRule(ctx context.Context, args ...string) error {
 func (w *Writer) liveFingerprints(ctx context.Context) (map[string]string, error) {
 	found := make(map[string]string, len(jumps))
 	for _, j := range jumps {
-		out, err := w.runner().Run(ctx, "iptables", "-S", j.chain)
+		out, err := w.runner().Run(ctx, w.tool(), "-S", j.chain)
 		if err != nil {
 			if absent(out) {
 				found[j.chain] = ""
 				continue
 			}
-			return nil, fmt.Errorf("iptables -S %s: %v (%s)", j.chain, err, out)
+			return nil, fmt.Errorf("%s -S %s: %v (%s)", w.tool(), j.chain, err, out)
 		}
 		found[j.chain] = markerOf(string(out))
 	}
@@ -229,10 +284,18 @@ func (w *Writer) liveFingerprints(ctx context.Context) (map[string]string, error
 
 // absent reports whether the output of an iptables command states that the rule or the
 // chain is not present. iptables exits non-zero for both states.
+//
+// iptables-nft states an absent chain in two more forms. A delete of a jump rule into an
+// absent chain returns "Chain '<chain>' does not exist". Version 1.8.7, which Ubuntu 22.04
+// and Debian 11 ship, returns "is incompatible, use 'nft' tool" for `iptables -S` of an
+// absent chain. The same text also states a chain that holds a rule iptables cannot read.
+// The daemon owns the chain, therefore the Writer replaces it in both states. See issue #404.
 func absent(output []byte) bool {
 	text := string(output)
 	return strings.Contains(text, "does a matching rule exist") ||
-		strings.Contains(text, "No chain/target/match by that name")
+		strings.Contains(text, "No chain/target/match by that name") ||
+		strings.Contains(text, "does not exist") ||
+		strings.Contains(text, "is incompatible, use 'nft' tool")
 }
 
 // markerOf returns the fingerprint that the marker rule in the output of `iptables -S`
@@ -254,7 +317,7 @@ func markerOf(output string) string {
 // Compile emits the rules in a fixed order.
 func fingerprint(c Compiled) string {
 	sum := sha256.New()
-	for _, rules := range [][][]string{c.Forward, c.Out} {
+	for _, rules := range [][][]string{c.Forward, c.Out, c.Guard} {
 		for _, rule := range rules {
 			for _, arg := range rule {
 				sum.Write([]byte(arg))
@@ -284,6 +347,11 @@ func restoreFile(c Compiled, mark string) []byte {
 	// The marker rule holds no target, so the packet continues to the next rule.
 	for _, j := range jumps {
 		fmt.Fprintf(&b, "-A %s -m comment --comment %s%s\n", j.chain, markerPrefix, mark)
+	}
+	// A guard rule drops a packet before the return rule below can give it back to FORWARD.
+	for _, rule := range c.Guard {
+		b.WriteString(ruleLine(rule))
+		b.WriteString("\n")
 	}
 	// A packet that touches no namespace device returns to FORWARD. The jump sits at
 	// position 1, therefore every forwarded packet of the host enters this chain, and the

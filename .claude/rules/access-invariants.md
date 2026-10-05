@@ -80,5 +80,22 @@ event.
 
 ## IPv6
 
-Version 1.0 writes IPv4 rules only. The daemon logs at start that it does not filter IPv6
-forwarding. State the gap; never let it look covered.
+The daemon writes the same two chains in the IPv6 filter table. Read FR-access-29 to
+FR-access-41 in `docs/specs/features/05-reachability-model.md` before you change the IPv6
+path. The test host measured each rule below on 2026-10-05.
+
+**Write the IPv6 chains before a forwarding key changes.** The chains hold the guard of
+each upstream device. A forwarding upstream device without the guard forwards internet
+traffic to every other host device.
+
+**Accept neighbor discovery in the IPv6 out chain.** Neighbor discovery is ICMPv6, so the
+chain sees it. ARP never enters the IPv4 chain. Without the rule, the closing drop stops
+the solicitation for the gateway and the namespace reaches nothing.
+
+**Prefer force_forwarding to all.forwarding.** `net.ipv6.conf.all.forwarding` stops each
+device with `accept_ra` 1 from accepting a router advertisement, so the host can lose its
+own IPv6 default route. Use `all.forwarding` only when the operator sets `ipv6: true`, and
+change `accept_ra` to 2 first.
+
+**Reset force_forwarding before the IPv6 chains go.** A shutdown continues after a failed
+step, because a chain that outlives the daemon is a rule that nobody owns.

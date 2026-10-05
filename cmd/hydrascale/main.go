@@ -144,21 +144,29 @@ func splitActions(actions []reconciler.Action) (changing, periodic []reconciler.
 	return changing, periodic
 }
 
-// writeActionReport writes what would change. `heading` names the report and `none` names
-// the result for a host that needs no change.
+// writeActionReport writes what would change. `chains` holds each difference in the local
+// rule chains, `heading` names the report and `none` names the result for a host that
+// needs no change.
 //
 // The report counts the periodic actions apart. Each one holds its own comparison, so it
 // changes nothing on a host that already matches, and a report that counts it states a
 // change that would not happen. See issue #274.
-func writeActionReport(w io.Writer, actions []reconciler.Action, heading, none string) {
+//
+// The report counts each chain difference as a change. A tick writes the chains apart from
+// the namespace actions, and a report without them stated no change on a host that held
+// no chain. See issue #407.
+func writeActionReport(w io.Writer, actions []reconciler.Action, chains []string, heading, none string) {
 	changing, periodic := splitActions(actions)
 
-	if len(changing) == 0 {
+	if len(changing)+len(chains) == 0 {
 		fmt.Fprintln(w, none)
 	} else {
-		fmt.Fprintf(w, heading+"\n", len(changing))
+		fmt.Fprintf(w, heading+"\n", len(changing)+len(chains))
 		for _, a := range changing {
 			fmt.Fprintf(w, "  %s\n", a)
+		}
+		for _, c := range chains {
+			fmt.Fprintf(w, "  %s\n", c)
 		}
 	}
 
@@ -185,7 +193,11 @@ func diffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			writeActionReport(cmd.OutOrStdout(), r.Diff(desired, actual),
+			chains, err := r.AccessDiff()
+			if err != nil {
+				return fmt.Errorf("read the local rule chains: %w", err)
+			}
+			writeActionReport(cmd.OutOrStdout(), r.Diff(desired, actual), chains,
 				"%d action(s) needed:",
 				"No changes needed. Desired state matches actual state.")
 			return nil
@@ -211,7 +223,11 @@ func applyCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				writeActionReport(cmd.OutOrStdout(), r.Diff(desired, actual),
+				chains, err := r.AccessDiff()
+				if err != nil {
+					return fmt.Errorf("read the local rule chains: %w", err)
+				}
+				writeActionReport(cmd.OutOrStdout(), r.Diff(desired, actual), chains,
 					"%d action(s) would be taken (dry run):",
 					"No changes needed (dry run).")
 				return nil

@@ -6,7 +6,7 @@ status: approved
 spec_version: 2
 created: 2026-08-04
 approved: 2026-08-23
-html_generated: 2026-09-29
+html_generated: 2026-10-05
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -78,6 +78,8 @@ the operator what is allowed.
 | reachability | noun | The condition where traffic from one source arrives at one destination. | connectivity, access, routing |
 | local rule | noun | One reachability rule that the daemon enforces on the host with iptables. | ACL, firewall rule, filter |
 | forward path | noun | The host rules that carry the traffic of one namespace to the internet. | uplink, egress, NAT path |
+| upstream device | noun | A host device that holds an IPv6 default route of the main table. The IPv6 forward path leaves the host through it. | uplink, WAN port, egress device |
+| NAT66 | noun | The IPv6 masquerade rule that gives a namespace the global IPv6 address of the host. | IPv6 NAT, NPTv6, v6 masquerade |
 | policy | noun | The huJSON access-control document that a control server holds for a tailnet. | ACL file, policy file, ruleset |
 | rule set | noun | The complete set of local rules for one host. | config, ACL, policy |
 | stage | verb | To record an edit in the console without sending it to the daemon. | draft, queue, buffer |
@@ -676,9 +678,8 @@ security and DNS work must not wait behind the console.
    with `-mod=vendor`, so the offline build serves that loop rather than a clone. A
    clone needs network access, which is normal for a Go project. Version 1.0 changes
    nothing here.
-5. Version 1.0 keeps IPv4 rules only for local rules. The survey found IPv6 route
-   handling in `internal/hostaccess` but no IPv6 firewall rules. Epic 2 confirms whether
-   an IPv6 gap exists.
+5. The daemon writes local rules for IPv4 and for IPv6. Issue #406 added the IPv6 path
+   and the IPv6 chains, and `features/05-reachability-model.md` states them.
 6. `9443` is free on a typical host. The configuration can change it.
 
 ## Risks & open questions
@@ -883,6 +884,8 @@ advance to `status: built`. |
 | 2026-09-22 | 1 | **Decision: the daemon answers a short name for a peer, behind the key `resolver.resolve_aliases`.** A MagicDNS name holds the suffix of the control server, such as `laptop.taildf854a.ts.net`, which the operator must remember per tailnet. The operator already names each tailnet with a tailnet alias. With the key set, the DNS forwarder answers the alias zone `<alias>.ts.internal` from the peer list of that tailnet, and it answers NXDOMAIN for a name below the zone that the zone does not hold. ICANN reserved the top level domain `.internal` in 2024 for a private name, therefore the zone collides with no public name. The daemon rewrites no query: a query of the MagicDNS suffix reaches the same path as before. The daemon writes no `/etc/hosts` entry for the zone. The forwarder answers on the host side veth address of each tailnet, on port 53, and the link of that device carries two domains: the MagicDNS suffix and the alias zone. A link of systemd-resolved carries one server list for every domain that it holds, therefore both domains name the forwarder, and the forwarder routes a MagicDNS query onward to the namespace. An alias becomes one DNS label, therefore `LoadConfig` refuses an alias that is not a DNS label when the key is set. The key is unset by default, and an unset key leaves the link with the MagicDNS suffix alone and the namespace side address. |
 | 2026-09-22 | 1 | **A review of the alias zone found five defects, and the daemon now holds the corrections.** (1) The listener opened its socket in a goroutine, therefore a port 53 that another resolver of the host holds reached the log alone. The link already named the host side address, so the tailnet lost the MagicDNS suffix as well as the alias zone. `SyncListeners` now opens each socket before it returns and reports the addresses that answer. A link whose listener did not open keeps the namespace side address and the MagicDNS suffix, and the next tick opens the socket again. (2) The veth address carries the traffic of the namespace, therefore a process inside a namespace reached the port and read the names of every other tailnet. The listener now answers a query whose source is the listen address, which is the address that systemd-resolved sends from, and it answers REFUSED to every other source. (3) A tailnet whose control server serves no MagicDNS suffix got a zone and a listener and no registration. The daemon now registers the veth device whenever the tailnet holds an alias zone. (4) The zone was keyed by `HostName`, which is the name of the operating system and not the name that MagicDNS serves. The key is now every label of `DNSName` below the MagicDNS suffix, therefore `a.b.tail1234.ts.net` answers as `a.b.<alias>.ts.internal` and two peers of one host name no longer name one record. (5) `ValidateTailnetNames` compared an alias with a case sensitive match, and a domain name folds case. It now refuses two aliases that differ by case alone when the key is set. |
 | 2026-09-28 | 1 | **Decision: the daemon exports the split DNS of each tailnet to the host resolver.** A tailnet whose control server holds split DNS resolved the names of that domain until now only inside the tailnet: the daemon registered the MagicDNS suffix and the alias zone on the veth device, therefore a query of a split domain left the host for the default upstream. The operator decided to export the split domains on the same path. The daemon reads them with `tailscale dns status --json` inside the namespace, because the command needs the socket of that tailnet. The resolver addresses of the reply are unused: each domain reaches the veth device of its tailnet, and the DNAT rule inside the namespace sends the query to `100.100.100.100`. One domain is held by one tailnet. The MagicDNS suffix and the alias zone always win, and of two tailnets that claim one domain the first in sorted identifier order keeps it; the loser records a conflict, and the daemon records one `dns.split_domain_conflict` event. A conflict event that stays repeats not. A split DNS read that fails leaves the tailnet with no split domain and the sync fails not. The claim order is a decision, because a control server assigns the domains and one host must choose. The requirements FR-split-1 to FR-split-9 land with no issue yet, so the issue map counts them not. |
+| 2026-10-05 | 1 | **Decision: each namespace gets an IPv6 path through NAT66 (issue #406).** The operator chose NAT66 from a unique local prefix over a routed prefix. The operator also decided: "Auto 6.17+, opt-in older". A kernel that holds `force_forwarding` gets the path without a configuration key. An older kernel needs `ipv6: true`, because `net.ipv6.conf.all.forwarding` stops a device with `accept_ra` 1 from accepting a router advertisement. The test host measured three defects before the merge: the IPv6 out chain dropped neighbor discovery, the host route sync deleted the connected route of the veth prefix, and a shutdown stopped at a failed reset and left both chains. FR-access-29 to FR-access-41 hold the result. |
+| 2026-10-05 | 1 | **Issue #410: the namespaced `tailscaled` restarted the host `systemd-resolved`.** `bpftrace` on the test host showed `tailscaled` run `systemctl is-active systemd-resolved.service` and then `systemctl restart systemd-resolved.service` after each write of its `resolv.conf`. Three restarts of the daemon within four minutes reached the start limit of `systemd-resolved`, and the host lost DNS. FR-dns-17 and FR-dns-18 hide `systemctl` from the child. |
 
 ## Issue map
 

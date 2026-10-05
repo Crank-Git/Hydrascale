@@ -22,6 +22,21 @@ var absentRule = execx.Result{
 	Err:    errors.New("exit status 1"),
 }
 
+// absentChainNft187 is the result that iptables-nft 1.8.7 returns for `iptables -S` of a
+// chain that the host does not hold. Ubuntu 22.04 and Debian 11 ship that version. See
+// issue #404.
+var absentChainNft187 = execx.Result{
+	Output: []byte("iptables v1.8.7 (nf_tables): chain `HYDRASCALE-FWD' in table `filter' is incompatible, use 'nft' tool.\n"),
+	Err:    errors.New("exit status 1"),
+}
+
+// absentJumpTarget is the result that iptables-nft returns for a delete of a jump rule
+// whose target chain is not present. Version 1.8.7 and version 1.8.10 both return it.
+var absentJumpTarget = execx.Result{
+	Output: []byte("iptables v1.8.10 (nf_tables): Chain 'HYDRASCALE-FWD' does not exist\nTry `iptables -h' or 'iptables --help' for more information.\n"),
+	Err:    errors.New("exit status 2"),
+}
+
 // fillers holds the target of each rule that another service writes into FORWARD. The
 // security audit measured these three rules above the rules of the daemon on the test
 // host.
@@ -386,6 +401,43 @@ func TestTeardownTreatsAnAbsentRuleAsSuccess(t *testing.T) {
 	}
 }
 
+func TestApplyWritesTheChainsWhenIptablesNft187ReportsTheAbsentChainAsIncompatible(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	for _, j := range jumps {
+		rec.Script(absentChainNft187, "iptables", "-S", j.chain)
+		rec.Script(execx.Result{Output: []byte(listing(j, 0))}, "iptables", "-S", j.parent)
+		rec.Script(execx.Result{}, "iptables", "-I", j.parent, "1", "-j", j.chain)
+	}
+	rec.Script(execx.Result{}, "iptables-restore", "--noflush")
+
+	w := &Writer{Runner: rec}
+	res, err := w.Apply(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !res.Wrote {
+		t.Error("Apply reported no write for a host that holds no chain")
+	}
+	if countName(rec, "iptables-restore") != 1 {
+		t.Errorf("Apply ran iptables-restore %d times, want 1", countName(rec, "iptables-restore"))
+	}
+}
+
+func TestTeardownTreatsAJumpIntoAnAbsentChainAsSuccess(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	rec.Script(absentJumpTarget, "iptables", "-D", "FORWARD", "-j", ChainForward)
+	rec.Script(absentJumpTarget, "iptables", "-D", "INPUT", "-j", ChainOut)
+	for _, j := range jumps {
+		rec.Script(absentChain, "iptables", "-F", j.chain)
+		rec.Script(absentChain, "iptables", "-X", j.chain)
+	}
+
+	w := &Writer{Runner: rec}
+	if err := w.Teardown(context.Background()); err != nil {
+		t.Errorf("Teardown returned an error for an absent chain: %v", err)
+	}
+}
+
 func TestTeardownReturnsEveryFailureTogether(t *testing.T) {
 	broken := execx.Result{
 		Output: []byte("iptables: Permission denied (you must be root)."),
@@ -485,4 +537,143 @@ func countName(rec *execx.Recorder, name string) int {
 		}
 	}
 	return n
+}
+
+// checkFixture returns a Writer whose host reports the fingerprint in each chain and the
+// position of each jump rule. An empty fingerprint makes the chain absent.
+func checkFixture(t *testing.T, present string, position int) (*execx.Recorder, *Writer) {
+	t.Helper()
+
+	rec := execx.NewRecorder(t)
+	for _, j := range jumps {
+		if present == "" {
+			rec.Script(absentChain, "iptables", "-S", j.chain)
+		} else {
+			out := "-N " + j.chain + "\n-A " + j.chain + " -m comment --comment " + markerPrefix + present + "\n"
+			rec.Script(execx.Result{Output: []byte(out)}, "iptables", "-S", j.chain)
+		}
+		rec.Script(execx.Result{Output: []byte(listing(j, position))}, "iptables", "-S", j.parent)
+	}
+	return rec, &Writer{Runner: rec}
+}
+
+// writes counts the commands of the recorder that change the host.
+func writes(rec *execx.Recorder) int {
+	n := 0
+	for _, c := range rec.Calls() {
+		if c.Name != "iptables" || c.Args[0] != "-S" {
+			n++
+		}
+	}
+	return n
+}
+
+func TestCheckReportsNoDifferenceForAHostThatHoldsTheCompiledRuleSet(t *testing.T) {
+	rec, w := checkFixture(t, fingerprint(testSet()), 1)
+
+	diffs, err := w.Check(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("Check reported differences for a converged host: %v", diffs)
+	}
+	if writes(rec) != 0 {
+		t.Errorf("Check ran %d commands that change the host, want 0", writes(rec))
+	}
+}
+
+func TestCheckReportsEachAbsentChainAndEachAbsentJumpRule(t *testing.T) {
+	rec, w := checkFixture(t, "", 0)
+
+	diffs, err := w.Check(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	got := strings.Join(diffs, "\n")
+	for _, want := range []string{ChainForward, ChainOut, "FORWARD", "INPUT"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the differences name no %s:\n%s", want, got)
+		}
+	}
+	if len(diffs) != 4 {
+		t.Errorf("Check reported %d differences, want 4:\n%s", len(diffs), got)
+	}
+	if writes(rec) != 0 {
+		t.Errorf("Check ran %d commands that change the host, want 0", writes(rec))
+	}
+}
+
+func TestCheckReportsAChainThatHoldsAnotherRuleSet(t *testing.T) {
+	_, w := checkFixture(t, "0000000000000000", 1)
+
+	diffs, err := w.Check(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(diffs) != 2 {
+		t.Fatalf("Check reported %d differences, want 2: %v", len(diffs), diffs)
+	}
+	if !strings.Contains(diffs[0], "0000000000000000") || !strings.Contains(diffs[0], fingerprint(testSet())) {
+		t.Errorf("the difference names no fingerprint: %q", diffs[0])
+	}
+}
+
+func TestCheckReturnsAFailedReadWithTheOutputOfTheCommand(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{
+		Output: []byte("iptables: Permission denied (you must be root).\n"),
+		Err:    errors.New("exit status 4"),
+	}, "iptables", "-S", ChainForward)
+
+	w := &Writer{Runner: rec}
+	_, err := w.Check(context.Background(), testSet())
+	if err == nil {
+		t.Fatal("Check returned no error for a failed read")
+	}
+	if !strings.Contains(err.Error(), "you must be root") {
+		t.Errorf("the error = %q, want the output of the command", err)
+	}
+}
+
+func TestTheIPv6WriterRunsIp6tablesAndWritesTheGuardBeforeTheReturnRule(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	for _, j := range jumps {
+		rec.Script(absentChain, "ip6tables", "-S", j.chain)
+		rec.Script(execx.Result{Output: []byte(listing(j, 0))}, "ip6tables", "-S", j.parent)
+		rec.Script(execx.Result{}, "ip6tables", "-I", j.parent, "1", "-j", j.chain)
+	}
+	rec.Script(execx.Result{}, "ip6tables-restore", "--noflush")
+
+	c := testSet()
+	c.Guard = [][]string{{"-A", ChainForward, "-i", "enp1s0f0", "!", "-o", "vh+", "-j", "DROP"}}
+
+	w := &Writer{Runner: rec, IPv6: true}
+	if _, err := w.Apply(context.Background(), c); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	var file string
+	for _, call := range rec.Calls() {
+		if call.Name == "iptables" || call.Name == "iptables-restore" {
+			t.Errorf("the IPv6 writer ran an IPv4 command: %s", call)
+		}
+		if call.Name == "ip6tables-restore" {
+			file = string(call.Stdin)
+		}
+	}
+	guard := strings.Index(file, "-A HYDRASCALE-FWD -i enp1s0f0 ! -o vh+ -j DROP\n")
+	ret := strings.Index(file, "-A HYDRASCALE-FWD ! -i vh+ ! -o vh+ -j RETURN\n")
+	if guard < 0 || ret < 0 || guard > ret {
+		t.Errorf("the rule file does not hold the guard before the return rule:\n%s", file)
+	}
+}
+
+func TestTheGuardChangesTheFingerprint(t *testing.T) {
+	c := testSet()
+	guarded := testSet()
+	guarded.Guard = [][]string{{"-A", ChainForward, "-i", "enp1s0f0", "!", "-o", "vh+", "-j", "DROP"}}
+	if fingerprint(c) == fingerprint(guarded) {
+		t.Error("a new guard leaves the fingerprint unchanged, so the Writer never writes it")
+	}
 }

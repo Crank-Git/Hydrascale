@@ -67,6 +67,12 @@ the test host needs working DNS for every other epic.
 - **FR-dns-6** — The configuration key `dns.allow_unprotected` defaults to `false`. When
   it is `true`, the child process starts without the overlay mount and the daemon records
   the event.
+- **FR-dns-17** — After the overlay mount, the helper places `/dev/null` over each
+  `systemctl` that `PATH` names, inside the mount namespace of the child. `tailscaled`
+  then finds no `systemctl` and restarts no service of the host. Issue #410 measured 26
+  restarts of the host `systemd-resolved` in 30 minutes before this requirement.
+- **FR-dns-18** — When the helper cannot hide `systemctl`, FR-dns-3 to FR-dns-6 apply as
+  they apply to a failed overlay mount.
 
 ### The host file check
 
