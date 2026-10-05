@@ -1,6 +1,7 @@
 package hostaccess
 
 import (
+	"slices"
 	"sort"
 	"testing"
 )
@@ -378,5 +379,20 @@ func TestRuleNotPresentReadsTheAnswerOfTheKernel(t *testing.T) {
 	}
 	if ruleNotPresent("") {
 		t.Error("ruleNotPresent returned true for empty output")
+	}
+}
+
+func TestParseHostRoutesV6SkipsTheConnectedRouteOfTheVethAddress(t *testing.T) {
+	// Issue #406 gives the host side veth device an IPv6 address, and the kernel adds a
+	// connected route for its prefix. The sync deleted that route on the test host, so
+	// the NAT66 reply to the namespace had no route back.
+	const vethDev = "vh02a1edb1c461"
+	input := "fd5c:9a3e:7b10:2a::/64 dev vh02a1edb1c461 proto kernel metric 256 pref medium\n" +
+		"fe80::/64 dev vh02a1edb1c461 proto kernel metric 256 pref medium\n" +
+		"fd7a:115c:a1e0::736:c70a dev vh02a1edb1c461 metric 1024 pref medium\n"
+
+	got := parseHostRoutesV6(input, vethDev)
+	if want := []string{"fd7a:115c:a1e0::736:c70a"}; !slices.Equal(got, want) {
+		t.Errorf("parseHostRoutesV6 = %v, want %v", got, want)
 	}
 }

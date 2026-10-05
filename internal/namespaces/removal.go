@@ -15,10 +15,10 @@ import (
 //
 // Namespace holds the network namespace name. HostVeth holds the host side device of the
 // veth pair. StateDir holds the directory that carries the node private key. RuleCount
-// holds the number of iptables rules that the removal deletes, and Commands holds every
+// holds the number of iptables and ip6tables rules that the removal deletes, and Commands holds every
 // step in the order that the removal runs it.
 //
-// The daemon runs the `iptables` steps and the `ip` steps as commands. It removes the
+// The daemon runs the `iptables`, `ip6tables`, and `ip` steps as commands. It removes the
 // files itself with the Go standard library, and the plan states those two steps in shell
 // form, because the operator reads what changes on the host.
 type RemovalPlan struct {
@@ -69,9 +69,13 @@ func PlanRemoval(id string, infraSubnet string, stateBase string) (RemovalPlan, 
 		return RemovalPlan{}, err
 	}
 
-	commands := make([]string, 0, len(rules)+4)
+	rules6 := vethTeardownRulesIPv6(nsName)
+	commands := make([]string, 0, len(rules)+len(rules6)+4)
 	for _, rule := range rules {
 		commands = append(commands, "iptables "+strings.Join(rule, " "))
+	}
+	for _, rule := range rules6 {
+		commands = append(commands, "ip6tables "+strings.Join(rule, " "))
 	}
 	commands = append(commands,
 		"ip link del "+hostVeth,
@@ -84,7 +88,7 @@ func PlanRemoval(id string, infraSubnet string, stateBase string) (RemovalPlan, 
 		Namespace: nsName,
 		HostVeth:  hostVeth,
 		StateDir:  stateDir,
-		RuleCount: len(rules),
+		RuleCount: len(rules) + len(rules6),
 		Commands:  commands,
 	}, nil
 }
@@ -96,9 +100,12 @@ func (m *RealManager) teardownVethRules(nsName string, infraSubnet string) []err
 	if err != nil {
 		return []error{err}
 	}
-	errs := make([]error, 0, len(rules))
+	errs := make([]error, 0, len(rules)+1)
 	for _, rule := range rules {
 		errs = append(errs, m.deleteRule("iptables", rule...))
+	}
+	for _, rule := range vethTeardownRulesIPv6(nsName) {
+		errs = append(errs, m.deleteRule("ip6tables", rule...))
 	}
 	return errs
 }

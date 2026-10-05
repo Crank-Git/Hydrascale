@@ -8,11 +8,12 @@ import (
 	"hydrascale/internal/execx"
 )
 
-// deletedRules returns the iptables commands that the recorder observed, as one line each.
+// deletedRules returns the iptables and ip6tables commands that the recorder observed, as
+// one line each.
 func deletedRules(rec *execx.Recorder) []string {
 	var lines []string
 	for _, call := range rec.Calls() {
-		if call.Name == "iptables" {
+		if call.Name == "iptables" || call.Name == "ip6tables" {
 			lines = append(lines, call.String())
 		}
 	}
@@ -41,6 +42,7 @@ func TestThePlanNamesTheSameIptablesRulesThatTheTeardownDeletes(t *testing.T) {
 	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(execx.Result{}, "ip6tables", nat66Delete(nsName)...)
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
@@ -49,6 +51,9 @@ func TestThePlanNamesTheSameIptablesRulesThatTheTeardownDeletes(t *testing.T) {
 	}
 
 	deleted := deletedRules(rec)
+	if !slices.ContainsFunc(deleted, func(rule string) bool { return strings.HasPrefix(rule, "ip6tables ") }) {
+		t.Error("the teardown deleted no ip6tables rule")
+	}
 	if plan.RuleCount != len(deleted) {
 		t.Errorf("the plan states %d rules and the teardown deleted %d", plan.RuleCount, len(deleted))
 	}
