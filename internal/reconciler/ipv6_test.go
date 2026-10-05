@@ -19,13 +19,13 @@ type fakeIPv6Host struct {
 
 func (f *fakeIPv6Host) ReadIPv6Host() (namespaces.IPv6Host, error) { return f.host, nil }
 
-func (f *fakeIPv6Host) EnableForceForwarding(uplinks []string) ([]string, error) {
-	f.log.add("force_forwarding " + strings.Join(uplinks, ","))
-	return uplinks, nil
+func (f *fakeIPv6Host) EnableForceForwarding(upstreams []string) ([]string, error) {
+	f.log.add("force_forwarding " + strings.Join(upstreams, ","))
+	return upstreams, nil
 }
 
-func (f *fakeIPv6Host) DisableForceForwarding(uplinks []string) error {
-	f.log.add("reset force_forwarding " + strings.Join(uplinks, ","))
+func (f *fakeIPv6Host) DisableForceForwarding(upstreams []string) error {
+	f.log.add("reset force_forwarding " + strings.Join(upstreams, ","))
 	return nil
 }
 
@@ -60,10 +60,10 @@ func ipv6Fixture(t *testing.T, body string, host namespaces.IPv6Host) (*Reconcil
 	return r, w6, h, log
 }
 
-// uplinkHost returns a host with one IPv6 uplink, one global prefix, and no forwarding.
-func uplinkHost(forceForwarding bool) namespaces.IPv6Host {
+// upstreamHost returns a host with one IPv6 upstream device, one global prefix, and no forwarding.
+func upstreamHost(forceForwarding bool) namespaces.IPv6Host {
 	return namespaces.IPv6Host{
-		Uplinks:         []string{"enp1s0f0"},
+		Upstreams:       []string{"enp1s0f0"},
 		Prefixes:        []string{"2001:db8:1:2::/64"},
 		ForceForwarding: forceForwarding,
 	}
@@ -81,7 +81,7 @@ func eventMessages(r *Reconciler, eventType string) []string {
 }
 
 func TestTheIPv6PathOpensWithForceForwardingAfterTheGuardedChainsExist(t *testing.T) {
-	r, w6, h, log := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(true))
+	r, w6, h, log := ipv6Fixture(t, "access:\n  mode: enforce\n", upstreamHost(true))
 
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -104,7 +104,7 @@ func TestTheIPv6PathOpensWithForceForwardingAfterTheGuardedChainsExist(t *testin
 }
 
 func TestTheIPv6ChainsHoldNoGuardOnAHostThatAlreadyForwards(t *testing.T) {
-	host := uplinkHost(true)
+	host := upstreamHost(true)
 	host.Forwarding = true
 	r, w6, _, _ := ipv6Fixture(t, "access:\n  mode: enforce\n", host)
 
@@ -117,7 +117,7 @@ func TestTheIPv6ChainsHoldNoGuardOnAHostThatAlreadyForwards(t *testing.T) {
 }
 
 func TestAnOldKernelGetsNoIPv6PathWithoutTheIPv6Key(t *testing.T) {
-	r, w6, h, log := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(false))
+	r, w6, h, log := ipv6Fixture(t, "access:\n  mode: enforce\n", upstreamHost(false))
 
 	for i := 0; i < 2; i++ {
 		if err := r.Reconcile(); err != nil {
@@ -135,7 +135,7 @@ func TestAnOldKernelGetsNoIPv6PathWithoutTheIPv6Key(t *testing.T) {
 }
 
 func TestAnOldKernelGetsAllForwardingWithTheIPv6Key(t *testing.T) {
-	r, w6, h, log := ipv6Fixture(t, "ipv6: true\naccess:\n  mode: enforce\n", uplinkHost(false))
+	r, w6, h, log := ipv6Fixture(t, "ipv6: true\naccess:\n  mode: enforce\n", upstreamHost(false))
 
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -171,7 +171,7 @@ func TestAHostWithoutAnIPv6DefaultRouteGetsNoIPv6Path(t *testing.T) {
 }
 
 func TestAFailedIPv6ChainWriteOpensNoForwarding(t *testing.T) {
-	r, w6, _, log := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(true))
+	r, w6, _, log := ipv6Fixture(t, "access:\n  mode: enforce\n", upstreamHost(true))
 	w6.err = errors.New("ip6tables-restore --noflush: exit status 2")
 
 	if err := r.Reconcile(); err != nil {
@@ -182,8 +182,8 @@ func TestAFailedIPv6ChainWriteOpensNoForwarding(t *testing.T) {
 	}
 }
 
-func TestShutdownResetsTheUplinkBeforeItRemovesTheIPv6Chains(t *testing.T) {
-	r, w6, _, log := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(true))
+func TestShutdownResetsTheUpstreamDeviceBeforeItRemovesTheIPv6Chains(t *testing.T) {
+	r, w6, _, log := ipv6Fixture(t, "access:\n  mode: enforce\n", upstreamHost(true))
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -194,20 +194,20 @@ func TestShutdownResetsTheUplinkBeforeItRemovesTheIPv6Chains(t *testing.T) {
 	got := log.recorded()
 	reset := slices.Index(got, "reset force_forwarding enp1s0f0")
 	if reset < 0 {
-		t.Fatalf("Shutdown did not reset the uplink: %v", got)
+		t.Fatalf("Shutdown did not reset the upstream device: %v", got)
 	}
 	if w6.teardown != 1 {
 		t.Errorf("Shutdown removed the IPv6 chains %d times, want 1", w6.teardown)
 	}
 }
 
-func TestTheGuardKeepsAnEarlierUplinkAfterTheDefaultRouteMoves(t *testing.T) {
-	r, w6, h, _ := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(true))
+func TestTheGuardKeepsAnEarlierUpstreamDeviceAfterTheDefaultRouteMoves(t *testing.T) {
+	r, w6, h, _ := ipv6Fixture(t, "access:\n  mode: enforce\n", upstreamHost(true))
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	h.host.Uplinks = []string{"wlan0"}
+	h.host.Upstreams = []string{"wlan0"}
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestTheGuardKeepsAnEarlierUplinkAfterTheDefaultRouteMoves(t *testing.T) {
 }
 
 func TestAccessDiffReportsTheIPv6Chains(t *testing.T) {
-	r, w6, _, _ := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(true))
+	r, w6, _, _ := ipv6Fixture(t, "access:\n  mode: enforce\n", upstreamHost(true))
 	w6.diffs = []string{"write chain HYDRASCALE-FWD: the host holds no chain or no marker rule"}
 
 	diffs, err := r.AccessDiff()
@@ -244,24 +244,24 @@ func lines(rules [][]string) []string {
 	return out
 }
 
-// failingResetHost is a fake IPv6 host whose uplink reset fails.
+// failingResetHost is a fake IPv6 host whose upstream device reset fails.
 type failingResetHost struct{ fakeIPv6Host }
 
-func (f *failingResetHost) DisableForceForwarding(uplinks []string) error {
+func (f *failingResetHost) DisableForceForwarding(upstreams []string) error {
 	return errors.New("sysctl: permission denied")
 }
 
-func TestShutdownRemovesBothChainsWhenTheUplinkResetFails(t *testing.T) {
-	r, w6, _, log := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(true))
+func TestShutdownRemovesBothChainsWhenTheUpstreamDeviceResetFails(t *testing.T) {
+	r, w6, _, log := ipv6Fixture(t, "access:\n  mode: enforce\n", upstreamHost(true))
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	w4 := &fakeChainWriter{}
 	r.SetChainWriter(w4)
-	r.ipv6 = &failingResetHost{fakeIPv6Host{host: uplinkHost(true), log: log}}
+	r.ipv6 = &failingResetHost{fakeIPv6Host{host: upstreamHost(true), log: log}}
 
 	if err := r.Shutdown(); err == nil {
-		t.Error("Shutdown returned no error for a failed uplink reset")
+		t.Error("Shutdown returned no error for a failed upstream device reset")
 	}
 	if w6.teardown != 1 || w4.teardown != 1 {
 		t.Errorf("Shutdown removed the IPv6 chains %d times and the IPv4 chains %d times, want 1 and 1", w6.teardown, w4.teardown)

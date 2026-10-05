@@ -24,8 +24,8 @@ func VethIPv6(index int) (hostIP, nsIP, hostGW, prefix string) {
 
 // IPv6Host holds the IPv6 facts of the host that the daemon reads on each tick.
 type IPv6Host struct {
-	// Uplinks holds the device of each IPv6 default route of the main table.
-	Uplinks []string
+	// Upstreams holds the device of each IPv6 default route of the main table.
+	Upstreams []string
 	// Prefixes holds the prefix of each global IPv6 address of a device that is not a
 	// namespace device, in CIDR form.
 	Prefixes []string
@@ -46,7 +46,7 @@ func (m *RealManager) ReadIPv6Host() (IPv6Host, error) {
 	if err != nil {
 		return h, fmt.Errorf("read the IPv6 default routes: %v (%s)", err, out)
 	}
-	h.Uplinks = parseRouteDevices(string(out))
+	h.Upstreams = parseRouteDevices(string(out))
 
 	out, err = m.run("ip", "-6", "-o", "addr", "show", "scope", "global")
 	if err != nil {
@@ -108,15 +108,15 @@ func sysctlDevice(device string) string {
 	return strings.ReplaceAll(device, ".", "/")
 }
 
-// EnableForceForwarding sets force_forwarding on each uplink device and returns the
+// EnableForceForwarding sets force_forwarding on each upstream device and returns the
 // devices whose value it changed.
-// A reply from the internet enters the host on the uplink, and the kernel forwards an IPv6
+// A reply from the internet enters the host on the upstream device, and the kernel forwards an IPv6
 // packet only when the input device forwards. force_forwarding leaves the acceptance of a
 // router advertisement on the device unchanged, which net.ipv6.conf.all.forwarding does
 // not. The test host measured both on 2026-10-05.
-func (m *RealManager) EnableForceForwarding(uplinks []string) ([]string, error) {
+func (m *RealManager) EnableForceForwarding(upstreams []string) ([]string, error) {
 	var changed []string
-	for _, dev := range uplinks {
+	for _, dev := range upstreams {
 		key := "net.ipv6.conf." + sysctlDevice(dev) + ".force_forwarding"
 		out, err := m.run("sysctl", "-n", key)
 		if err != nil {
@@ -133,13 +133,13 @@ func (m *RealManager) EnableForceForwarding(uplinks []string) ([]string, error) 
 	return changed, nil
 }
 
-// DisableForceForwarding resets force_forwarding on each uplink device. A device that is
+// DisableForceForwarding resets force_forwarding on each upstream device. A device that is
 // gone forwards nothing, so DisableForceForwarding treats its absent key as success. A step
 // that fails does not stop the remaining steps; DisableForceForwarding returns the failures
 // together.
-func (m *RealManager) DisableForceForwarding(uplinks []string) error {
+func (m *RealManager) DisableForceForwarding(upstreams []string) error {
 	var errs []error
-	for _, dev := range uplinks {
+	for _, dev := range upstreams {
 		key := "net.ipv6.conf." + sysctlDevice(dev) + ".force_forwarding"
 		out, err := m.run("sysctl", "-w", key+"=0")
 		if err != nil && !strings.Contains(string(out), "No such file or directory") {

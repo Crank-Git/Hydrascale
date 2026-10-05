@@ -13,7 +13,7 @@ import (
 
 // The modes of the IPv6 path. The operator decided both on 2026-10-05. See issue #406.
 const (
-	// ipv6ForceForwarding sets force_forwarding on the uplinks and on each host side veth
+	// ipv6ForceForwarding sets force_forwarding on the upstream devices and on each host side veth
 	// device. The kernel holds the key from Linux 6.17, and the daemon needs no key of the
 	// configuration file for it.
 	ipv6ForceForwarding = "force_forwarding"
@@ -36,7 +36,7 @@ type ipv6Plan struct {
 // error when a host read fails or when the compile fails.
 func (r *Reconciler) planIPv6(in accessInput) (ipv6Plan, error) {
 	r.mu.Lock()
-	host6, writer6, forced := r.ipv6, r.access6, r.forcedUplinks
+	host6, writer6, forced := r.ipv6, r.access6, r.forcedUpstreams
 	r.mu.Unlock()
 	if host6 == nil || writer6 == nil {
 		return ipv6Plan{}, nil
@@ -49,7 +49,7 @@ func (r *Reconciler) planIPv6(in accessInput) (ipv6Plan, error) {
 	plan := ipv6Plan{host: h}
 
 	switch {
-	case len(h.Uplinks) == 0:
+	case len(h.Upstreams) == 0:
 		plan.reason = "the host holds no IPv6 default route"
 		return plan, nil
 	case h.ForceForwarding:
@@ -62,11 +62,11 @@ func (r *Reconciler) planIPv6(in accessInput) (ipv6Plan, error) {
 	}
 
 	topo := access.TopologyIPv6{Devices: in.devices, HostPrefixes: h.Prefixes}
-	// A host that forwards on every device already forwarded a packet from the uplink
+	// A host that forwards on every device already forwarded a packet from the upstream device
 	// before the daemon started, so the guard would stop a path of the operator. The guard
-	// also covers an earlier uplink, because its force_forwarding stays until Shutdown.
+	// also covers an earlier upstream device, because its force_forwarding stays until Shutdown.
 	if plan.mode == ipv6ForceForwarding && !h.Forwarding {
-		topo.GuardedUplinks = union(forced, h.Uplinks)
+		topo.GuardedUpstreams = union(forced, h.Upstreams)
 	}
 
 	tail, err := access.TailForMode(in.set.EffectiveMode())
@@ -85,7 +85,7 @@ func (r *Reconciler) planIPv6(in accessInput) (ipv6Plan, error) {
 // in is the compile input of the tick, desired holds the declared tailnets, and actual
 // holds the state of each namespace.
 // applyIPv6 writes the IPv6 chains before it changes a forwarding key, because the chains
-// hold the guard of the uplink. It records ipv6.state when the state changes, and
+// hold the guard of the upstream device. It records ipv6.state when the state changes, and
 // access.write_failed when a command fails.
 func (r *Reconciler) applyIPv6(in accessInput, desired map[string]config.Tailnet, actual map[string]*TailnetState) {
 	plan, err := r.planIPv6(in)
@@ -152,13 +152,13 @@ func (r *Reconciler) applyIPv6(in accessInput, desired map[string]config.Tailnet
 func (r *Reconciler) enableIPv6Forwarding(plan ipv6Plan) bool {
 	switch plan.mode {
 	case ipv6ForceForwarding:
-		changed, err := r.ipv6.EnableForceForwarding(plan.host.Uplinks)
+		changed, err := r.ipv6.EnableForceForwarding(plan.host.Upstreams)
 		if err != nil {
 			r.emit("access.write_failed", "", "IPv6: "+err.Error())
 			return false
 		}
 		r.mu.Lock()
-		r.forcedUplinks = union(r.forcedUplinks, plan.host.Uplinks)
+		r.forcedUpstreams = union(r.forcedUpstreams, plan.host.Upstreams)
 		r.mu.Unlock()
 		if len(changed) > 0 {
 			r.emit("ipv6.forwarding", "", "set force_forwarding on "+strings.Join(changed, ", "))

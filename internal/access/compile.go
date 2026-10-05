@@ -78,10 +78,10 @@ type TopologyIPv6 struct {
 	// HostPrefixes holds each global IPv6 prefix of the host local network, in CIDR form.
 	// The internet destination excludes them, as it excludes the RFC 1918 ranges for IPv4.
 	HostPrefixes []string
-	// GuardedUplinks holds each uplink device that forwards only because the daemon set
+	// GuardedUpstreams holds each upstream device that forwards only because the daemon set
 	// force_forwarding on it. The forward chain drops a packet from such a device to a
 	// device that is not a namespace device, so the host forwards no new path.
-	GuardedUplinks []string
+	GuardedUpstreams []string
 }
 
 // Compiled holds the rules of both chains, in the order that the daemon writes them.
@@ -213,8 +213,8 @@ func CompileIPv6(set RuleSet, topo TopologyIPv6, tail Tail) (Compiled, error) {
 	if err != nil {
 		return Compiled{}, err
 	}
-	for _, uplink := range topo.GuardedUplinks {
-		c.Guard = append(c.Guard, appendRule(ChainForward, []string{"-i", uplink, "!", "-o", devicePrefix + "+", "-j", "DROP"}))
+	for _, upstream := range topo.GuardedUpstreams {
+		c.Guard = append(c.Guard, appendRule(ChainForward, []string{"-i", upstream, "!", "-o", devicePrefix + "+", "-j", "DROP"}))
 	}
 	return c, nil
 }

@@ -57,7 +57,7 @@ func TestReadIPv6HostReadsAKernelWithoutForceForwarding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadIPv6Host: %v", err)
 	}
-	if h.ForceForwarding || !h.Forwarding || !slices.Equal(h.Uplinks, []string{"enp1s0f0"}) {
+	if h.ForceForwarding || !h.Forwarding || !slices.Equal(h.Upstreams, []string{"enp1s0f0"}) {
 		t.Errorf("ReadIPv6Host = %+v", h)
 	}
 }

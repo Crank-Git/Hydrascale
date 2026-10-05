@@ -773,6 +773,37 @@ before the main table, which the kernel consults at 32766. A host that runs its 
 main table. The daemon reads the rule list on each tick and it adds no second copy. A
 shutdown removes each rule and empties the table.
 
+### IPv6
+
+Each namespace gets an IPv6 path when the host holds an IPv6 default route. The daemon
+gives the namespace an address from the unique local prefix `fd5c:9a3e:7b10::/48`. The
+host translates that address to its own global address with one NAT66 rule. The local
+rules apply to IPv6 as they apply to IPv4: the daemon writes `HYDRASCALE-FWD` and
+`HYDRASCALE-OUT` in the IPv6 filter table too.
+
+The host must forward IPv6, and the kernel decides how:
+
+- **Linux 6.17 or later.** The daemon sets `force_forwarding` on each upstream device and
+  on each host side veth device. The host keeps its own router advertisements. No key is
+  necessary.
+- **An older kernel.** Only `net.ipv6.conf.all.forwarding` forwards IPv6. That key stops
+  each device with `accept_ra` 1 from accepting a router advertisement, so the host can
+  lose its own IPv6 default route. The daemon therefore sets it only when you add the
+  key `ipv6: true`. It changes `accept_ra` from 1 to 2 on each device first.
+
+```yaml
+ipv6: true
+```
+
+The event `ipv6.state` states whether the path is on and why. Read it with
+`journalctl -u hydrascale | grep ipv6.state`. A host with no IPv6 default route reports
+`off: the host holds no IPv6 default route`.
+
+**Warning: `force_forwarding` on the upstream device lets the host forward internet
+traffic to any other host device.** The daemon drops that traffic in `HYDRASCALE-FWD`
+when the host did not forward IPv6 before. A shutdown resets `force_forwarding` before it
+removes the chains.
+
 ### Compatibility
 
 - **A standard Linux distribution.** Every feature works, including a MagicDNS name per
@@ -870,6 +901,11 @@ host_access: false
 # that table. 53 is the suggested value, because tailscaled already uses the table 52
 # inside each namespace. The kernel reserves 253, 254 and 255.
 # route_table: 53
+
+# Let the daemon set net.ipv6.conf.all.forwarding on a kernel older than Linux 6.17
+# (default: false). A newer kernel gets the IPv6 path of each namespace without this key.
+# See "IPv6" above.
+# ipv6: true
 
 # The Unix group that reaches the control socket (default: empty, which is root only).
 # Warning: membership of this group is equivalent to root access on this host, because a

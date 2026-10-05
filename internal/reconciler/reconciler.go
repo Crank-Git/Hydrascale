@@ -147,11 +147,11 @@ type Reconciler struct {
 	// access6 writes the IPv6 chains, and ipv6 writes the IPv6 path of each namespace.
 	// New sets both for a Reconciler that drives the live host. ipv6State holds the last
 	// reported state of the IPv6 path, so that a tick records an event only on a change.
-	// forcedUplinks holds each uplink that forwards for the daemon, which Shutdown resets.
-	access6       ChainWriter
-	ipv6          IPv6PathWriter
-	ipv6State     string
-	forcedUplinks []string
+	// forcedUpstreams holds each upstream device that forwards for the daemon, which Shutdown resets.
+	access6         ChainWriter
+	ipv6            IPv6PathWriter
+	ipv6State       string
+	forcedUpstreams []string
 
 	// path writes the host rules of the forward path of a namespace that the host does
 	// not hold. New sets it when the namespace manager carries that ability.
@@ -209,11 +209,11 @@ type IPv6PathWriter interface {
 	// ReadIPv6Host returns the IPv6 default routes, the global prefixes, and the
 	// forwarding state of the host.
 	ReadIPv6Host() (namespaces.IPv6Host, error)
-	// EnableForceForwarding sets force_forwarding on each uplink, and it returns the
+	// EnableForceForwarding sets force_forwarding on each upstream device, and it returns the
 	// devices whose value it changed.
-	EnableForceForwarding(uplinks []string) ([]string, error)
-	// DisableForceForwarding resets force_forwarding on each uplink.
-	DisableForceForwarding(uplinks []string) error
+	EnableForceForwarding(upstreams []string) ([]string, error)
+	// DisableForceForwarding resets force_forwarding on each upstream device.
+	DisableForceForwarding(upstreams []string) error
 	// EnableAllForwarding sets net.ipv6.conf.all.forwarding, and it returns the devices
 	// whose accept_ra value it changed.
 	EnableAllForwarding() ([]string, error)
@@ -1492,16 +1492,16 @@ func (r *Reconciler) Shutdown() error {
 	}
 
 	r.mu.Lock()
-	writer, writer6, ipv6, forced := r.access, r.access6, r.ipv6, r.forcedUplinks
+	writer, writer6, ipv6, forced := r.access, r.access6, r.ipv6, r.forcedUpstreams
 	r.mu.Unlock()
-	// The uplink stops forwarding before the IPv6 chains go, because the guard of the
-	// chain is the only rule that keeps a forwarding uplink off the other host devices.
+	// The upstream device stops forwarding before the IPv6 chains go, because the guard of the
+	// chain is the only rule that keeps a forwarding upstream device off the other host devices.
 	// A step that fails does not stop the remaining steps, because a chain that stays on
 	// the host after the daemon stops is a rule that nobody owns.
 	var errs []error
 	if ipv6 != nil && len(forced) > 0 {
 		if err := ipv6.DisableForceForwarding(forced); err != nil {
-			errs = append(errs, fmt.Errorf("reset IPv6 forwarding on the uplinks: %w", err))
+			errs = append(errs, fmt.Errorf("reset IPv6 forwarding on the upstream devices: %w", err))
 		}
 	}
 	if writer6 != nil {

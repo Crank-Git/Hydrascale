@@ -492,12 +492,12 @@ func TestValidate(t *testing.T) {
 }
 
 // topologyIPv6 returns an IPv6 topology of two tailnets, one host prefix, and one guarded
-// uplink.
+// upstream device.
 func topologyIPv6() TopologyIPv6 {
 	return TopologyIPv6{
-		Devices:        map[string]string{"alpha": "vh0123456789ab", "beta": "vhba9876543210"},
-		HostPrefixes:   []string{"2001:db8:1:2::/64"},
-		GuardedUplinks: []string{"enp1s0f0"},
+		Devices:          map[string]string{"alpha": "vh0123456789ab", "beta": "vhba9876543210"},
+		HostPrefixes:     []string{"2001:db8:1:2::/64"},
+		GuardedUpstreams: []string{"enp1s0f0"},
 	}
 }
 
@@ -539,7 +539,7 @@ func TestCompileIPv6OpensNeighborDiscoveryAndNoDNS(t *testing.T) {
 	})
 }
 
-func TestCompileIPv6GuardsEachUplinkThatForwardsOnlyForTheDaemon(t *testing.T) {
+func TestCompileIPv6GuardsEachUpstreamDeviceThatForwardsOnlyForTheDaemon(t *testing.T) {
 	c, err := CompileIPv6(RuleSet{}, topologyIPv6(), EnforceTail)
 	if err != nil {
 		t.Fatalf("CompileIPv6: %v", err)
