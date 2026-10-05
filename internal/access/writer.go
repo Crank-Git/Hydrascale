@@ -229,10 +229,18 @@ func (w *Writer) liveFingerprints(ctx context.Context) (map[string]string, error
 
 // absent reports whether the output of an iptables command states that the rule or the
 // chain is not present. iptables exits non-zero for both states.
+//
+// iptables-nft states an absent chain in two more forms. A delete of a jump rule into an
+// absent chain returns "Chain '<chain>' does not exist". Version 1.8.7, which Ubuntu 22.04
+// and Debian 11 ship, returns "is incompatible, use 'nft' tool" for `iptables -S` of an
+// absent chain. The same text also states a chain that holds a rule iptables cannot read.
+// The daemon owns the chain, therefore the Writer replaces it in both states. See issue #404.
 func absent(output []byte) bool {
 	text := string(output)
 	return strings.Contains(text, "does a matching rule exist") ||
-		strings.Contains(text, "No chain/target/match by that name")
+		strings.Contains(text, "No chain/target/match by that name") ||
+		strings.Contains(text, "does not exist") ||
+		strings.Contains(text, "is incompatible, use 'nft' tool")
 }
 
 // markerOf returns the fingerprint that the marker rule in the output of `iptables -S`

@@ -22,6 +22,21 @@ var absentRule = execx.Result{
 	Err:    errors.New("exit status 1"),
 }
 
+// absentChainNft187 is the result that iptables-nft 1.8.7 returns for `iptables -S` of a
+// chain that the host does not hold. Ubuntu 22.04 and Debian 11 ship that version. See
+// issue #404.
+var absentChainNft187 = execx.Result{
+	Output: []byte("iptables v1.8.7 (nf_tables): chain `HYDRASCALE-FWD' in table `filter' is incompatible, use 'nft' tool.\n"),
+	Err:    errors.New("exit status 1"),
+}
+
+// absentJumpTarget is the result that iptables-nft returns for a delete of a jump rule
+// whose target chain is not present. Version 1.8.7 and version 1.8.10 both return it.
+var absentJumpTarget = execx.Result{
+	Output: []byte("iptables v1.8.10 (nf_tables): Chain 'HYDRASCALE-FWD' does not exist\nTry `iptables -h' or 'iptables --help' for more information.\n"),
+	Err:    errors.New("exit status 2"),
+}
+
 // fillers holds the target of each rule that another service writes into FORWARD. The
 // security audit measured these three rules above the rules of the daemon on the test
 // host.
@@ -383,6 +398,43 @@ func TestTeardownTreatsAnAbsentRuleAsSuccess(t *testing.T) {
 	}
 	if len(rec.Calls()) != 6 {
 		t.Errorf("Teardown ran %d commands, want 6", len(rec.Calls()))
+	}
+}
+
+func TestApplyWritesTheChainsWhenIptablesNft187ReportsTheAbsentChainAsIncompatible(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	for _, j := range jumps {
+		rec.Script(absentChainNft187, "iptables", "-S", j.chain)
+		rec.Script(execx.Result{Output: []byte(listing(j, 0))}, "iptables", "-S", j.parent)
+		rec.Script(execx.Result{}, "iptables", "-I", j.parent, "1", "-j", j.chain)
+	}
+	rec.Script(execx.Result{}, "iptables-restore", "--noflush")
+
+	w := &Writer{Runner: rec}
+	res, err := w.Apply(context.Background(), testSet())
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !res.Wrote {
+		t.Error("Apply reported no write for a host that holds no chain")
+	}
+	if countName(rec, "iptables-restore") != 1 {
+		t.Errorf("Apply ran iptables-restore %d times, want 1", countName(rec, "iptables-restore"))
+	}
+}
+
+func TestTeardownTreatsAJumpIntoAnAbsentChainAsSuccess(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	rec.Script(absentJumpTarget, "iptables", "-D", "FORWARD", "-j", ChainForward)
+	rec.Script(absentJumpTarget, "iptables", "-D", "INPUT", "-j", ChainOut)
+	for _, j := range jumps {
+		rec.Script(absentChain, "iptables", "-F", j.chain)
+		rec.Script(absentChain, "iptables", "-X", j.chain)
+	}
+
+	w := &Writer{Runner: rec}
+	if err := w.Teardown(context.Background()); err != nil {
+		t.Errorf("Teardown returned an error for an absent chain: %v", err)
 	}
 }
 
