@@ -521,20 +521,22 @@ func TestCompileIPv6ExcludesTheUniqueLocalRangeAndTheHostPrefixFromTheInternet(t
 	}
 }
 
-func TestCompileIPv6WritesNoDNSRule(t *testing.T) {
-	c, err := CompileIPv6(RuleSet{}, topologyIPv6(), EnforceTail)
+func TestCompileIPv6OpensNeighborDiscoveryAndNoDNS(t *testing.T) {
+	// Neighbor discovery is ICMPv6, so the out chain sees it. The test host measured a
+	// namespace that reached nothing, because the closing drop stopped the neighbor
+	// solicitation for its gateway. ARP never enters the IPv4 chain.
+	topo := topologyIPv6()
+	topo.Devices = map[string]string{"alpha": "vh0123456789ab"}
+	c, err := CompileIPv6(RuleSet{}, topo, EnforceTail)
 	if err != nil {
 		t.Fatalf("CompileIPv6: %v", err)
 	}
-	for _, line := range lines(c.Out) {
-		if strings.Contains(line, "--dport") {
-			t.Errorf("the IPv6 out chain holds a DNS rule: %q", line)
-		}
-	}
-	if got := len(c.Out); got != 3 {
-		t.Errorf("the IPv6 out chain holds %d rules, want 3 (established and one drop per device):\n%s",
-			got, strings.Join(lines(c.Out), "\n"))
-	}
+	equalLines(t, c.Out, []string{
+		"-A HYDRASCALE-OUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"-A HYDRASCALE-OUT -i vh0123456789ab -p ipv6-icmp --icmpv6-type neighbour-solicitation -j ACCEPT",
+		"-A HYDRASCALE-OUT -i vh0123456789ab -p ipv6-icmp --icmpv6-type neighbour-advertisement -j ACCEPT",
+		"-A HYDRASCALE-OUT -i vh0123456789ab -j DROP",
+	})
 }
 
 func TestCompileIPv6GuardsEachUplinkThatForwardsOnlyForTheDaemon(t *testing.T) {

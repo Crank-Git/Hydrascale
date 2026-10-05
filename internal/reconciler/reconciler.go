@@ -1496,29 +1496,30 @@ func (r *Reconciler) Shutdown() error {
 	r.mu.Unlock()
 	// The uplink stops forwarding before the IPv6 chains go, because the guard of the
 	// chain is the only rule that keeps a forwarding uplink off the other host devices.
+	// A step that fails does not stop the remaining steps, because a chain that stays on
+	// the host after the daemon stops is a rule that nobody owns.
+	var errs []error
 	if ipv6 != nil && len(forced) > 0 {
 		if err := ipv6.DisableForceForwarding(forced); err != nil {
-			return r.reportTeardown("", []error{fmt.Errorf("reset IPv6 forwarding on the uplinks: %w", err)})
+			errs = append(errs, fmt.Errorf("reset IPv6 forwarding on the uplinks: %w", err))
 		}
 	}
 	if writer6 != nil {
 		if err := writer6.Teardown(ctx); err != nil {
-			return r.reportTeardown("", []error{fmt.Errorf("remove the IPv6 local rule chains: %w", err)})
+			errs = append(errs, fmt.Errorf("remove the IPv6 local rule chains: %w", err))
 		}
 	}
 	if writer != nil {
 		if err := writer.Teardown(ctx); err != nil {
-			return r.reportTeardown("", []error{fmt.Errorf("remove the local rule chains: %w", err)})
+			errs = append(errs, fmt.Errorf("remove the local rule chains: %w", err))
 		}
 	}
-
 	if r.ha != nil {
 		if err := r.ha.TeardownAll(); err != nil {
-			return r.reportTeardown("", []error{fmt.Errorf("remove the host access state: %w", err)})
+			errs = append(errs, fmt.Errorf("remove the host access state: %w", err))
 		}
 	}
-
-	return nil
+	return r.reportTeardown("", errs)
 }
 
 // RecordEvent adds one event to the event log.

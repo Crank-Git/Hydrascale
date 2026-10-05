@@ -170,3 +170,16 @@ func TestTeardownDeletesTheNAT66RuleThatEnsureIPv6PathAdds(t *testing.T) {
 		t.Errorf("teardown deletes %v, want %v", deleted, added)
 	}
 }
+
+func TestDisableForceForwardingTreatsADeviceThatIsGoneAsReset(t *testing.T) {
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{
+		Output: []byte("sysctl: cannot stat /proc/sys/net/ipv6/conf/v6up/force_forwarding: No such file or directory\n"),
+		Err:    errors.New("exit status 1"),
+	}, "sysctl", "-w", "net.ipv6.conf.v6up.force_forwarding=0")
+	rec.Script(execx.Result{}, "sysctl", "-w", "net.ipv6.conf.enp1s0f0.force_forwarding=0")
+
+	if err := (&RealManager{Runner: rec}).DisableForceForwarding([]string{"v6up", "enp1s0f0"}); err != nil {
+		t.Errorf("DisableForceForwarding returned an error for a device that is gone: %v", err)
+	}
+}

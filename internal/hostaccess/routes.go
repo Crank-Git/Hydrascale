@@ -203,6 +203,12 @@ func parseHostRoutesV6(output string, vethDev string) []string {
 		if vethDev != "" && !strings.Contains(line, "dev "+vethDev) {
 			continue
 		}
+		// The kernel adds a connected route for each address of the device, and the
+		// daemon writes no such route. The veth device holds an IPv6 address since issue
+		// #406, and a delete of its route stops the NAT66 reply to the namespace.
+		if slices.Contains(fields, "kernel") {
+			continue
+		}
 		if !validRouteDest(dest) {
 			log.Printf("hostaccess: the destination %q is not an address and not a CIDR block", dest)
 			continue

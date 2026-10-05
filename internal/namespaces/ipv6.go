@@ -133,13 +133,16 @@ func (m *RealManager) EnableForceForwarding(uplinks []string) ([]string, error) 
 	return changed, nil
 }
 
-// DisableForceForwarding resets force_forwarding on each uplink device. A step that fails
-// does not stop the remaining steps; DisableForceForwarding returns the failures together.
+// DisableForceForwarding resets force_forwarding on each uplink device. A device that is
+// gone forwards nothing, so DisableForceForwarding treats its absent key as success. A step
+// that fails does not stop the remaining steps; DisableForceForwarding returns the failures
+// together.
 func (m *RealManager) DisableForceForwarding(uplinks []string) error {
 	var errs []error
 	for _, dev := range uplinks {
 		key := "net.ipv6.conf." + sysctlDevice(dev) + ".force_forwarding"
-		if out, err := m.run("sysctl", "-w", key+"=0"); err != nil {
+		out, err := m.run("sysctl", "-w", key+"=0")
+		if err != nil && !strings.Contains(string(out), "No such file or directory") {
 			errs = append(errs, fmt.Errorf("reset %s: %v (%s)", key, err, out))
 		}
 	}

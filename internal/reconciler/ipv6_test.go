@@ -243,3 +243,27 @@ func lines(rules [][]string) []string {
 	}
 	return out
 }
+
+// failingResetHost is a fake IPv6 host whose uplink reset fails.
+type failingResetHost struct{ fakeIPv6Host }
+
+func (f *failingResetHost) DisableForceForwarding(uplinks []string) error {
+	return errors.New("sysctl: permission denied")
+}
+
+func TestShutdownRemovesBothChainsWhenTheUplinkResetFails(t *testing.T) {
+	r, w6, _, log := ipv6Fixture(t, "access:\n  mode: enforce\n", uplinkHost(true))
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	w4 := &fakeChainWriter{}
+	r.SetChainWriter(w4)
+	r.ipv6 = &failingResetHost{fakeIPv6Host{host: uplinkHost(true), log: log}}
+
+	if err := r.Shutdown(); err == nil {
+		t.Error("Shutdown returned no error for a failed uplink reset")
+	}
+	if w6.teardown != 1 || w4.teardown != 1 {
+		t.Errorf("Shutdown removed the IPv6 chains %d times and the IPv4 chains %d times, want 1 and 1", w6.teardown, w4.teardown)
+	}
+}

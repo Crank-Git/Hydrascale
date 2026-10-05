@@ -181,7 +181,9 @@ func Compile(set RuleSet, topo Topology, tail Tail) (Compiled, error) {
 // set is the rule set, topo holds the veth device of each tailnet and the IPv6 facts of
 // the host, and tail holds the rules that close each chain.
 // CompileIPv6 is pure, as Compile is. The IPv6 chains hold no DNS rule, because a
-// namespace reaches the DNS forwarder over IPv4.
+// namespace reaches the DNS forwarder over IPv4. The out chain opens neighbor discovery
+// from each namespace device, because neighbor discovery is ICMPv6 and the closing drop
+// would stop the solicitation for the gateway. ARP never enters the IPv4 chain.
 // CompileIPv6 returns an error when a rule fails validation, when the topology names no
 // device for a tailnet, or when a host prefix is not a CIDR prefix.
 func CompileIPv6(set RuleSet, topo TopologyIPv6, tail Tail) (Compiled, error) {
@@ -199,7 +201,15 @@ func CompileIPv6(set RuleSet, topo TopologyIPv6, tail Tail) (Compiled, error) {
 		ranges = append(ranges, r)
 	}
 
-	c, err := compile(set, ids, topo.Devices, nil, ranges, tail)
+	var ndp [][]string
+	for _, id := range ids {
+		for _, kind := range []string{"neighbour-solicitation", "neighbour-advertisement"} {
+			ndp = append(ndp, appendRule(ChainOut,
+				[]string{"-i", topo.Devices[id], "-p", "ipv6-icmp", "--icmpv6-type", kind, "-j", "ACCEPT"}))
+		}
+	}
+
+	c, err := compile(set, ids, topo.Devices, ndp, ranges, tail)
 	if err != nil {
 		return Compiled{}, err
 	}
@@ -220,11 +230,11 @@ func sortedIDs(devices map[string]string) []string {
 }
 
 // compile returns the rules of both chains for one address family.
-// dns holds the out rules that open the DNS forwarder, and private holds the ranges that
-// the internet destination excludes.
-func compile(set RuleSet, ids []string, devices map[string]string, dns [][]string, private []string, tail Tail) (Compiled, error) {
+// open holds the out rules that every namespace needs without a rule of the operator, and
+// private holds the ranges that the internet destination excludes.
+func compile(set RuleSet, ids []string, devices map[string]string, open [][]string, private []string, tail Tail) (Compiled, error) {
 	forward := [][]string{appendRule(ChainForward, establishedMatch)}
-	out := append([][]string{appendRule(ChainOut, establishedMatch)}, dns...)
+	out := append([][]string{appendRule(ChainOut, establishedMatch)}, open...)
 
 	for _, rule := range set.Rules {
 		chain, match, err := compileRule(rule, devices, private)
