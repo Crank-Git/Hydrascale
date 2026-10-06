@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,21 @@ func uninstallFixture(t *testing.T, cfgPath string, tailnets ...string) (*Reconc
 	return r, ns, w4, w6, log
 }
 
+// requireOnlyStateDirErrors fails the test for any error other than a failed removal of a
+// state directory. That removal belongs to root, so its result depends on the user that
+// runs the test, as in TestDeleteNamespaceRemovesTheNamesOfTheTailnetFromTheHostsFile.
+func requireOnlyStateDirErrors(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if !strings.Contains(line, "remove the state directory") {
+			t.Fatalf("Uninstall: %v", err)
+		}
+	}
+}
+
 func TestUninstallRemovesEveryNamespaceAndBothChainFamilies(t *testing.T) {
 	cfgPath := writeAccessConfig(t, "access:\n  mode: enforce\n  rules:\n    - from: alpha\n      to: internet\n", "alpha", "beta")
 	before, err := os.ReadFile(cfgPath)
@@ -37,9 +53,7 @@ func TestUninstallRemovesEveryNamespaceAndBothChainFamilies(t *testing.T) {
 	}
 	r, ns, w4, w6, log := uninstallFixture(t, cfgPath, "alpha", "beta")
 
-	if err := r.Uninstall(); err != nil {
-		t.Fatalf("Uninstall: %v", err)
-	}
+	requireOnlyStateDirErrors(t, r.Uninstall())
 
 	if len(ns.namespaces) != 0 {
 		t.Errorf("the host still holds %v", ns.namespaces)
@@ -73,9 +87,7 @@ func TestUninstallTearsDownWhenTheConfigurationFileDoesNotLoad(t *testing.T) {
 	}
 	r, ns, w4, w6, _ := uninstallFixture(t, cfgPath, "alpha")
 
-	if err := r.Uninstall(); err != nil {
-		t.Fatalf("Uninstall: %v", err)
-	}
+	requireOnlyStateDirErrors(t, r.Uninstall())
 	if len(ns.namespaces) != 0 || w4.teardown != 1 || w6.teardown != 1 {
 		t.Errorf("namespaces %v, IPv4 teardowns %d, IPv6 teardowns %d", ns.namespaces, w4.teardown, w6.teardown)
 	}
