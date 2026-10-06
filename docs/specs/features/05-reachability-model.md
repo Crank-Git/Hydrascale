@@ -159,6 +159,22 @@ each kernel fact that this section names.
 - **FR-access-41** — The daemon records `ipv6.state` when the state of the IPv6 path
   changes. The message names the mode, or the reason that the path is off.
 
+### The listen port
+
+Issue #404 measured direct connections that took 10 minutes to form and dropped after 2
+minutes. The host `tailscaled` on the same host connected at once. A peer reached the
+namespace only through a conntrack entry that the packets of the namespace opened, and
+`nf_conntrack_udp_timeout_stream` closes such an entry after 120 seconds. The operator
+decided on 2026-10-06 to forward a port by default.
+
+- **FR-access-42** — The `tailscaled` of each namespace listens on the UDP port
+  41641 plus the veth index of the namespace.
+- **FR-access-43** — The host sends inbound UDP for that port to the namespace with one
+  DNAT rule in `nat PREROUTING`, for IPv4 and for IPv6. The rule matches only a packet
+  for an address of the host.
+- **FR-access-44** — `HYDRASCALE-FWD` accepts a packet that the DNAT rule changed, before
+  any rule of the operator, in each address family.
+
 ## User flows
 
 ### The operator upgrades from version 0.9
@@ -298,6 +314,8 @@ chains that the file does not name. The behaviour is documented in
 | IPv6 traffic. | The daemon writes the same two chains in the IPv6 filter table, and FR-access-29 to FR-access-41 state the path. A host with no IPv6 default route gets no IPv6 path, and the daemon records `ipv6.state` with the reason. |
 | `net.ipv6.conf.all.forwarding` on a host that accepts router advertisements. | A device with `accept_ra` 1 ignores each router advertisement while the host forwards, so the host loses its own IPv6 default route. `force_forwarding` keeps the advertisement. The daemon uses `all.forwarding` only with `ipv6: true`, and it changes `accept_ra` to 2 first. The test host measured both on 2026-10-05. |
 | A namespace sends a neighbor solicitation for its IPv6 gateway. | Neighbor discovery is ICMPv6, so `HYDRASCALE-OUT` sees it. ARP never enters the IPv4 chain. FR-access-38 accepts it, because the closing drop otherwise stops every IPv6 packet of the namespace. |
+| A peer sends to the namespace before the namespace sends to the peer. | The DNAT rule of FR-access-43 sends the packet to the namespace, so the peer reaches `tailscaled` as it reaches the host `tailscaled`. Without the rule the host dropped it, and a direct connection depended on a conntrack entry that expired after 120 seconds. |
+| Another service of the host listens on the listen port of a namespace. | The DNAT rule takes each inbound UDP packet for that port. The port is 41641 plus the veth index, so the range is 41642 to 41895. |
 | `force_forwarding` on the upstream device. | A reply from the internet enters on the upstream device, and the kernel forwards an IPv6 packet only when the input device forwards. The host then also forwards from the upstream device to its other devices. FR-access-39 drops that traffic. |
 
 ## Acceptance criteria

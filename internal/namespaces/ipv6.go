@@ -205,7 +205,7 @@ func parseLinkNames(output string) []string {
 // nothing. EnsureIPv6Path returns the first failure.
 func (m *RealManager) EnsureIPv6Path(nsName string, index int, forceForwarding bool) ([]string, error) {
 	hostVeth, nsVeth := VethNames(nsName)
-	hostIP, nsIP, hostGW, prefix := VethIPv6(index)
+	hostIP, nsIP, hostGW, _ := VethIPv6(index)
 
 	steps := [][]string{
 		{"ip", "-6", "addr", "replace", hostIP, "dev", hostVeth, "nodad"},
@@ -221,19 +221,35 @@ func (m *RealManager) EnsureIPv6Path(nsName string, index int, forceForwarding b
 		}
 	}
 
-	if _, err := m.run("ip6tables", "-t", "nat", "-C", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE"); err == nil {
-		return nil, nil
+	var written []string
+	for _, rule := range natRulesIPv6(index) {
+		wrote, err := m.ensureNATRule("ip6tables", nsName, rule)
+		if err != nil {
+			return written, err
+		}
+		if wrote {
+			written = append(written, "ip6 nat "+strings.Join(rule, " "))
+		}
 	}
-	if out, err := m.run("ip6tables", "-t", "nat", "-A", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE"); err != nil {
-		return nil, fmt.Errorf("add the NAT66 rule of %s: %v (%s)", nsName, err, out)
+	return written, nil
+}
+
+// natRulesIPv6 returns the NAT66 rule and the IPv6 listen forward rule of the namespace
+// with the veth index, without their operation.
+func natRulesIPv6(index int) [][]string {
+	_, nsIP, _, prefix := VethIPv6(index)
+	addr := "[" + strings.TrimSuffix(nsIP, "/64") + "]"
+	return [][]string{
+		{"POSTROUTING", "-s", prefix, "-j", "MASQUERADE"},
+		listenForward(addr, ListenPort(index)),
 	}
-	return []string{"ip6 nat POSTROUTING -s " + prefix + " -j MASQUERADE"}, nil
 }
 
 // vethTeardownRulesIPv6 returns the ip6tables rules that TeardownVeth deletes for nsName.
 func vethTeardownRulesIPv6(nsName string) [][]string {
-	_, _, _, prefix := VethIPv6(VethIndex(nsName))
-	return [][]string{
-		{"-t", "nat", "-D", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE"},
+	var rules [][]string
+	for _, rule := range natRulesIPv6(VethIndex(nsName)) {
+		rules = append(rules, append([]string{"-t", "nat", "-D"}, rule...))
 	}
+	return rules
 }

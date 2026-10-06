@@ -61,7 +61,7 @@ func (r *Reconciler) planIPv6(in accessInput) (ipv6Plan, error) {
 		return plan, nil
 	}
 
-	topo := access.TopologyIPv6{Devices: in.devices, HostPrefixes: h.Prefixes}
+	topo := access.TopologyIPv6{Devices: in.devices, Ports: in.ports, HostPrefixes: h.Prefixes}
 	// A host that forwards on every device already forwarded a packet from the upstream device
 	// before the daemon started, so the guard would stop a path of the operator. The guard
 	// also covers an earlier upstream device, because its force_forwarding stays until Shutdown.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -712,5 +713,24 @@ func TestAccessDiffReturnsAFailedCompile(t *testing.T) {
 	}
 	if len(w.checked) != 0 {
 		t.Errorf("AccessDiff checked %d rule sets after a failed compile, want 0", len(w.checked))
+	}
+}
+
+func TestReconcileAcceptsTheListenPortOfEachTailnet(t *testing.T) {
+	// Issue #404. The host forwards the listen port of each tailnet to its namespace, and
+	// the forward chain accepts that packet, so a peer reaches tailscaled directly.
+	cfgPath := writeAccessConfig(t, "access:\n  mode: enforce\n", "alpha")
+	r := newTestReconciler(cfgPath, newMockNS(), newMockDaemon(), newMockRouting())
+	w := &fakeChainWriter{}
+	r.SetChainWriter(w)
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	port := namespaces.ListenPort(namespaces.VethIndex(namespaces.GetNamespaceName("alpha")))
+	want := fmt.Sprintf("-A %s -o %s -p udp --dport %d -m conntrack --ctstate DNAT -j ACCEPT", access.ChainForward, device("alpha"), port)
+	if got := forwardRules(t, w); !slices.Contains(got, want) {
+		t.Errorf("the forward chain holds no rule %q:\n%s", want, strings.Join(got, "\n"))
 	}
 }

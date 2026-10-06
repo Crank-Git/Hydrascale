@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 )
 
 // ChainForward holds the rules for traffic that the host forwards between namespaces and
@@ -68,6 +69,9 @@ type Topology struct {
 	Devices map[string]string
 	// DNSAddress is the address that the DNS forwarder listens on, in the form host:port.
 	DNSAddress string
+	// Ports maps a tailnet identifier to the UDP port of its tailscaled, which the host
+	// forwards to the namespace. A tailnet without an entry gets no forward rule.
+	Ports map[string]int
 }
 
 // TopologyIPv6 holds the host facts that CompileIPv6 needs. CompileIPv6 takes them as an
@@ -75,6 +79,8 @@ type Topology struct {
 type TopologyIPv6 struct {
 	// Devices maps a tailnet identifier to the host side veth device of its namespace.
 	Devices map[string]string
+	// Ports maps a tailnet identifier to the UDP port of its tailscaled, as in Topology.
+	Ports map[string]int
 	// HostPrefixes holds each global IPv6 prefix of the host local network, in CIDR form.
 	// The internet destination excludes them, as it excludes the RFC 1918 ranges for IPv4.
 	HostPrefixes []string
@@ -174,7 +180,25 @@ func Compile(set RuleSet, topo Topology, tail Tail) (Compiled, error) {
 		}
 	}
 
-	return compile(set, ids, topo.Devices, dns, privateRanges, tail)
+	return compile(set, ids, topo.Devices, listenAccepts(ids, topo.Devices, topo.Ports), dns, privateRanges, tail)
+}
+
+// listenAccepts returns one forward rule for each tailnet with a port. The rule accepts
+// inbound UDP that the host sent to the namespace for the port of its tailscaled. A peer
+// then reaches tailscaled without a hole that its own packets opened, as it reaches the
+// host tailscaled. The conntrack match limits the rule to a packet that the listen
+// forward rule of the host changed. See issue #404.
+func listenAccepts(ids []string, devices map[string]string, ports map[string]int) [][]string {
+	var rules [][]string
+	for _, id := range ids {
+		port, ok := ports[id]
+		if !ok {
+			continue
+		}
+		rules = append(rules, appendRule(ChainForward, []string{"-o", devices[id], "-p", "udp",
+			"--dport", strconv.Itoa(port), "-m", "conntrack", "--ctstate", "DNAT", "-j", "ACCEPT"}))
+	}
+	return rules
 }
 
 // CompileIPv6 returns the ip6tables arguments that the rule set requires.
@@ -209,7 +233,7 @@ func CompileIPv6(set RuleSet, topo TopologyIPv6, tail Tail) (Compiled, error) {
 		}
 	}
 
-	c, err := compile(set, ids, topo.Devices, ndp, ranges, tail)
+	c, err := compile(set, ids, topo.Devices, listenAccepts(ids, topo.Devices, topo.Ports), ndp, ranges, tail)
 	if err != nil {
 		return Compiled{}, err
 	}
@@ -230,10 +254,11 @@ func sortedIDs(devices map[string]string) []string {
 }
 
 // compile returns the rules of both chains for one address family.
-// open holds the out rules that every namespace needs without a rule of the operator, and
-// private holds the ranges that the internet destination excludes.
-func compile(set RuleSet, ids []string, devices map[string]string, open [][]string, private []string, tail Tail) (Compiled, error) {
-	forward := [][]string{appendRule(ChainForward, establishedMatch)}
+// listen holds the forward rules and open holds the out rules that every namespace needs
+// without a rule of the operator. private holds the ranges that the internet destination
+// excludes.
+func compile(set RuleSet, ids []string, devices map[string]string, listen, open [][]string, private []string, tail Tail) (Compiled, error) {
+	forward := append([][]string{appendRule(ChainForward, establishedMatch)}, listen...)
 	out := append([][]string{appendRule(ChainOut, establishedMatch)}, open...)
 
 	for _, rule := range set.Rules {

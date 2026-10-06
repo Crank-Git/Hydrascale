@@ -1016,6 +1016,7 @@ func (r *Reconciler) AccessDiff() ([]string, error) {
 type accessInput struct {
 	set      access.RuleSet
 	devices  map[string]string
+	ports    map[string]int
 	ipv6     bool
 	compiled access.Compiled
 }
@@ -1029,9 +1030,12 @@ func (r *Reconciler) compileAccess() (accessInput, error) {
 	}
 
 	devices := make(map[string]string, len(cfg.Tailnets))
+	ports := make(map[string]int, len(cfg.Tailnets))
 	for _, tn := range cfg.Tailnets {
-		hostVeth, _ := namespaces.VethNames(namespaces.GetNamespaceName(tn.ID))
+		nsName := namespaces.GetNamespaceName(tn.ID)
+		hostVeth, _ := namespaces.VethNames(nsName)
 		devices[tn.ID] = hostVeth
+		ports[tn.ID] = namespaces.ListenPort(namespaces.VethIndex(nsName))
 	}
 
 	bindAddress := cfg.Resolver.BindAddress
@@ -1049,11 +1053,11 @@ func (r *Reconciler) compileAccess() (accessInput, error) {
 		return accessInput{}, err
 	}
 
-	compiled, err := access.Compile(set, access.Topology{Devices: devices, DNSAddress: bindAddress}, tail)
+	compiled, err := access.Compile(set, access.Topology{Devices: devices, DNSAddress: bindAddress, Ports: ports}, tail)
 	if err != nil {
 		return accessInput{}, fmt.Errorf("compile the local rule set: %w", err)
 	}
-	return accessInput{set: set, devices: devices, ipv6: cfg.IPv6, compiled: compiled}, nil
+	return accessInput{set: set, devices: devices, ports: ports, ipv6: cfg.IPv6, compiled: compiled}, nil
 }
 
 // declaredRules returns the rules whose endpoints the configuration file still declares.

@@ -31,6 +31,8 @@ func setupVethFixture(t *testing.T, nsName, infraSubnet string, index int) (*exe
 		{Name: "sysctl", Args: []string{"-w", "net.ipv4.conf." + hostVeth + ".forwarding=1"}},
 		{Name: "iptables", Args: []string{"-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
 		{Name: "iptables", Args: []string{"-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
+		{Name: "iptables", Args: natArgs("-C", listenRuleFor(nsName, infraSubnet, index))},
+		{Name: "iptables", Args: natArgs("-A", listenRuleFor(nsName, infraSubnet, index))},
 	}
 
 	rec := execx.NewRecorder(t)
@@ -170,19 +172,23 @@ func TestEnsureForwardPathWritesTheMasqueradeRuleThatTheHostDoesNotHold(t *testi
 	want := []execx.Call{
 		{Name: "iptables", Args: []string{"-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
 		{Name: "iptables", Args: []string{"-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
+		{Name: "iptables", Args: natArgs("-C", listenRuleFor(nsName, infraSubnet, index))},
+		{Name: "iptables", Args: natArgs("-A", listenRuleFor(nsName, infraSubnet, index))},
 	}
 
 	rec := execx.NewRecorder(t)
 	rec.Script(absent, want[0].Name, want[0].Args...)
 	rec.Script(execx.Result{}, want[1].Name, want[1].Args...)
+	rec.Script(absent, want[2].Name, want[2].Args...)
+	rec.Script(execx.Result{}, want[3].Name, want[3].Args...)
 
 	m := &RealManager{Runner: rec}
 	written, err := m.EnsureForwardPath(nsName, index, infraSubnet)
 	if err != nil {
 		t.Fatalf("EnsureForwardPath: %v", err)
 	}
-	if len(written) != 1 {
-		t.Fatalf("EnsureForwardPath wrote %d rules, want 1: %v", len(written), written)
+	if len(written) != 2 {
+		t.Fatalf("EnsureForwardPath wrote %d rules, want 2: %v", len(written), written)
 	}
 
 	got := rec.Calls()
@@ -208,6 +214,7 @@ func TestEnsureForwardPathWritesNothingWhenTheHostHoldsTheRule(t *testing.T) {
 
 	rec := execx.NewRecorder(t)
 	rec.Script(execx.Result{}, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(execx.Result{}, "iptables", natArgs("-C", listenRuleFor(nsName, infraSubnet, index))...)
 
 	m := &RealManager{Runner: rec}
 	written, err := m.EnsureForwardPath(nsName, index, infraSubnet)
@@ -217,8 +224,8 @@ func TestEnsureForwardPathWritesNothingWhenTheHostHoldsTheRule(t *testing.T) {
 	if len(written) != 0 {
 		t.Errorf("EnsureForwardPath wrote %v, want no rule", written)
 	}
-	if len(rec.Calls()) != 1 {
-		t.Errorf("EnsureForwardPath ran %d commands, want 1:\n%s", len(rec.Calls()), format(rec.Calls()))
+	if len(rec.Calls()) != 2 {
+		t.Errorf("EnsureForwardPath ran %d commands, want 2:\n%s", len(rec.Calls()), format(rec.Calls()))
 	}
 }
 
@@ -254,7 +261,9 @@ func TestTeardownVethRunsTheFullCommandListInOrder(t *testing.T) {
 		{Name: "iptables", Args: []string{"-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"}},
 		{Name: "iptables", Args: []string{"-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"}},
 		{Name: "iptables", Args: []string{"-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"}},
+		{Name: "iptables", Args: natArgs("-D", listenRuleFor(nsName, infraSubnet, VethIndex(nsName)))},
 		{Name: "ip6tables", Args: nat66Delete(nsName)},
+		{Name: "ip6tables", Args: vethTeardownRulesIPv6(nsName)[1]},
 		{Name: "ip", Args: []string{"link", "del", hostVeth}},
 	}
 
@@ -294,16 +303,18 @@ func TestTeardownVethRemovesEveryRuleWhenADeleteFails(t *testing.T) {
 	rec.Script(fail, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(fail, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(fail, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(fail, "iptables", natArgs("-D", listenRuleFor(nsName, infraSubnet, VethIndex(nsName)))...)
 	rec.Script(fail, "ip6tables", nat66Delete(nsName)...)
+	rec.Script(fail, "ip6tables", vethTeardownRulesIPv6(nsName)[1]...)
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
 	// A failed delete does not stop the remaining steps, and TeardownVeth reports it.
 	if err := m.TeardownVeth(nsName, infraSubnet); err == nil {
-		t.Fatal("TeardownVeth returned no error for four failed rule deletes")
+		t.Fatal("TeardownVeth returned no error for six failed rule deletes")
 	}
-	if len(rec.Calls()) != 5 {
-		t.Errorf("TeardownVeth ran %d commands, want 5", len(rec.Calls()))
+	if len(rec.Calls()) != 7 {
+		t.Errorf("TeardownVeth ran %d commands, want 7", len(rec.Calls()))
 	}
 }
 
