@@ -79,6 +79,10 @@ Version 1.0 adds three things to that loop:
 - **Upstream policy.** The daemon reads, validates, and writes the access-control document
   that the control server of a tailnet holds.
 
+Version 1.4 gives each namespace an IPv6 path, and it forwards a UDP port of the host to
+each namespace, so a peer connects to a namespace directly over IPv4 and IPv6. See
+[Networking](#networking).
+
 ## Requirements
 
 - **Linux.** A network namespace is a Linux kernel feature.
@@ -86,13 +90,16 @@ Version 1.0 adds three things to that loop:
 - **Root, or the capability `CAP_NET_ADMIN`.**
 - **Tailscale.** The commands `tailscaled` and `tailscale` must be in `$PATH`.
 - **iproute2.** The daemon runs `ip` to manage a namespace.
-- **iptables.** The daemon writes the NAT rules and the forward rules.
+- **iptables and ip6tables.** The daemon writes the NAT rules and the forward rules of
+  both address families. The `iptables` package of each distribution holds both commands.
 - **Kernel network namespace support** (`CONFIG_NET_NS`), which every current kernel holds.
 - **Kernel policy routing** (`CONFIG_IP_MULTIPLE_TABLES`, `CONFIG_IPV6_MULTIPLE_TABLES`).
   [Host access](#host-access) needs it to propagate an accepted subnet route to the host.
   Most distribution kernels hold it. Some single-board kernels omit it, and route
   propagation then changes nothing.
 - **IP forwarding.** Run `sudo sysctl -w net.ipv4.ip_forward=1`.
+- **IPv6, if you want it.** The host needs an IPv6 default route, and Linux 6.17 or later.
+  An older kernel needs the key `ipv6: true`. See [IPv6](#ipv6).
 
 ## Install
 
@@ -235,7 +242,8 @@ JSON API.
 
 A local rule is one reachability rule that the daemon enforces on the host with iptables.
 The daemon owns the chains `HYDRASCALE-FWD` and `HYDRASCALE-OUT`, and one jump rule into
-each of `FORWARD` and `INPUT`. It writes no other rule, and it moves no rule of the
+each of `FORWARD` and `INPUT`, in each address family. Outside those chains it writes only
+the NAT rules of each namespace; see [Networking](#networking). It moves no rule of the
 operator.
 
 The rule set holds no deny rule, because deny is the default. A path that no rule allows is
@@ -259,6 +267,10 @@ access:
   `internet`.
 - `to` names a tailnet that the file declares, or the literal `host`, or the literal
   `internet`.
+- `internet` means a public address. For IPv4 it excludes the RFC 1918 ranges, the
+  link-local range, and the loopback range. For IPv6 it excludes the unique local range
+  `fc00::/7`, the link-local range, the loopback address, and each global prefix of the
+  host. A rule to `internet` therefore never reaches the local network of the host.
 - `from` and `to` must differ.
 - `ports` holds entries of the form `tcp/<n>`, `udp/<n>`, `tcp/<n>-<m>`, or `udp/<n>-<m>`.
   A port number is between 1 and 65535. An empty list allows every port and both protocols.
@@ -775,48 +787,6 @@ before the main table, which the kernel consults at 32766. A host that runs its 
 main table. The daemon reads the rule list on each tick and it adds no second copy. A
 shutdown removes each rule and empties the table.
 
-### Direct connections
-
-The `tailscaled` of each namespace listens on a fixed UDP port: 41641 plus the veth index
-of the namespace, so a port from 41642 to 41895. The host forwards inbound UDP for that
-port to the namespace, for IPv4 and for IPv6. A peer then reaches the namespace directly,
-as it reaches the `tailscaled` of the host on 41641. Read the port of a namespace with
-`ip netns exec ns-<id> ss -lunp`.
-
-**Warning: the host forwards each inbound UDP packet for that port to the namespace.** A
-host service that listens on a port from 41642 to 41895 stops receiving that traffic.
-
-### IPv6
-
-Each namespace gets an IPv6 path when the host holds an IPv6 default route. The daemon
-gives the namespace an address from the unique local prefix `fd5c:9a3e:7b10::/48`. The
-host translates that address to its own global address with one NAT66 rule. The local
-rules apply to IPv6 as they apply to IPv4: the daemon writes `HYDRASCALE-FWD` and
-`HYDRASCALE-OUT` in the IPv6 filter table too.
-
-The host must forward IPv6, and the kernel decides how:
-
-- **Linux 6.17 or later.** The daemon sets `force_forwarding` on each upstream device and
-  on each host side veth device. The host keeps its own router advertisements. No key is
-  necessary.
-- **An older kernel.** Only `net.ipv6.conf.all.forwarding` forwards IPv6. That key stops
-  each device with `accept_ra` 1 from accepting a router advertisement, so the host can
-  lose its own IPv6 default route. The daemon therefore sets it only when you add the
-  key `ipv6: true`. It changes `accept_ra` from 1 to 2 on each device first.
-
-```yaml
-ipv6: true
-```
-
-The event `ipv6.state` states whether the path is on and why. Read it with
-`journalctl -u hydrascale | grep ipv6.state`. A host with no IPv6 default route reports
-`off: the host holds no IPv6 default route`.
-
-**Warning: `force_forwarding` on the upstream device lets the host forward internet
-traffic to any other host device.** The daemon drops that traffic in `HYDRASCALE-FWD`
-when the host did not forward IPv6 before. A shutdown resets `force_forwarding` before it
-removes the chains.
-
 ### Compatibility
 
 - **A standard Linux distribution.** Every feature works, including a MagicDNS name per
@@ -917,7 +887,7 @@ host_access: false
 
 # Let the daemon set net.ipv6.conf.all.forwarding on a kernel older than Linux 6.17
 # (default: false). A newer kernel gets the IPv6 path of each namespace without this key.
-# See "IPv6" above.
+# See "IPv6" under "Networking".
 # ipv6: true
 
 # The Unix group that reaches the control socket (default: empty, which is root only).
@@ -1053,8 +1023,56 @@ at least a `/16`.
 
 ### NAT and masquerade
 
-The daemon adds an iptables MASQUERADE rule per namespace, so that outbound traffic of the
-namespace goes through the default interface of the host and reaches the internet.
+The daemon writes these rules in the `nat` table for each namespace:
+
+- **MASQUERADE**, so that the IPv4 traffic of the namespace leaves through the default
+  interface of the host.
+- **NAT66**, when the IPv6 path is on, so that the IPv6 traffic of the namespace leaves
+  with the global address of the host. See [IPv6](#ipv6).
+- **A DNAT rule per address family** in `PREROUTING`, which sends inbound UDP for the listen
+  port of the namespace to its `tailscaled`. See [Direct connections](#direct-connections).
+
+### Direct connections
+
+The `tailscaled` of each namespace listens on a fixed UDP port: 41641 plus the veth index
+of the namespace, so a port from 41642 to 41895. The host forwards inbound UDP for that
+port to the namespace, for IPv4 and for IPv6. A peer then reaches the namespace directly,
+as it reaches the `tailscaled` of the host on 41641. Read the port of a namespace with
+`ip netns exec ns-<id> ss -lunp`.
+
+**Warning: the host forwards each inbound UDP packet for that port to the namespace.** A
+host service that listens on a port from 41642 to 41895 stops receiving that traffic.
+
+### IPv6
+
+Each namespace gets an IPv6 path when the host holds an IPv6 default route. The daemon
+gives the namespace an address from the unique local prefix `fd5c:9a3e:7b10::/48`. The
+host translates that address to its own global address with one NAT66 rule. The local
+rules apply to IPv6 as they apply to IPv4: the daemon writes `HYDRASCALE-FWD` and
+`HYDRASCALE-OUT` in the IPv6 filter table too.
+
+The host must forward IPv6, and the kernel decides how:
+
+- **Linux 6.17 or later.** The daemon sets `force_forwarding` on each upstream device and
+  on each host side veth device. The host keeps its own router advertisements. No key is
+  necessary.
+- **An older kernel.** Only `net.ipv6.conf.all.forwarding` forwards IPv6. That key stops
+  each device with `accept_ra` 1 from accepting a router advertisement, so the host can
+  lose its own IPv6 default route. The daemon therefore sets it only when you add the
+  key `ipv6: true`. It changes `accept_ra` from 1 to 2 on each device first.
+
+```yaml
+ipv6: true
+```
+
+The event `ipv6.state` states whether the path is on and why. Read it with
+`journalctl -u hydrascale | grep ipv6.state`. A host with no IPv6 default route reports
+`off: the host holds no IPv6 default route`.
+
+**Warning: `force_forwarding` on the upstream device lets the host forward internet
+traffic to any other host device.** The daemon drops that traffic in `HYDRASCALE-FWD`
+when the host did not forward IPv6 before. A shutdown resets `force_forwarding` before it
+removes the chains.
 
 ### Docker
 
@@ -1274,9 +1292,10 @@ once.
 
 ## Uninstall
 
-`uninstall` stops every tailnet, deletes the namespaces, the veth pairs, the iptables
-rules, the host routes, and the DNS entries, then removes the systemd service and
-`/var/lib/hydrascale`:
+`uninstall` stops every tailnet, deletes the namespaces, the veth pairs, the iptables and
+ip6tables rules, the host routes, and the DNS entries, then removes the systemd service and
+`/var/lib/hydrascale`. It finds the tailnets from the namespaces on the host, and it does
+not change the configuration file:
 
 ```bash
 sudo hydrascale uninstall
@@ -1286,6 +1305,9 @@ The command logs each tailnet node out, so no node stays in the tailnet admin co
 `--keep-nodes` to keep them. A plain `uninstall` keeps the binary and `/etc/hydrascale`, so
 the command runs again. Pass `--purge` to remove those too, and `--yes` to skip the
 confirmation.
+
+If a teardown step fails, `uninstall` lists each failure, keeps `/var/lib/hydrascale` and
+the service unit, and exits non-zero. Correct the failure and run it again.
 
 ## Troubleshooting
 
@@ -1337,6 +1359,24 @@ The file grants group access or other access. Set the mode and the owner:
 sudo chown root:root /etc/hydrascale/secrets.yaml
 sudo chmod 0600 /etc/hydrascale/secrets.yaml
 ```
+
+**`netcheck` in a namespace reports `IPv6: no`**
+Read the reason that the daemon records:
+```bash
+sudo journalctl -u hydrascale | grep ipv6.state
+```
+`the host holds no IPv6 default route` means the host has no IPv6 upstream.
+`the kernel holds no force_forwarding` means the kernel is older than Linux 6.17; add
+`ipv6: true` to the configuration file. See [IPv6](#ipv6).
+
+**`tailscale ping` reports `direct connection not established`**
+A peer reaches the namespace on its listen port. Read the port, and confirm the DNAT rule:
+```bash
+sudo ip netns exec ns-<id> ss -lunp | grep tailscaled
+sudo iptables -t nat -S PREROUTING | grep DNAT
+```
+A firewall in front of the host, such as the firewall of a cloud provider, must allow
+inbound UDP on that port.
 
 **Traffic of a namespace cannot reach the internet**
 IP forwarding is off. Read the value and set it:

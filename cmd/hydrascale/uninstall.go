@@ -5,12 +5,16 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/namespaces"
+	"hydrascale/internal/reconciler"
+	"hydrascale/internal/routing"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func uninstallCmd() *cobra.Command {
@@ -51,34 +55,30 @@ func runUninstall(yes, purge, keepNodes bool) error {
 		return nil
 	}
 
-	// 1. Stop the running service first so it doesn't fight the teardown.
+	// 1. Log each node out while its tailscaled still runs. The service stop below stops
+	//    every tailscaled, so a logout after it reached no daemon. The tailnets come from
+	//    the namespaces on the host, so a configuration file that does not load changes
+	//    nothing here. See issue #417.
+	ids := hostTailnets()
+	if !keepNodes {
+		for _, id := range ids {
+			logoutNamespace(id)
+		}
+	}
+
+	// 2. Stop the service. Its shutdown stops each tailscaled, removes the local rule
+	//    chains, and resets the forwarding that it set.
 	if isServiceActive("hydrascale") {
 		_ = exec.Command("systemctl", "stop", "hydrascale").Run()
 	}
 	_ = exec.Command("systemctl", "disable", "hydrascale").Run()
 
-	// 2. Deregister nodes (best-effort) before their namespaces go away.
-	path := configPath()
-	cfg, err := config.LoadConfig(path)
-	if err != nil {
-		cfg = config.DefaultConfig()
-	}
-	if !keepNodes {
-		for _, tn := range cfg.Tailnets {
-			logoutNamespace(tn.ID)
-		}
-	}
-
-	// 3. Reconcile toward an empty desired state to tear down every namespace,
-	//    veth, iptables rule, host route, and DNS entry — the same path `remove` uses.
-	if len(cfg.Tailnets) > 0 {
-		empty := *cfg
-		empty.Tailnets = nil
-		if saveErr := config.SaveConfig(path, &empty); saveErr == nil {
-			if rErr := newReconciler().Reconcile(); rErr != nil {
-				fmt.Printf("  teardown reconcile reported: %v\n", rErr)
-			}
-		}
+	// 3. Remove each namespace, veth pair, and nat rule, and both chain families. The
+	//    teardown writes no configuration file and runs no tick, so it neither destroys
+	//    the file of the operator nor writes the chains again. See issue #417.
+	if err := uninstallReconciler().Uninstall(); err != nil {
+		fmt.Printf("\nThe teardown failed, so /var/lib/hydrascale and the service unit stay:\n%v\n", err)
+		return fmt.Errorf("uninstall incomplete; correct the failures above and run it again")
 	}
 
 	// 4. Remove state, service unit, and (with --purge) binary + config.
@@ -106,6 +106,44 @@ func runUninstall(yes, purge, keepNodes bool) error {
 	}
 	fmt.Println("Hydrascale uninstalled. (If any tailnet was mid-teardown, a reboot fully clears namespaces.)")
 	return nil
+}
+
+// hostTailnets returns the tailnet identifier of each namespace of the daemon that the
+// host holds.
+func hostTailnets() []string {
+	list, err := namespaces.NewRealManager().List()
+	if err != nil {
+		fmt.Printf("  list the namespaces: %v\n", err)
+		return nil
+	}
+	var ids []string
+	for _, ns := range list {
+		if id := namespaces.GetTailnetFromNamespace(ns); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// uninstallReconciler returns a Reconciler for the teardown. It needs the infra subnet
+// alone, so it reads that key even from a configuration file that fails validation, and
+// it falls back to the default subnet when the file does not parse.
+func uninstallReconciler() *reconciler.Reconciler {
+	infraSubnet := config.DefaultConfig().InfraSubnet
+	if cfg, err := loadConfig(); err == nil {
+		if cfg.InfraSubnet != "" {
+			infraSubnet = cfg.InfraSubnet
+		}
+	} else if data, readErr := os.ReadFile(configPath()); readErr == nil {
+		var raw struct {
+			InfraSubnet string `yaml:"infra_subnet"`
+		}
+		if yaml.Unmarshal(data, &raw) == nil && raw.InfraSubnet != "" {
+			infraSubnet = raw.InfraSubnet
+		}
+	}
+	return reconciler.New(configPath(), namespaces.NewRealManager(), daemon.NewRealManager(),
+		routing.NewRealManager(), 10*time.Second, nil, infraSubnet)
 }
 
 // isServiceActive reports whether a systemd unit is active.
