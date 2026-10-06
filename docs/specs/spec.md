@@ -6,7 +6,7 @@ status: approved
 spec_version: 2
 created: 2026-08-04
 approved: 2026-08-23
-html_generated: 2026-10-05
+html_generated: 2026-10-06
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -886,6 +886,7 @@ advance to `status: built`. |
 | 2026-09-28 | 1 | **Decision: the daemon exports the split DNS of each tailnet to the host resolver.** A tailnet whose control server holds split DNS resolved the names of that domain until now only inside the tailnet: the daemon registered the MagicDNS suffix and the alias zone on the veth device, therefore a query of a split domain left the host for the default upstream. The operator decided to export the split domains on the same path. The daemon reads them with `tailscale dns status --json` inside the namespace, because the command needs the socket of that tailnet. The resolver addresses of the reply are unused: each domain reaches the veth device of its tailnet, and the DNAT rule inside the namespace sends the query to `100.100.100.100`. One domain is held by one tailnet. The MagicDNS suffix and the alias zone always win, and of two tailnets that claim one domain the first in sorted identifier order keeps it; the loser records a conflict, and the daemon records one `dns.split_domain_conflict` event. A conflict event that stays repeats not. A split DNS read that fails leaves the tailnet with no split domain and the sync fails not. The claim order is a decision, because a control server assigns the domains and one host must choose. The requirements FR-split-1 to FR-split-9 land with no issue yet, so the issue map counts them not. |
 | 2026-10-05 | 1 | **Decision: each namespace gets an IPv6 path through NAT66 (issue #406).** The operator chose NAT66 from a unique local prefix over a routed prefix. The operator also decided: "Auto 6.17+, opt-in older". A kernel that holds `force_forwarding` gets the path without a configuration key. An older kernel needs `ipv6: true`, because `net.ipv6.conf.all.forwarding` stops a device with `accept_ra` 1 from accepting a router advertisement. The test host measured three defects before the merge: the IPv6 out chain dropped neighbor discovery, the host route sync deleted the connected route of the veth prefix, and a shutdown stopped at a failed reset and left both chains. FR-access-29 to FR-access-41 hold the result. |
 | 2026-10-05 | 1 | **Issue #410: the namespaced `tailscaled` restarted the host `systemd-resolved`.** `bpftrace` on the test host showed `tailscaled` run `systemctl is-active systemd-resolved.service` and then `systemctl restart systemd-resolved.service` after each write of its `resolv.conf`. Three restarts of the daemon within four minutes reached the start limit of `systemd-resolved`, and the host lost DNS. FR-dns-17 and FR-dns-18 hide `systemctl` from the child. |
+| 2026-10-06 | 1 | **Decision: the host forwards a listen port to each namespace (issue #404).** The reporter measured direct connections that took 10 minutes to form and dropped after 2 minutes, while the host `tailscaled` connected at once. A peer reached the namespace only through a conntrack entry that the namespace opened. The operator chose "On by default". FR-access-42 to FR-access-44 hold the result. The port follows from the veth index alone, so a teardown needs no configuration file, and the build holds no key to change it. |
 
 ## Issue map
 

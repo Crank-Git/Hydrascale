@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"hydrascale/internal/execx"
+	"hydrascale/internal/namespaces"
 )
 
 // DefaultStateDir is the base directory for per-tailnet state.
@@ -269,6 +270,9 @@ func (m *RealManager) Start(tailnetID string, namespaceName string, allowUnprote
 		"--state="+stateFile,
 		"--socket="+socketPath,
 		"--statedir="+stateDir,
+		// The host sends inbound UDP for this port to the namespace, so a peer reaches
+		// tailscaled without a hole that its own packets opened. See issue #404.
+		"--port="+strconv.Itoa(namespaces.ListenPort(namespaces.VethIndex(namespaceName))),
 	)
 
 	// Kill any existing daemon before starting a new one

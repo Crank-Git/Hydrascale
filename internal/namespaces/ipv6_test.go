@@ -114,16 +114,19 @@ func TestEnsureIPv6PathWritesTheAddressesTheRouteAndTheNAT66Rule(t *testing.T) {
 	rec.Script(execx.Result{}, "sysctl", "-w", "net.ipv6.conf."+hostVeth+".force_forwarding=1")
 	rec.Script(failed, "ip6tables", "-t", "nat", "-C", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE")
 	rec.Script(execx.Result{}, "ip6tables", "-t", "nat", "-A", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE")
+	listen := listenForward("[fd5c:9a3e:7b10:7::2]", ListenPort(7))
+	rec.Script(failed, "ip6tables", natArgs("-C", listen)...)
+	rec.Script(execx.Result{}, "ip6tables", natArgs("-A", listen)...)
 
 	written, err := (&RealManager{Runner: rec}).EnsureIPv6Path(nsName, 7, true)
 	if err != nil {
 		t.Fatalf("EnsureIPv6Path: %v", err)
 	}
-	if len(written) != 1 {
-		t.Errorf("written = %v, want the NAT66 rule", written)
+	if len(written) != 2 {
+		t.Errorf("written = %v, want the NAT66 rule and the listen forward rule", written)
 	}
-	if len(rec.Calls()) != 6 {
-		t.Errorf("EnsureIPv6Path ran %d commands, want 6", len(rec.Calls()))
+	if len(rec.Calls()) != 8 {
+		t.Errorf("EnsureIPv6Path ran %d commands, want 8", len(rec.Calls()))
 	}
 }
 
@@ -137,6 +140,7 @@ func TestEnsureIPv6PathSetsNoForceForwardingWhenTheHostForwardsOnEveryDevice(t *
 	rec.Script(execx.Result{}, "ip", "netns", "exec", nsName, "ip", "-6", "addr", "replace", nsIP, "dev", nsVeth, "nodad")
 	rec.Script(execx.Result{}, "ip", "netns", "exec", nsName, "ip", "-6", "route", "replace", "default", "via", hostGW, "dev", nsVeth)
 	rec.Script(execx.Result{}, "ip6tables", "-t", "nat", "-C", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE")
+	rec.Script(execx.Result{}, "ip6tables", natArgs("-C", natRulesIPv6(7)[1])...)
 
 	written, err := (&RealManager{Runner: rec}).EnsureIPv6Path(nsName, 7, false)
 	if err != nil {
@@ -147,7 +151,7 @@ func TestEnsureIPv6PathSetsNoForceForwardingWhenTheHostForwardsOnEveryDevice(t *
 	}
 }
 
-func TestTeardownDeletesTheNAT66RuleThatEnsureIPv6PathAdds(t *testing.T) {
+func TestTeardownDeletesEachNATRuleThatEnsureIPv6PathAdds(t *testing.T) {
 	const nsName = "ns-team-prod"
 	index := VethIndex(nsName)
 
@@ -159,15 +163,28 @@ func TestTeardownDeletesTheNAT66RuleThatEnsureIPv6PathAdds(t *testing.T) {
 	rec.Script(execx.Result{}, "ip", "netns", "exec", nsName, "ip", "-6", "route", "replace", "default", "via", hostGW, "dev", nsVeth)
 	rec.Script(failed, "ip6tables", "-t", "nat", "-C", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE")
 	rec.Script(execx.Result{}, "ip6tables", "-t", "nat", "-A", "POSTROUTING", "-s", prefix, "-j", "MASQUERADE")
+	rec.Script(failed, "ip6tables", natArgs("-C", natRulesIPv6(index)[1])...)
+	rec.Script(execx.Result{}, "ip6tables", natArgs("-A", natRulesIPv6(index)[1])...)
 	if _, err := (&RealManager{Runner: rec}).EnsureIPv6Path(nsName, index, false); err != nil {
 		t.Fatalf("EnsureIPv6Path: %v", err)
 	}
 
-	calls := rec.Calls()
-	added := slices.Clone(calls[len(calls)-1].Args)
-	added[slices.Index(added, "-A")] = "-D"
-	if deleted := vethTeardownRulesIPv6(nsName)[0]; !slices.Equal(added, deleted) {
-		t.Errorf("teardown deletes %v, want %v", deleted, added)
+	var added [][]string
+	for _, call := range rec.Calls() {
+		if call.Name == "ip6tables" && slices.Contains(call.Args, "-A") {
+			args := slices.Clone(call.Args)
+			args[slices.Index(args, "-A")] = "-D"
+			added = append(added, args)
+		}
+	}
+	deleted := vethTeardownRulesIPv6(nsName)
+	if len(added) != len(deleted) {
+		t.Fatalf("EnsureIPv6Path added %d rules and teardown deletes %d", len(added), len(deleted))
+	}
+	for i := range added {
+		if !slices.Equal(added[i], deleted[i]) {
+			t.Errorf("teardown deletes %v, want %v", deleted[i], added[i])
+		}
 	}
 }
 

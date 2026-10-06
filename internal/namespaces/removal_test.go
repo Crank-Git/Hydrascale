@@ -42,7 +42,9 @@ func TestThePlanNamesTheSameIptablesRulesThatTheTeardownDeletes(t *testing.T) {
 	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(execx.Result{}, "iptables", natArgs("-D", listenRuleFor(nsName, infraSubnet, VethIndex(nsName)))...)
 	rec.Script(execx.Result{}, "ip6tables", nat66Delete(nsName)...)
+	rec.Script(execx.Result{}, "ip6tables", vethTeardownRulesIPv6(nsName)[1]...)
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
