@@ -23,6 +23,18 @@ func nat66Delete(nsName string) []string {
 	return vethTeardownRulesIPv6(nsName)[0]
 }
 
+// natArgs returns the arguments of one command on the nat table.
+func natArgs(op string, rule []string) []string {
+	return append([]string{"-t", "nat", op}, rule...)
+}
+
+// listenRuleFor returns the IPv4 listen forward rule of the namespace, without its
+// operation.
+func listenRuleFor(nsName, infraSubnet string, index int) []string {
+	_, _, _, addr, _ := VethIPs(infraSubnet, index)
+	return listenForward(addr, ListenPort(index))
+}
+
 // broken is the result that iptables returns for a delete that fails for another reason.
 var broken = execx.Result{
 	Output: []byte("iptables: Permission denied (you must be root)."),
@@ -42,15 +54,17 @@ func TestTeardownVethReturnsAnErrorWhenARuleDeleteFails(t *testing.T) {
 	rec.Script(broken, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(execx.Result{}, "iptables", natArgs("-D", listenRuleFor(nsName, infraSubnet, VethIndex(nsName)))...)
 	rec.Script(execx.Result{}, "ip6tables", nat66Delete(nsName)...)
+	rec.Script(execx.Result{}, "ip6tables", vethTeardownRulesIPv6(nsName)[1]...)
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
 	if err := m.TeardownVeth(nsName, infraSubnet); err == nil {
 		t.Fatal("TeardownVeth returned no error for a failed rule delete")
 	}
-	if len(rec.Calls()) != 5 {
-		t.Errorf("TeardownVeth ran %d commands after a failed delete, want 5", len(rec.Calls()))
+	if len(rec.Calls()) != 7 {
+		t.Errorf("TeardownVeth ran %d commands after a failed delete, want 7", len(rec.Calls()))
 	}
 }
 
@@ -67,7 +81,9 @@ func TestTeardownVethReturnsEveryFailedStepTogether(t *testing.T) {
 	rec.Script(broken, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(broken, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(broken, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(broken, "iptables", natArgs("-D", listenRuleFor(nsName, infraSubnet, VethIndex(nsName)))...)
 	rec.Script(broken, "ip6tables", nat66Delete(nsName)...)
+	rec.Script(broken, "ip6tables", vethTeardownRulesIPv6(nsName)[1]...)
 	rec.Script(execx.Result{Err: errors.New("exit status 1")}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
@@ -75,8 +91,8 @@ func TestTeardownVethReturnsEveryFailedStepTogether(t *testing.T) {
 	if err == nil {
 		t.Fatal("TeardownVeth returned no error")
 	}
-	if got := strings.Count(err.Error(), "\n") + 1; got != 5 {
-		t.Errorf("TeardownVeth returned %d errors, want 5: %v", got, err)
+	if got := strings.Count(err.Error(), "\n") + 1; got != 7 {
+		t.Errorf("TeardownVeth returned %d errors, want 7: %v", got, err)
 	}
 }
 
@@ -93,7 +109,9 @@ func TestTeardownVethTreatsAnAbsentRuleAsSuccess(t *testing.T) {
 	rec.Script(absent, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(absent, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(absent, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(absent, "iptables", natArgs("-D", listenRuleFor(nsName, infraSubnet, VethIndex(nsName)))...)
 	rec.Script(absent, "ip6tables", nat66Delete(nsName)...)
+	rec.Script(absent, "ip6tables", vethTeardownRulesIPv6(nsName)[1]...)
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 
 	m := &RealManager{Runner: rec}
@@ -243,7 +261,9 @@ func scriptVethTeardown(t *testing.T, rec *execx.Recorder, nsName, infraSubnet s
 	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	rec.Script(execx.Result{}, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE")
+	rec.Script(execx.Result{}, "iptables", natArgs("-D", listenRuleFor(nsName, infraSubnet, VethIndex(nsName)))...)
 	rec.Script(execx.Result{}, "ip6tables", nat66Delete(nsName)...)
+	rec.Script(execx.Result{}, "ip6tables", vethTeardownRulesIPv6(nsName)[1]...)
 	rec.Script(execx.Result{}, "ip", "link", "del", hostVeth)
 }
 
