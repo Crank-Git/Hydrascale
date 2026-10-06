@@ -567,3 +567,41 @@ func TestCompileWritesNoGuard(t *testing.T) {
 		t.Errorf("the IPv4 rule set holds a guard: %v", c.Guard)
 	}
 }
+
+func TestCompileAcceptsTheForwardedListenPortOfEachTailnet(t *testing.T) {
+	// Issue #404. A peer reached the namespace only through a hole that the packets of
+	// the namespace opened, so a direct connection dropped when the conntrack entry
+	// expired. The host forwards the listen port, and the chain accepts that packet.
+	topo := Topology{
+		Devices:    map[string]string{"alpha": "vh0123456789ab"},
+		DNSAddress: "127.0.0.53:53",
+		Ports:      map[string]int{"alpha": 41700},
+	}
+	c, err := Compile(RuleSet{}, topo, EnforceTail)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	want := "-A HYDRASCALE-FWD -o vh0123456789ab -p udp --dport 41700 -m conntrack --ctstate DNAT -j ACCEPT"
+	got := lines(c.Forward)
+	if len(got) < 2 || got[1] != want {
+		t.Errorf("the second forward rule is not %q:\n%s", want, strings.Join(got, "\n"))
+	}
+}
+
+func TestCompileIPv6AcceptsTheForwardedListenPortOfEachTailnet(t *testing.T) {
+	topo := topologyIPv6()
+	topo.Ports = map[string]int{"alpha": 41700, "beta": 41701}
+	c, err := CompileIPv6(RuleSet{}, topo, EnforceTail)
+	if err != nil {
+		t.Fatalf("CompileIPv6: %v", err)
+	}
+	got := lines(c.Forward)
+	for _, want := range []string{
+		"-A HYDRASCALE-FWD -o vh0123456789ab -p udp --dport 41700 -m conntrack --ctstate DNAT -j ACCEPT",
+		"-A HYDRASCALE-FWD -o vhba9876543210 -p udp --dport 41701 -m conntrack --ctstate DNAT -j ACCEPT",
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("the IPv6 forward chain holds no rule %q:\n%s", want, strings.Join(got, "\n"))
+		}
+	}
+}

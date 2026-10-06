@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"hydrascale/internal/execx"
+	"hydrascale/internal/namespaces"
 )
 
 // startCall returns the one command that Start runs for the tailnet corp in the namespace
@@ -34,6 +36,7 @@ func startCall(t *testing.T, base string) execx.Call {
 		"--state=" + filepath.Join(stateDir, "tailscaled.state"),
 		"--socket=" + filepath.Join(stateDir, "tailscaled.sock"),
 		"--statedir=" + stateDir,
+		"--port=" + strconv.Itoa(namespaces.ListenPort(namespaces.VethIndex("ns-corp"))),
 	}}
 }
 

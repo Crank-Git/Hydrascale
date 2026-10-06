@@ -33,7 +33,8 @@ type RemovalPlan struct {
 // vethTeardownRules returns an error when infraSubnet holds no veth addresses.
 func vethTeardownRules(nsName string, infraSubnet string) ([][]string, error) {
 	hostVeth, _ := VethNames(nsName)
-	_, nsIP, _, _, err := VethIPs(infraSubnet, VethIndex(nsName))
+	index := VethIndex(nsName)
+	_, nsIP, _, nsAddr, err := VethIPs(infraSubnet, index)
 	if err != nil {
 		return nil, fmt.Errorf("veth IPs for %s: %w", nsName, err)
 	}
@@ -44,6 +45,7 @@ func vethTeardownRules(nsName string, infraSubnet string) ([][]string, error) {
 		{"-D", "FORWARD", "-i", hostVeth, "-j", "ACCEPT"},
 		{"-D", "FORWARD", "-o", hostVeth, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
 		{"-t", "nat", "-D", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"},
+		append([]string{"-t", "nat", "-D"}, listenForward(nsAddr, ListenPort(index))...),
 	}, nil
 }
 

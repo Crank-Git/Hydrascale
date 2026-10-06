@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"hydrascale/internal/execx"
@@ -335,19 +336,68 @@ func (m *RealManager) SetupVeth(nsName string, index int, infraSubnet string) er
 // it. The reconciler runs EnsureForwardPath on every tick, which costs one command for
 // each namespace.
 // EnsureForwardPath returns an error when the write fails.
+//
+// The forward path also holds the listen forward rule, which sends inbound UDP for the
+// listen port of the namespace to the namespace. See ListenPort.
 func (m *RealManager) EnsureForwardPath(nsName string, index int, infraSubnet string) ([]string, error) {
-	_, nsIP, _, _, err := VethIPs(infraSubnet, index)
+	_, nsIP, _, nsAddr, err := VethIPs(infraSubnet, index)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err := m.run("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err == nil {
-		return nil, nil
+	var written []string
+	for _, rule := range [][]string{
+		{"POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"},
+		listenForward(nsAddr, ListenPort(index)),
+	} {
+		wrote, err := m.ensureNATRule("iptables", nsName, rule)
+		if err != nil {
+			return written, err
+		}
+		if wrote {
+			written = append(written, "nat "+strings.Join(rule, " "))
+		}
 	}
-	if out, err := m.run("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", nsIP, "-j", "MASQUERADE"); err != nil {
-		return nil, fmt.Errorf("add the masquerade rule of %s: %v (%s)", nsName, err, out)
+	return written, nil
+}
+
+// ListenPortBase is the port that the host tailscaled uses by default. The listen port of
+// a namespace follows it, so that no namespace takes the port of the host tailscaled.
+const ListenPortBase = 41641
+
+// ListenPort returns the UDP port of the tailscaled of the namespace with the veth index.
+// The host sends inbound UDP for that port to the namespace, so a peer reaches the
+// namespace without a hole that its own packets opened. A namespace behind the NAT of the
+// host lost a direct connection when the conntrack entry expired, which issue #404
+// measured. The port follows from the veth index alone, as the veth addresses do, so a
+// teardown needs no configuration file.
+func ListenPort(index int) int {
+	return ListenPortBase + index
+}
+
+// listenForward returns the nat rule, without its operation, that sends inbound UDP for
+// port to addr. addr is the address of the namespace, and an IPv6 address carries
+// brackets. The addrtype match limits the rule to a packet for the host itself, so a
+// packet that the host forwards for a container keeps its destination.
+func listenForward(addr string, port int) []string {
+	p := strconv.Itoa(port)
+	return []string{"PREROUTING", "!", "-i", "vh+", "-m", "addrtype", "--dst-type", "LOCAL",
+		"-p", "udp", "--dport", p, "-j", "DNAT", "--to-destination", addr + ":" + p}
+}
+
+// ensureNATRule writes the rule into the nat table of tool when the table does not hold
+// it, and it reports whether it wrote the rule. rule holds no operation. nsName names the
+// namespace in an error.
+func (m *RealManager) ensureNATRule(tool, nsName string, rule []string) (bool, error) {
+	check := append([]string{"-t", "nat", "-C"}, rule...)
+	if _, err := m.run(tool, check...); err == nil {
+		return false, nil
 	}
-	return []string{"nat POSTROUTING -s " + nsIP + " -j MASQUERADE"}, nil
+	add := append([]string{"-t", "nat", "-A"}, rule...)
+	if out, err := m.run(tool, add...); err != nil {
+		return false, fmt.Errorf("add the nat rule %s of %s: %v (%s)", strings.Join(rule, " "), nsName, err, out)
+	}
+	return true, nil
 }
 
 // TeardownVeth removes the veth pair for a namespace.
