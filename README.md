@@ -775,6 +775,17 @@ before the main table, which the kernel consults at 32766. A host that runs its 
 main table. The daemon reads the rule list on each tick and it adds no second copy. A
 shutdown removes each rule and empties the table.
 
+### Direct connections
+
+The `tailscaled` of each namespace listens on a fixed UDP port: 41641 plus the veth index
+of the namespace, so a port from 41642 to 41895. The host forwards inbound UDP for that
+port to the namespace, for IPv4 and for IPv6. A peer then reaches the namespace directly,
+as it reaches the `tailscaled` of the host on 41641. Read the port of a namespace with
+`ip netns exec ns-<id> ss -lunp`.
+
+**Warning: the host forwards each inbound UDP packet for that port to the namespace.** A
+host service that listens on a port from 41642 to 41895 stops receiving that traffic.
+
 ### IPv6
 
 Each namespace gets an IPv6 path when the host holds an IPv6 default route. The daemon
