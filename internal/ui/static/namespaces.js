@@ -102,8 +102,12 @@ function credentialOf(status, id) {
   if (!entry || entry.credential_state === "usable") {
     return null;
   }
-  const word = entry.credential_state === "rejected" ? "credential rejected" : "no credential";
-  return { tone: "crit", word, reason: entry.reason || "" };
+  // A credential is optional, so an absent credential is a quiet state and not a fault.
+  // A credential that the control server rejected is a fault.
+  if (entry.credential_state === "rejected") {
+    return { tone: "crit", word: "credential rejected", reason: entry.reason || "" };
+  }
+  return { tone: "", word: "no credential", reason: entry.reason || "" };
 }
 
 /** addressOf returns the first tailnet address of a namespace, or the absent marker. */
@@ -444,24 +448,42 @@ async function send(route, body, done) {
   }
 }
 
-/** drawRow draws one row of the list. The row wraps when its line is too short. */
+/**
+ * drawRow draws one row of the table. Each cell is fixed, so a value holds the same
+ * column in every row. A pointer or the Enter key opens the panel of the row.
+ */
 function drawRow(row) {
-  const node = el("div", row.muted ? "ns-row ns-muted" : "ns-row");
-  node.setAttribute("role", "option");
+  const node = el("tr", row.muted ? "ns-muted" : undefined);
+  node.dataset.tailnet = row.id;
   node.setAttribute("aria-selected", row.selected ? "true" : "false");
-  node.tabIndex = 0;
+  node.tabIndex = row.muted ? -1 : 0;
 
-  node.append(el("span", "ns-id mono", row.id));
-  node.append(stateSpan(row.state));
-  node.append(stateSpan(row.reachability));
-  if (row.credential) {
-    node.append(stateSpan(row.credential));
-  }
-  node.append(el("span", "ns-peers mono", row.peers));
+  const id = el("th", "mono", row.id);
+  id.scope = "row";
+  node.append(id);
 
-  const address = el("span", "ns-addr mono");
-  address.textContent = `${row.address} · ${row.namespace}`;
+  const stateCell = (state) => {
+    const cell = el("td", "state");
+    if (state) {
+      cell.append(stateSpan(state));
+    } else {
+      cell.append(el("span", "ns-word ns-none", "usable"));
+    }
+    return cell;
+  };
+  node.append(stateCell(row.state));
+  node.append(stateCell(row.reachability));
+  const policy = stateCell(row.credential);
+  policy.classList.add("opt");
+  node.append(policy);
+  node.append(el("td", row.peerCount === null ? "num ns-pending" : "num mono", row.peerCount === null ? "no count yet" : String(row.peerCount)));
+
+  const address = el("td", "opt");
+  address.append(el("span", "ns-addr mono", row.address));
   node.append(address);
+  const namespace = el("td", "opt");
+  namespace.append(el("span", "ns-addr mono", row.namespace));
+  node.append(namespace);
 
   const open = () => {
     if (row.actionsDisabled) {
@@ -475,6 +497,14 @@ function drawRow(row) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       open();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = event.key === "ArrowDown" ? node.nextElementSibling : node.previousElementSibling;
+      if (next) {
+        next.focus();
+      }
     }
   });
   return node;
@@ -482,12 +512,12 @@ function drawRow(row) {
 
 /** drawPanel draws the contextual panel. FR-console-26. */
 function drawPanel(panel) {
-  const aside = el("aside", "card ns-panel");
+  const aside = el("aside", "frame ns-panel");
   aside.setAttribute("aria-label", `The tailnet ${panel.id}`);
 
-  const head = el("div", "ns-panel-head");
-  head.append(el("h2", "mono", panel.id));
-  const close = el("button", "btn ns-close", "Close");
+  const head = el("div", "frame-head");
+  head.append(el("h2", "frame-title mono", panel.id));
+  const close = el("button", "btn ns-sm", "Close");
   close.type = "button";
   close.addEventListener("click", () => {
     selected = null;
@@ -774,20 +804,32 @@ function render() {
   if (!section || !snapshot) {
     return;
   }
+  // A redraw replaces every element, so the view reads which row held the focus first and
+  // gives the focus back to that row after.
+  const focusedRow = document.activeElement && document.activeElement.closest
+    ? document.activeElement.closest("#view-namespaces tbody tr")
+    : null;
+  const focusID = focusedRow ? focusedRow.dataset.tailnet : null;
   section.replaceChildren();
 
   if (snapshot.loading) {
-    const card = el("div", "card");
-    card.append(el("span", "label", "Loading"));
-    card.append(el("p", "note", "The first poll has not returned."));
-    section.append(card);
+    const frame = el("div", "frame");
+    frame.append(el("p", "note", "The first poll has not returned."));
+    section.append(frame);
     return;
   }
 
   const values = detailValues();
   const rows = buildRows(snapshot.status, values, { selected, removing: Array.from(removing) });
 
-  const head = el("div", "ns-head");
+  const grid = el("div", "ns-grid");
+  const frame = el("section", "frame ns-list");
+  frame.setAttribute("aria-labelledby", "tailnets-heading");
+  const head = el("div", "frame-head");
+  const heading = el("h2", "frame-title", "Tailnets");
+  heading.id = "tailnets-heading";
+  head.append(heading);
+  head.append(el("span", "frame-meta mono ns-count", rows.length === 1 ? "1 tailnet" : `${rows.length} tailnets`));
   const add = el("button", "btn primary", "Add tailnet");
   add.type = "button";
   add.addEventListener("click", () => {
@@ -796,28 +838,53 @@ function render() {
     render();
   });
   head.append(add);
-  section.append(head);
+  frame.append(head);
 
   if (rows.length === 0) {
-    const card = el("div", "card empty");
-    card.append(el("span", "label", "Empty"));
-    card.append(el("p", undefined, "No tailnet is configured. Add one, and this view lists it with its state, its peer count, and its address."));
-    section.append(card);
+    frame.append(el("p", "note", "No tailnet is configured. Add one, and this view lists it with its state, its peer count, and its address."));
   } else {
-    const grid = el("div", "ns-grid");
-    const list = el("div", "ns-list");
-    list.setAttribute("role", "listbox");
-    list.setAttribute("aria-label", "The tailnets of this host");
+    const table = el("table", "board ns-board");
+    table.append(el("caption", "sr", "One row per tailnet. Select a row to open its panel."));
+    const headRow = el("tr");
+    for (const [label, className] of [
+      ["Tailnet", ""],
+      ["State", ""],
+      ["Reachability", ""],
+      ["Policy", "opt"],
+      ["Peers", "num"],
+      ["Address", "opt"],
+      ["Namespace", "opt"],
+    ]) {
+      const cell = el("th", className || undefined, label);
+      cell.scope = "col";
+      headRow.append(cell);
+    }
+    const thead = el("thead");
+    thead.append(headRow);
+    table.append(thead);
+    const body = el("tbody");
     for (const row of rows) {
-      list.append(drawRow(row));
+      body.append(drawRow(row));
     }
-    grid.append(list);
+    table.append(body);
+    const wrap = el("div", "board-frame");
+    wrap.append(table);
+    frame.append(wrap);
+  }
+  grid.append(frame);
 
-    const panel = buildPanel(snapshot.status, values, events.value, selected);
-    if (panel) {
-      grid.append(drawPanel(panel));
+  const panel = buildPanel(snapshot.status, values, events.value, selected);
+  if (panel) {
+    grid.classList.add("ns-open");
+    grid.append(drawPanel(panel));
+  }
+  section.append(grid);
+
+  if (focusID) {
+    const again = section.querySelector(`tbody tr[data-tailnet="${CSS.escape(focusID)}"]`);
+    if (again) {
+      again.focus();
     }
-    section.append(grid);
   }
 
   if (toast) {

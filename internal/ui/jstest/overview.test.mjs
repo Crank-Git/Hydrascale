@@ -53,14 +53,14 @@ test("the row of the recent activity panel puts its message on a line of its own
   assert.match(message, /flex:\s*1 0 100%/);
 });
 
-test("the activity view keeps the one-line row, because it is wider than the panel", async () => {
+test("the activity view draws a table and not the stacked row of the overview panel", async () => {
   // Issue #236. The two-line row belongs to the 320 pixel panel of the overview. The
-  // activity view holds the whole width of the page, therefore its row stays on one line
-  // and the writer of the view adds no ev-stack class.
+  // activity view holds the whole width of the page in fixed table columns, therefore its
+  // writer adds no ev-stack class and no ev class.
   const source = await readFile(new URL("../static/panels.js", import.meta.url), "utf8");
-  assert.match(source, /'<div class="ev">'/);
+  assert.match(source, /'<tr class="log-row">'/);
   assert.doesNotMatch(source, /ev-stack/);
 
-  const row = await ruleBody(".ev");
-  assert.doesNotMatch(row, /flex-wrap/);
+  const table = await ruleBody(".log");
+  assert.match(table, /table-layout:\s*fixed/);
 });

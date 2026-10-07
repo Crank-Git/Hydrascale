@@ -37,8 +37,10 @@ function element(tag, className, text) {
  * not write. The value it holds is the poll interval that the settings list states above.
  */
 function intervalCard(snapshot) {
-  const card = element("section", "card");
-  card.append(element("h2", undefined, "Poll interval"));
+  const card = element("section", "frame");
+  const head = element("div", "frame-head");
+  head.append(element("h2", "frame-title", "Poll interval"));
+  card.append(head);
 
   const note = element("p", "note", "The console reads ");
   note.append(element("code", "mono", `GET ${STATUS_ROUTE}`));
@@ -76,10 +78,9 @@ function draw(section, snapshot) {
   section.replaceChildren();
 
   if (snapshot.loading) {
-    const card = element("div", "card");
-    card.append(element("span", "label", "Loading"));
-    card.append(element("p", "note", "The first poll has not returned."));
-    section.append(card);
+    const frame = element("div", "frame");
+    frame.append(element("p", "note", "The first poll has not returned."));
+    section.append(frame);
     return;
   }
 
@@ -88,10 +89,12 @@ function draw(section, snapshot) {
   const settings = settingsModel(status, snapshot.interval, window.location.host);
 
   // The serializer escapes every value that the daemon reported, and a test asserts that.
-  const written = element("div", "panels");
+  // The frames sit in two columns on a wide screen, so a short frame never stretches a
+  // label and its value across the whole page.
+  const written = element("div", "settings-grid");
   written.innerHTML = dnsMarkup(dns) + settingsMarkup(settings);
+  written.append(intervalCard(snapshot));
   section.append(written);
-  section.append(intervalCard(snapshot));
 }
 
 registerView("settings", draw);

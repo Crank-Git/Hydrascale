@@ -32,17 +32,32 @@ The console is a departure board. Each tailnet is one row of fixed cells. The co
 never move. Only the values in the cells change.
 
 The page is a warm black ground. Square cells sit in one frame, with a 1 pixel gutter
-between two cells. A cell face is one step lighter than the ground. The console uses no
-card, no shadow, and no corner radius in the shell and in the Overview view.
+between two cells. A cell face is one step lighter than the ground. No view uses a
+rounded corner or a shadow. A dialog keeps the one pop shadow.
 
 ## The views and their state
 
-The shell and the Overview view carry the board design that this document states.
+Every view uses the same three parts:
 
-The Namespaces, Access, Policy, Activity, and Settings views read the same tokens. They
-still carry their earlier card layout. Each of them gets its own redesign later. Do not
-copy their card layout into a new surface. This document does not state that layout as
-part of the system.
+- A frame holds one region. A frame is the page colour inside one border. Its first line
+  is a header strip that holds the title on the left and a count or a tool on the right.
+  `.frame` and `.frame-head` draw it. A `.card` that opens with a `.label` or a
+  `.card-head` draws the same strip.
+- A board table holds one row per item in fixed columns. `.board` draws it. The Overview
+  and the Namespaces view use it.
+- A segmented control holds a choice. The current choice reverses its cell and takes no
+  accent. `.seg` draws it.
+
+Each view applies them as follows:
+
+| View | Regions |
+|---|---|
+| Overview | The verdict line, the board, the topology frame, and the events frame. |
+| Namespaces | The tailnet table, and the panel frame of the selected tailnet. The add action holds the accent. |
+| Access | The toolbar, the allowed paths frame, the reachability frame, and the rules frame. A rule row is a grid with fixed columns for the source, the connector, and the destination. |
+| Policy | The tailnet list frame, and the policy document frame. The visual editor shows its ten sections as one grid of cells. |
+| Activity | One events frame with two filters: notable or every event, and the tailnet. A reconcile tick is one folded row. The table states each date once. |
+| Settings | Titled frames in two columns. A label column of 140 pixels gives each frame one left edge for its values. |
 
 ## The token files
 

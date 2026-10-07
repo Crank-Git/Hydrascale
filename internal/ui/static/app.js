@@ -76,7 +76,7 @@ export const VIEWS = [
   {
     id: "policy",
     heading: "Policy",
-    lead: "The access policy that each control server holds. A policy change affects every device in the tailnet, not only this host.",
+    lead: "The access policy that each control server holds.",
     empty: "The daemon declares no tailnet. Add one, and this view lists it with its control server kind and its credential state.",
     pending: "This view lists every tailnet with its control server kind and its credential state, and it shows the policy document of a selection.",
   },
