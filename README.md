@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events that are not routine reconcile ticks." width="900">
+  <img src="docs/site/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events that are not routine reconcile ticks." width="900">
 </p>
 
 <p align="center"><i>The Overview view. The first line answers whether every tailnet is healthy, and a tailnet with a fault sorts to the top of the board. The tailnet names, the addresses, and the events are placeholders.</i></p>
@@ -190,7 +190,7 @@ application inside the binary, so it makes no request to another host and it nee
 step. It holds six views: Overview, Namespaces, Access, Policy, Activity, and Settings.
 
 <p align="center">
-  <img src="docs/images/console-namespaces.png" alt="The Namespaces view of the console. A table holds one row per tailnet with its state, reachability, policy credential, peer count, address, and namespace. The panel of the selected tailnet lists its fields, its peers, its recent events, and the Disconnect and Remove actions." width="900">
+  <img src="docs/site/images/console-namespaces.png" alt="The Namespaces view of the console. A table holds one row per tailnet with its state, reachability, policy credential, peer count, address, and namespace. The panel of the selected tailnet lists its fields, its peers, its recent events, and the Disconnect and Remove actions." width="900">
 </p>
 
 <p align="center"><i>The Namespaces view, with the panel of one tailnet open. The names and the addresses are placeholders.</i></p>
@@ -306,14 +306,14 @@ host reaches no tailnet.
 The daemon detects the migration by the presence of the `access` key. That operator
 therefore gets no preserving rule set and no copy at `<config>.pre-v1.backup`. To start
 version 1.0 in the mode `observe`, write `mode: observe` and one rule per tailnet to
-`internet` together. [docs/UPGRADING.md](docs/UPGRADING.md), section "To upgrade with no
-enforcement at all", holds that order and the steps after it.
+`internet` together. [docs/site/operations/upgrade.md](docs/site/operations/upgrade.md),
+section "To upgrade with no enforcement at all", holds that order and the steps after it.
 
 The Access view of the console shows the rule set, stages an edit, and applies it. The
 reconciler writes the changed rule set on the next tick.
 
 <p align="center">
-  <img src="docs/images/console-access.png" alt="The Access view of the console. A dotted curve joins each tailnet to the internet node or the host node. A reachability matrix marks the four allowed paths, and the rule list beside it holds one row per rule with its port field." width="900">
+  <img src="docs/site/images/console-access.png" alt="The Access view of the console. A dotted curve joins each tailnet to the internet node or the host node. A reachability matrix marks the four allowed paths, and the rule list beside it holds one row per rule with its port field." width="900">
 </p>
 
 <p align="center"><i>The Access view. A filled square and a drawn curve each mark an allowed path. A denied path has neither.</i></p>
@@ -325,7 +325,7 @@ The Policy view of the console reads that document, validates it, and writes it 
 is the upstream half of reachability; the local rules are the half that this host enforces.
 
 <p align="center">
-  <img src="docs/images/console-policy.png" alt="The Policy view of the console. The tailnet list states the credential state of each tailnet. The policy document of the selected tailnet shows in the Text editor, with line numbers, the etag, and the Validate, Discard, and Push actions." width="900">
+  <img src="docs/site/images/console-policy.png" alt="The Policy view of the console. The tailnet list states the credential state of each tailnet. The policy document of the selected tailnet shows in the Text editor, with line numbers, the etag, and the Validate, Discard, and Push actions." width="900">
 </p>
 
 <p align="center"><i>The Policy view, with the document of one tailnet open in the Text editor. A tailnet with no credential states the exact keys that a policy read needs when you select it.</i></p>
@@ -370,7 +370,7 @@ stages an edit to one section at a time. Text stays the way to read or change a 
 that Visual does not yet build.
 
 <p align="center">
-  <img src="docs/images/console-policy-visual-rules.png" alt="The section grid of the Visual editor, with ten sections and their entry counts, and the Rules section open below it with the reachability matrix and the rule list." width="900">
+  <img src="docs/site/images/console-policy-visual-rules.png" alt="The section grid of the Visual editor, with ten sections and their entry counts, and the Rules section open below it with the reachability matrix and the rule list." width="900">
 </p>
 
 <p align="center"><i>The section grid. Rules opens by default, with a reachability matrix above the rule list.</i></p>
@@ -393,18 +393,18 @@ The section grid lists ten sections, each with a count of the entries it holds:
   its result as a state dot and a word.
 
 <p align="center">
-  <img src="docs/images/console-policy-visual-ssh.png" alt="The SSH access section, with two rules after Add, and Validate and Discard enabled." width="900">
+  <img src="docs/site/images/console-policy-visual-ssh.png" alt="The SSH access section, with two rules after Add, and Validate and Discard enabled." width="900">
 </p>
 
 <p align="center"><i>The SSH access section. A staged rule enables Validate and Discard, the same as a Text edit. Push is available after a validate passes.</i></p>
 
 <p align="center">
-  <img src="docs/images/console-policy-visual-tests.png" alt="The Tests section, with one test marked pass after Run." width="900">
+  <img src="docs/site/images/console-policy-visual-tests.png" alt="The Tests section, with one test marked pass after Run." width="900">
 </p>
 
 <p align="center"><i>The Tests section, after Run. A test marks pass or names the reason the control server gives.</i></p>
 
-`docs/manual/policy-visual-editor.md` walks each section in order, with a screenshot
+`docs/site/guides/policy-visual-editor.md` walks each section in order, with a screenshot
 per step.
 
 ## Credentials
@@ -686,7 +686,7 @@ daemon records the event `dns.unprotected`, and the Overview view of the console
 namespace as unprotected.
 
 <p align="center">
-  <img src="docs/images/console-settings.png" alt="The Settings view of the console. Six frames in two columns state the resolver, the split DNS domains, the protection state of each namespace, the host file checksum, the paths and the poll interval of the daemon, and the console warning." width="900">
+  <img src="docs/site/images/console-settings.png" alt="The Settings view of the console. Six frames in two columns state the resolver, the split DNS domains, the protection state of each namespace, the host file checksum, the paths and the poll interval of the daemon, and the console warning." width="900">
 </p>
 
 <p align="center"><i>The Settings view, which holds the resolver state and the protection state of each namespace.</i></p>
@@ -1245,7 +1245,7 @@ sudo journalctl -u hydrascale -f
 ## Architecture
 
 <p align="center">
-  <img src="docs/images/architecture.svg" alt="One Linux host. The config file, the reconciler, the console and the DNS forwarder sit on the host. A veth pair joins the host to one network namespace per tailnet, and each namespace runs its own tailscaled and its own tailscale0 interface." width="900">
+  <img src="docs/site/images/architecture.svg" alt="One Linux host. The config file, the reconciler, the console and the DNS forwarder sit on the host. A veth pair joins the host to one network namespace per tailnet, and each namespace runs its own tailscaled and its own tailscale0 interface." width="900">
 </p>
 
 The daemon runs one network namespace per tailnet. A veth pair joins each namespace to the

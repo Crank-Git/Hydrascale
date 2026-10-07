@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// Covers the "Use the Visual editor of Policy" manual page: docs/manual/policy-visual-editor.md.
+// Covers the "Use the Visual editor of Policy" manual page: docs/site/guides/policy-visual-editor.md.
 // Every test opens the jbones tailnet, a real read-and-write Tailscale tailnet, and stages
 // an edit in the browser only. No test clicks Push, so no edit here reaches the control
 // server.

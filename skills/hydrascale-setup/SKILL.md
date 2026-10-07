@@ -86,8 +86,8 @@ denies that packet. Print this order:
 The daemon detects the migration by the presence of the `access` key.
 `internal/config/migrate.go:72` returns early when the configuration file already holds an
 `access` block. An `access` block that the operator writes before the first start
-therefore suppresses the migration. `docs/UPGRADING.md` holds both orders and the full
-procedure. Read it before you print an upgrade step.
+therefore suppresses the migration. `docs/site/operations/upgrade.md` holds both orders
+and the full procedure. Read it before you print an upgrade step.
 
 ## The console
 
