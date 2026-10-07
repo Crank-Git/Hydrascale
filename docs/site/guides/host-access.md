@@ -79,7 +79,7 @@ sudo hydrascale tailscale corp-prod -- up --accept-routes
 The configuration file needs no change. A subnet route appears on the host within one
 tick after the login. The daemon removes it when the tailnet goes away.
 
-## The naming convention
+## The names of the peers
 
 Each peer takes the name `<tailnet-id>-<hostname>`. Two tailnets with a peer of the same
 name therefore give two different names on the host.

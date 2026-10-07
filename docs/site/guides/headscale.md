@@ -58,7 +58,7 @@ The namespace stays up, and the daemon manages it from that point.
 - **MagicDNS.** The DNS names of host access depend on the DNS configuration of the
   control server. Headscale serves MagicDNS, and its suffix and its behaviour can differ
   from Tailscale. The daemon also exports the split DNS domains of each tailnet to the
-  resolver of the host, and a Headscale control server can serve no split DNS. If a name
+  resolver of the host. A Headscale control server can serve no split DNS. If a name
   does not resolve, read the Headscale DNS configuration.
 - **DERP relays.** Tailscale runs its own global DERP relay network. Headscale uses the
   same relays, its own relays, or both. If two peers cannot connect, read the DERP map of

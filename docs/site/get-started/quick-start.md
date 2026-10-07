@@ -66,9 +66,9 @@ reports `healthy` and `running`. An earlier read reports `down` and `degraded`, 
 normal state after a start. If a tailnet still reports `down` after 60 seconds, the
 tailnet has a real failure.
 
-The `access` block of this file sets the local rules. Read
-[Local rules](../concepts/local-rules.md) before you start the daemon on a host that
-already uses its tailnets, because the mode `enforce` denies each path that no rule allows.
+The `access` block of this file sets the local rules. The mode `enforce` denies each path
+that no rule allows. If the host already uses its tailnets, read
+[Local rules](../concepts/local-rules.md) before you start the daemon.
 
 ## Next step
 
