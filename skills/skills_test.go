@@ -1,13 +1,104 @@
 package skills
 
 import (
+	"io/fs"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// The test names the skills that the set holds today. The test reads no file of the
-// working directory, because the gate runs this binary from another directory.
-var knownSkills = []string{"hydrascale-setup", "hydrascale-troubleshoot", "tailnet-exec"}
+// skillTests holds one entry for each skill directory. An entry names the content tests
+// of that skill. The compiler checks each name, so a renamed test changes this table too.
+// A new skill directory without an entry fails TestEachSkillHasATestEntry.
+// The test reads the embedded set, not the working directory, because the gate runs this
+// binary from another directory.
+var skillTests = map[string][]func(*testing.T){
+	"hydrascale-setup": {
+		TestTheSetupSkillStatesSudo,
+		TestTheSetupSkillAllowsEachReadOnlyCommand,
+		TestTheSetupSkillStatesEachStatusValue,
+		TestTheSetupSkillNamesEachHostChange,
+		TestTheSetupSkillStatesTheConfigurationKeys,
+		TestTheSetupSkillStatesTheUpgradeInASectionOfItsOwn,
+		TestTheSetupSkillStatesTheTunnelOnAnyLocalPort,
+		TestTheSetupSkillNamesNoSourceLine,
+	},
+	"hydrascale-troubleshoot": {
+		TestTheTroubleshootSkillIsEmbedded,
+		TestTheTroubleshootSkillHoldsFiveDiagnoses,
+		TestTheTroubleshootSkillAllowsNoHostChange,
+		TestTheTroubleshootSkillNamesEachEvent,
+		TestTheTroubleshootSkillDiagnosesIPv6,
+		TestTheTroubleshootSkillDiagnosesADirectConnection,
+		TestTheTroubleshootSkillDiagnosesDNS,
+		TestTheTroubleshootSkillDiagnosesADisplacedJumpRule,
+		TestTheTroubleshootSkillDiagnosesARejectedCredential,
+		TestTheTroubleshootSkillStatesTheResultWithNoFault,
+		TestTheTroubleshootSkillNamesNoSourceLine,
+	},
+	"tailnet-exec": {
+		TestTheTailnetExecSkillStatesRootForEachForm,
+		TestTheTailnetExecSkillStatesTheStandaloneStatus,
+		TestTheTailnetExecSkillStatesTheAlias,
+		TestTheTailnetExecSkillStatesTheAliasZone,
+		TestTheTailnetExecSkillStatesWrapApply,
+		TestTheTailnetExecSkillLinksTheCommandLinePage,
+	},
+}
+
+// skillsWithNoTest returns each name of dirs that tests holds no test for, in the order of
+// dirs. An entry with an empty list counts as no entry.
+func skillsWithNoTest(dirs []string, tests map[string][]func(*testing.T)) []string {
+	var missing []string
+	for _, dir := range dirs {
+		if len(tests[dir]) == 0 {
+			missing = append(missing, dir)
+		}
+	}
+	return missing
+}
+
+func TestEachSkillHasATestEntry(t *testing.T) {
+	stub := func(*testing.T) {}
+
+	t.Run("reports a skill directory that holds no test entry", func(t *testing.T) {
+		got := skillsWithNoTest([]string{"demo", "new-skill"}, map[string][]func(*testing.T){"demo": {stub}})
+		if strings.Join(got, ",") != "new-skill" {
+			t.Errorf("skillsWithNoTest() = %q, want %q", got, []string{"new-skill"})
+		}
+	})
+
+	t.Run("reports a skill directory whose test entry holds no test", func(t *testing.T) {
+		got := skillsWithNoTest([]string{"demo"}, map[string][]func(*testing.T){"demo": nil})
+		if strings.Join(got, ",") != "demo" {
+			t.Errorf("skillsWithNoTest() = %q, want %q", got, []string{"demo"})
+		}
+	})
+
+	t.Run("holds a test entry for each directory of the embedded set", func(t *testing.T) {
+		entries, err := fs.ReadDir(files, ".")
+		if err != nil {
+			t.Fatalf("fs.ReadDir() = %v, want no error", err)
+		}
+		var dirs []string
+		for _, entry := range entries {
+			if entry.IsDir() {
+				dirs = append(dirs, entry.Name())
+			}
+		}
+		if len(dirs) == 0 {
+			t.Fatal("the embedded set holds no directory, so the test reads the wrong set")
+		}
+		for _, name := range skillsWithNoTest(dirs, skillTests) {
+			t.Errorf("skills/%s holds no entry in skillTests. Write a content test and add it to the table", name)
+		}
+		for name := range skillTests {
+			if !slices.Contains(dirs, name) {
+				t.Errorf("skillTests holds an entry for %q, and the embedded set holds no such directory", name)
+			}
+		}
+	})
+}
 
 func TestAll(t *testing.T) {
 	t.Run("returns one skill for each directory of the skill set", func(t *testing.T) {
@@ -15,8 +106,8 @@ func TestAll(t *testing.T) {
 		if err != nil {
 			t.Fatalf("All() = %v, want no error", err)
 		}
-		if len(set) < len(knownSkills) {
-			t.Errorf("len(All()) = %d, want %d or more", len(set), len(knownSkills))
+		if len(set) != len(skillTests) {
+			t.Errorf("len(All()) = %d, want %d", len(set), len(skillTests))
 		}
 	})
 
@@ -40,7 +131,7 @@ func TestAll(t *testing.T) {
 		if err != nil {
 			t.Fatalf("All() = %v, want no error", err)
 		}
-		for _, want := range knownSkills {
+		for want := range skillTests {
 			found := false
 			for _, skill := range set {
 				if skill.Name == want {
