@@ -13,7 +13,7 @@ const BackupSuffix = ".pre-v1.backup"
 
 // BackupFile writes a copy of the file at path to backupPath.
 // The copy takes the mode of the source file, because the configuration file can hold an
-// auth key; see SA-23 and SA-24 of docs/security-audit.md.
+// auth key; see SA-23 and SA-24 of docs/site/security/audit.md.
 // BackupFile writes a temporary file in the directory of backupPath and it renames that
 // file over backupPath, so a reader never sees a partial copy and a previous copy at a
 // wider mode never survives.

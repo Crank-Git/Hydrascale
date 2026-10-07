@@ -186,41 +186,42 @@ body.rv-open .layout { padding-right:21rem; }
 <ul>
 <li><strong>FR-docs-1</strong> — <code>README.md</code> shows the new mark rather than <code>assets/logo.png</code>.
 </li>
-<li><strong>FR-docs-2</strong> — <code>README.md</code> describes the console, the local rules, and the upstream
+<li><strong>FR-docs-2</strong> — <code>README.md</code> holds one paragraph and one screenshot of the console. The
 </li>
 </ul>
-<p>policy feature.</p>
+<p>documentation site describes the local rules and the upstream policy. Feature <code>15-readme-slim.md</code> moved this fact.</p>
 <ul>
 <li><strong>FR-docs-3</strong> — <code>README.md</code> contains no desktop client section.
 </li>
 <li><strong>FR-docs-4</strong> — <code>README.md</code> states that the console has no authentication and that it
 </li>
 </ul>
-<p>binds a loopback address.</p>
+<p>binds a loopback address. The README links to the Security section of the site for the detail.</p>
 <ul>
-<li><strong>FR-docs-5</strong> — <code>README.md</code> states that <code>socket_group</code> membership gives full control of
+<li><strong>FR-docs-5</strong> — The Security section of the site states that <code>socket_group</code> membership
 </li>
 </ul>
-<p>the daemon.</p>
+<p>gives full control of the daemon. Feature <code>15-readme-slim.md</code> moved this fact.</p>
 <ul>
-<li><strong>FR-docs-6</strong> — <code>README.md</code> documents every new configuration key: <code>console</code>, <code>access</code>,
+<li><strong>FR-docs-6</strong> — The configuration page of the site documents every configuration key,
 </li>
 </ul>
-<p><code>secrets_file</code>, and <code>dns.allow_unprotected</code>.</p>
+<p>which includes <code>console</code>, <code>access</code>, <code>secrets_file</code>, and <code>dns.allow_unprotected</code>. Feature <code>15-readme-slim.md</code> moved this fact.</p>
 <ul>
-<li><strong>FR-docs-7</strong> — <code>README.md</code> documents the credential setup for Tailscale and for
+<li><strong>FR-docs-7</strong> — The credentials page of the site documents the credential setup for
 </li>
 </ul>
-<p>Headscale.</p>
+<p>Tailscale and for Headscale. Feature <code>15-readme-slim.md</code> moved this fact.</p>
 <ul>
-<li><strong>FR-docs-8</strong> — <code>README.md</code> states that a Headscale control server needs
+<li><strong>FR-docs-8</strong> — The Headscale page of the site states that a Headscale control server needs
 </li>
 </ul>
-<p><code>policy.mode: "database"</code> for a policy write. <code>hscontrol/types/config.go:54</code> at tag <code>v0.29.3</code> declares the value.</p>
+<p><code>policy.mode: "database"</code> for a policy write. <code>hscontrol/types/config.go:54</code> at tag <code>v0.29.3</code> declares the value. Feature <code>15-readme-slim.md</code> moved this fact.</p>
 <ul>
-<li><strong>FR-docs-9</strong> — The table of contents matches the sections.
+<li><strong>FR-docs-9</strong> — <code>README.md</code> holds no table of contents, because it is short enough to read
 </li>
 </ul>
+<p>whole. Feature <code>15-readme-slim.md</code> removed the table.</p>
 <h4 id="docs-and-release-the-design-document">The design document</h4>
 <ul>
 <li><strong>FR-docs-10</strong> — <code>docs/DESIGN.md</code> states the palette, the typography, the shape scale,

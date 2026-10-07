@@ -159,7 +159,8 @@ line reaches the host network. The only line that routes the traffic is a commen
 - **FR-skills-33** — `.claude/skills/tailnet-exec` and `.claude/skills/hydrascale-setup`
   are symbolic links to the matching directory under `skills/`.
 - **FR-skills-34** — `README.md` holds one section that states the command
-  `hydrascale skills install` and what the two skills do.
+  `hydrascale skills install` and what the two skills do. The section links to the skills
+  page of the documentation site for the detail.
 - **FR-skills-35** — `scripts/check-hygiene.sh` passes with the new files.
 
 ## User flows

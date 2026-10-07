@@ -6,6 +6,35 @@ and the Tests section. [Read and change the upstream policy in
 Policy](policy-editor.md) covers the Text editor and the Validate, Discard, and Push
 buttons that both editors share.
 
+## The visual editor and the text editor
+
+The Policy view offers two ways to read and change the policy document. The **Visual**
+tab sits next to the **Text** tab. The visual editor shows the document as sections, and
+it stages an edit to one section at a time. The text editor stays the way to read or
+change a section that the visual editor does not build yet.
+
+## The ten sections
+
+The section grid lists ten sections. Each section shows a count of the entries that it
+holds.
+
+- **Groups**, **Hosts**, **Tag owners**, and **IP sets** hold the named sets that a rule
+  refers to.
+- **Rules** holds the reachability matrix and the rule list. A filled square in the
+  matrix marks an allowed path, in the same visual language as the Access view.
+- **SSH access** holds the SSH rules. Each SSH rule has a source, a destination, a user
+  list, and an action. An SSH rule grants an SSH connection or checks it.
+- **Auto-approvers** holds the routes and the exit node that the control server approves
+  with no operator step.
+- **Node attributes** holds the `nodeAttrs` entries of the document. Each entry has a
+  target list and an attribute list.
+- **Postures** holds the device posture definitions that a check rule refers to.
+- **Tests** holds the assertions that the document declares. The **Run** button sends the
+  staged document to the validate route of the control server. Each row then shows its
+  result as a state dot and a word.
+
+The steps below walk each section in order.
+
 ## 1. Open the Visual editor
 
 Open a tailnet that reads "read and write" in the Policy tailnet list. The policy
