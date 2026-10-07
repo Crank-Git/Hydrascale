@@ -105,15 +105,16 @@ command that failed. Report that message to the operator.
 If the host holds no upstream device, the repair is on the network of the host. Hydrascale
 cannot give the host an IPv6 default route.
 
-If the kernel holds no `force_forwarding`, print this repair for the operator:
+If the kernel holds no `net.ipv6.conf.all.force_forwarding`, print this repair for the
+operator:
 
 ```sh
 sudo "$EDITOR" /etc/hydrascale/config.yaml   # add the line: ipv6: true
 ```
 
 The daemon reads the configuration file on each tick. With `ipv6: true`, the daemon sets
-`net.ipv6.conf.all.forwarding`. It first changes `accept_ra` from 1 to 2 on each device,
-so the host keeps its own IPv6 default route.
+`net.ipv6.conf.all.forwarding`. It first changes `net.ipv6.conf.<device>.accept_ra` from
+1 to 2 on each device, so the host keeps its own IPv6 default route.
 
 The page https://crank-git.github.io/Hydrascale/concepts/networking/ states the IPv6 path
 in the section "IPv6".

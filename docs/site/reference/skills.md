@@ -43,5 +43,14 @@ The binary holds three skills:
   them.
 
 `skills/hydrascale-setup/SKILL.md`, `skills/tailnet-exec/SKILL.md`, and
-`skills/hydrascale-troubleshoot/SKILL.md` hold the source of the three skills. A test reads each file, and it fails when a skill names a `hydrascale` command
-that the binary does not hold.
+`skills/hydrascale-troubleshoot/SKILL.md` hold the source of the three skills. A test
+reads each file. The test fails when a skill states one of these:
+
+- A `hydrascale` command that the binary does not hold, or a flag that the command does
+  not declare.
+- A configuration key in backticks that the daemon does not read.
+- An event type in backticks that the daemon does not record.
+- A source line in the form `file.go:NN`.
+- A link to a page that this site does not hold, or a path under `docs/site/`.
+
+A second test fails when a directory under `skills/` holds no content test.
