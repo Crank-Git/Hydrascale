@@ -935,7 +935,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-noports{color:var(--text-tertiary); white-space:nowrap}
 .ac-states .chip{min-height:38px; padding:0 var(--sp-3)}
 .ac-rule .chip{min-height:36px}
-.ac-portfield{width:18ch}
+.ac-portfield{width:100%; max-width:36ch}
 /* A phone stacks the controls of a rule row below the path. */
 @media (max-width:600px){
   .ac-rule{grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr); grid-auto-flow:row}
@@ -1377,8 +1377,10 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-check input:checked::after{content:""; width:10px; height:10px; background:var(--text-body)}
 .ns-check input:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
-/* Access: the port field states "all ports" when it is empty, so the row states it once. */
-.ac-rule:has(.ac-portfield) .ac-noports{display:none}
+/* The port field holds the ports of the rule, or states "all ports" when it is empty, so
+   a row with a field states its ports once, in the field. */
+.ac-rule:has(.ac-portfield) .ac-noports,
+.ac-rule:has(.ac-portfield) .ac-ports{display:none}
 
 /* Policy: the etag breaks inside its chip, and a tab takes two columns. */
 /* The etag spans the width of the document, so its edges meet the edges of the editor. */

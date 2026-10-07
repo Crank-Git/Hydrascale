@@ -7,15 +7,21 @@ test("lands on Overview and lists every tailnet with its reconciler state", asyn
 
   await expect(page.locator("#view-heading")).toHaveText("Overview");
 
-  // The statistics row reports a tailnet count and a peer count as machine values.
-  const stats = page.locator(".stat");
-  await expect(stats.filter({ hasText: "Tailnets" }).locator(".stat-value")).toHaveText(/^\d+$/);
-  await expect(stats.filter({ hasText: "Peers" }).locator(".stat-value")).toHaveText(/^\d+$/);
+  // The verdict line answers the glance: a coloured dot, a sentence, and counts that are
+  // the sums of the board columns.
+  const verdict = page.locator(".verdict");
+  await expect(verdict.locator(".verdict-text .dot")).toBeVisible();
+  const counts = verdict.locator(".verdict-counts .count");
+  await expect(counts.nth(0)).toHaveText(/^\d+ tailnets?$/);
+  await expect(counts.nth(1)).toHaveText(/^\d+ peers?$/);
 
-  // The reconciler state renders as a coloured dot plus a lowercase word, per the console's
-  // state-rendering convention.
-  const reconciler = stats.filter({ hasText: "Reconciler" }).locator(".stat-value");
-  await expect(reconciler.locator(".dot")).toBeVisible();
+  // The board holds one row per tailnet. The state renders as a coloured dot plus a
+  // lowercase word, per the console's state-rendering convention.
+  for (const id of ["jbones", "havoc"]) {
+    const row = page.locator(`.board tbody tr[data-tailnet="${id}"]`);
+    await expect(row).toBeVisible();
+    await expect(row.locator("td.state").first().locator(".dot")).toBeVisible();
+  }
 
   // Every declared tailnet draws a node in the topology diagram, labelled with its id.
   const topology = page.getByRole("img", { name: "The topology of every tailnet, the host, and the internet." });
