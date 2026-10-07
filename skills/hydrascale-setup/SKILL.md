@@ -26,12 +26,13 @@ host.
 | `sudo hydrascale env <id>` | The shell lines for the namespace of one tailnet. | Yes. |
 | `hydrascale version` | The version of the binary. | No. |
 
-These commands need `sudo` for two reasons:
+These commands need `sudo` for three reasons:
 
 - The daemon writes `/etc/hydrascale/config.yaml` at mode `0600`. `list`, `env`, and
   `diff` read that file.
+- `diff` also reads the iptables chains, which needs root.
 - The control socket `/var/lib/hydrascale/api.sock` has the mode `0600` when no
-  `socket_group` is set. `diff` also reads the iptables chains, which needs root.
+  `socket_group` is set. `status` reads that socket.
 
 `status` asks the daemon through the control socket first. If the socket does not answer,
 `status` reads the configuration file and the host directly. A member of `socket_group`
@@ -92,7 +93,8 @@ These commands change the host or a tailnet:
   only.
 - `sudo hydrascale tui` opens the terminal interface. Its keys add, connect, disconnect,
   and remove a tailnet.
-- `sudo hydrascale install` and `sudo hydrascale serve`.
+- `sudo hydrascale install` writes the systemd unit, and `sudo hydrascale serve` runs the
+  daemon.
 - `sudo systemctl start hydrascale`, `sudo systemctl stop hydrascale`,
   `sudo systemctl restart hydrascale`, and `sudo systemctl reload hydrascale`.
 - An edit of `/etc/hydrascale/config.yaml` or of `/etc/hydrascale/secrets.yaml`.
