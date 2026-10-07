@@ -27,7 +27,7 @@ type Tail [][]string
 var EnforceTail = Tail{{"-j", "DROP"}}
 
 // LogPrefix marks each line that the mode observe writes to the kernel log. The operator
-// reads the lines with journalctl -u hydrascale | grep hydrascale-would-deny.
+// reads the lines with journalctl -k | grep hydrascale-would-deny.
 const LogPrefix = "hydrascale-would-deny: "
 
 // logLimit holds 60 packets each minute, because the LOG target on a busy host writes one

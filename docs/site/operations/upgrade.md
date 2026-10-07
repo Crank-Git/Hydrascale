@@ -180,10 +180,11 @@ path that the mode `enforce` denies at step 21.
 Step 15 reads the paths that the mode `enforce` denies:
 
 ```bash
-journalctl -u hydrascale | grep hydrascale-would-deny
+sudo journalctl -k | grep hydrascale-would-deny
 ```
 
-The mode `observe` rate-limits that log to 60 packets each minute.
+The mode `observe` writes at most 60 log lines each minute. Above that limit, the daemon
+accepts the packet and writes no log line.
 
 A rule that step 16 adds takes this form:
 

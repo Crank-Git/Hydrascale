@@ -68,7 +68,7 @@ chain, so `ts-forward`, `DOCKER-USER`, and `DOCKER-FORWARD` do not see it.
 Read the log lines of the mode `observe`:
 
 ```bash
-journalctl -u hydrascale | grep hydrascale-would-deny
+sudo journalctl -k | grep hydrascale-would-deny
 ```
 
 The mode `observe` writes at most 60 log lines each minute. Above that limit, the daemon
