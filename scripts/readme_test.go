@@ -138,6 +138,8 @@ func TestEachRepositoryLinkOfTheReadmeExists(t *testing.T) {
 	}
 }
 
+var linkText = regexp.MustCompile(`\[([^\]]+)\]`)
+
 func TestTheDocumentationTableHasOneRowPerSection(t *testing.T) {
 	var rows [][]string
 	for _, line := range readmeSection(readReadme(t), "Documentation") {
@@ -161,7 +163,7 @@ func TestTheDocumentationTableHasOneRowPerSection(t *testing.T) {
 			t.Errorf("the row %q states no content of the section (FR-readme-6)", row)
 			continue
 		}
-		name := regexp.MustCompile(`\[([^\]]+)\]`).FindStringSubmatch(row[0])
+		name := linkText.FindStringSubmatch(row[0])
 		if name == nil || !strings.Contains(row[0], "]("+siteURL) {
 			t.Errorf("the row %q holds no absolute link to the site (FR-readme-6)", row)
 			continue
