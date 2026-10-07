@@ -43,11 +43,23 @@ nav:
       - guides/policy-editor.md
       - guides/policy-visual-editor.md
   - Concepts: concepts/index.md
-  - Reference: reference/index.md
+  - Reference:
+      - reference/index.md
+      - reference/configuration.md
+      - reference/command-line.md
+      - reference/environment.md
+      - reference/control-api.md
+      - reference/events.md
+      - reference/skills.md
   - Operations:
       - operations/index.md
+      - operations/daemon-mode.md
+      - operations/remote-access.md
       - operations/upgrade.md
+      - operations/uninstall.md
+      - operations/troubleshooting.md
   - Architecture: architecture/index.md
   - Security:
       - security/index.md
+      - security/console.md
       - security/audit.md
