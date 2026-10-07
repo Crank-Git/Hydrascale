@@ -1,5 +1,6 @@
 # The documentation site. docs/specs/features/14-docs-site.md specifies it.
 # scripts/docs-build.sh builds it, and docs/site/requirements.txt pins the theme.
+# .github/workflows/docs.yml publishes it to GitHub Pages on each push to main.
 site_name: hydrascale
 site_url: https://crank-git.github.io/Hydrascale/
 docs_dir: docs/site
