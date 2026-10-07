@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hydrascale v1.0 — Feature: Security audit</title>
+<title>Hydrascale v1.0 — Feature: Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</title>
 <style>
 :root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
         --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
@@ -132,7 +132,7 @@ body.rv-open .layout { padding-right:21rem; }
 @media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
 </style>
 </head>
-<body data-page="feature-security-audit" data-rvkey="hydrascale-v1">
+<body data-page="feature-agent-skills-refresh" data-rvkey="hydrascale-v1">
 <div class="layout">
 <aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
 <h2>Spec</h2><ul>
@@ -141,7 +141,7 @@ body.rv-open .layout { padding-right:21rem; }
 <h2>Features</h2><ul>
 <li><a href="feature-foundation.html">Foundation</a></li>
 <li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
-<li><a class="current" href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-audit.html">Security audit</a></li>
 <li><a href="feature-security-fixes.html">Security fixes</a></li>
 <li><a href="feature-dns-integrity.html">DNS integrity</a></li>
 <li><a href="feature-reachability-model.html">Local reachability model</a></li>
@@ -155,205 +155,383 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
 <li><a href="feature-docs-site.html">Documentation site</a></li>
 <li><a href="feature-readme-slim.html">A short README that links to the documentation site</a></li>
-<li><a href="feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
+<li><a class="current" href="feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
 </ul></aside>
 <main>
-<h1>Feature: Security audit</h1>
-<p class="meta">Epic 2: Security audit &nbsp; <span class="badge">built</span></p>
-<h3 id="security-audit-purpose">Purpose</h3>
-<p>The operator believes the daemon has several small authorization defects. The planning survey found four candidates. A guess is not a plan. This feature set produces a written list of findings, so that Epic 3 fixes facts.</p>
-<p>The audit reads code. It does not change code. It ends with the operator choosing which findings Epic 3 fixes.</p>
-<h3 id="security-audit-what-the-survey-already-found">What the survey already found</h3>
-<p>These four are inputs to the audit, not its output. The audit confirms each one and assigns a severity.</p>
-<div class="table-wrap"><table>
-<tr><th>Candidate</th><th>Evidence</th><th>Why it matters</th></tr>
-<tr><td>The host <code>FORWARD</code> chain accepts every packet from a namespace.</td><td><code>internal/namespaces/ns.go:263</code> inserts <code>iptables -I FORWARD 1 -i &lt;hostVeth&gt; -j ACCEPT</code>. There is no destination match and no output interface match.</td><td>A process in one namespace reaches another namespace and the host network. The rule sits above an operator firewall rule because it is inserted at position 1.</td></tr>
-<tr><td>Teardown is best effort.</td><td><code>internal/namespaces/ns.go:297</code> ignores the result of every delete.</td><td>A removed namespace can leave an <code>ACCEPT</code> rule and a <code>MASQUERADE</code> rule on the host.</td></tr>
-<tr><td>The overlay mount failure is silent.</td><td><code>cmd/hydrascale/nsdaemon.go:56</code> prints to standard error and continues.</td><td>The host <code>/etc/resolv.conf</code> file loses its protection and nothing reports it.</td></tr>
-<tr><td>The control API has no authentication.</td><td><code>internal/api/server.go</code> registers eight routes and none checks an identity.</td><td>Membership of <code>socket_group</code> is equivalent to root, and the documentation does not say so.</td></tr>
-</table></div>
-<h3 id="security-audit-user-stories">User stories</h3>
+<h1>Feature: Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</h1>
+<p class="meta">Epic 15: Agent skills refresh &nbsp; <span class="badge">planned</span></p>
+<h3 id="agent-skills-refresh-purpose">Purpose</h3>
+<p>This is a delta feature. It changes the skills that <code>features/10-agent-skills.md</code> built.</p>
+<p>The two skills that <code>hydrascale skills install</code> ships were written for version 1.1, and no line of them changed after 2026-08-10. Versions 1.2 to 1.5 added aliases, the policy routes, IPv6, a listen port for each namespace, a new uninstall, and a redesigned console. A survey of the skills on 2026-10-07 found these defects:</p>
 <ul>
-<li>As the operator, I want a written list of what is wrong, so that I fix the real
+<li><code>hydrascale-setup</code> states that only <code>status</code> needs <code>sudo</code>. <code>diff</code>, <code>list</code>, and <code>env</code>
 </li>
 </ul>
-<p>defects rather than the ones I remember.</p>
+<p>also need it.</p>
 <ul>
-<li>As the operator, I want each finding to have a <code>file:line</code> reference, so that a fix is
+<li><code>hydrascale-setup</code> omits five commands that change the host: <code>uninstall</code>,
 </li>
 </ul>
-<p>unambiguous.</p>
+<p><code>init --force</code>, <code>wrap --apply</code>, the terminal interface, and Push in the console.</p>
 <ul>
-<li>As the operator, I want to choose which findings get fixed in this release, so that the
+<li><code>tailnet-exec</code> states that a failed <code>hydrascale status</code> means that the daemon does not
 </li>
 </ul>
-<p>release ships.</p>
-<h3 id="security-audit-functional-requirements">Functional requirements</h3>
+<p>run. <code>status</code> reads the host directly when the socket is absent, so this is false.</p>
 <ul>
-<li><strong>FR-audit-1</strong> — The audit produces <code>docs/security-audit.md</code>.
-</li>
-<li><strong>FR-audit-2</strong> — Each finding has an identifier of the form <code>SA-&lt;n&gt;</code>.
-</li>
-<li><strong>FR-audit-3</strong> — Each finding has a severity of <code>high</code>, <code>medium</code>, or <code>low</code>.
-</li>
-<li><strong>FR-audit-4</strong> — Each finding has at least one <code>file:line</code> reference.
-</li>
-<li><strong>FR-audit-5</strong> — Each finding states the condition under which it causes harm.
-</li>
-<li><strong>FR-audit-6</strong> — Each finding states whether the audit reproduced it on the test host.
-</li>
-<li><strong>FR-audit-7</strong> — The audit covers every route that <code>internal/api/server.go</code> registers.
-</li>
-<li><strong>FR-audit-8</strong> — The audit covers every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
-</li>
-<li><strong>FR-audit-9</strong> — The audit covers every file mode and every socket mode that the daemon
+<li><code>tailnet-exec</code> states that only <code>exec</code> needs root. <code>ping</code>, <code>ssh</code>, and <code>tailscale</code> also
 </li>
 </ul>
-<p>sets.</p>
+<p>run through <code>ip netns exec</code>.</p>
 <ul>
-<li><strong>FR-audit-10</strong> — The audit covers every path that the daemon builds from configuration
+<li>Neither skill states the tailnet alias, the alias zone, IPv6, the listen ports, or the
 </li>
 </ul>
-<p>input or from request input.</p>
+<p>events that versions 1.2 to 1.5 added.</p>
 <ul>
-<li><strong>FR-audit-11</strong> — The audit covers the teardown path of every resource that the daemon
+<li>The four contributor skills under <code>.claude/skills/</code> name a test that does not exist, an
 </li>
 </ul>
-<p>creates.</p>
+<p>SSH alias that does not exist, and a script that "Epic 1 adds", and they omit half of the CI gate.</p>
 <ul>
-<li><strong>FR-audit-12</strong> — The audit records the console threat model as a finding, so that the
+<li><code>cmd/hydrascale/skills_drift_test.go</code> checks the command path of each form and nothing
 </li>
 </ul>
-<p>accepted risk is written down.</p>
+<p>else, so every defect above passes CI.</p>
+<p>This feature rewrites the two skills, adds a third skill for troubleshooting, corrects the contributor skills, and makes the drift test catch the next drift. Each skill links to the documentation site that <code>features/14-docs-site.md</code> builds.</p>
+<h3 id="agent-skills-refresh-user-stories">User stories</h3>
 <ul>
-<li><strong>FR-audit-13</strong> — The audit records whether an IPv6 gap exists in the firewall rules.
-</li>
-<li><strong>FR-audit-14</strong> — The audit states, for each finding, whether Epic 3 fixes it.
+<li>As an operator, I want my coding agent to know which commands need <code>sudo</code>, so that it
 </li>
 </ul>
-<h3 id="security-audit-user-flows">User flows</h3>
-<h4 id="security-audit-the-audit-runs">The audit runs</h4>
+<p>does not fail and then guess.</p>
+<ul>
+<li>As an operator, I want my coding agent to stop before any command that changes the
+</li>
+</ul>
+<p>host, so that it never runs an uninstall that I did not ask for.</p>
+<ul>
+<li>As an operator, I want my coding agent to diagnose IPv6, direct connections, DNS, and a
+</li>
+</ul>
+<p>credential fault with read-only commands, so that it explains a fault before it changes anything.</p>
+<ul>
+<li>As a contributor, I want the contributor skills to state the real gate, so that an
+</li>
+</ul>
+<p>agent runs every check that CI runs.</p>
+<ul>
+<li>As a maintainer, I want CI to fail when a skill names a flag or a key that the code
+</li>
+</ul>
+<p>does not hold, so that the skills cannot drift silently again.</p>
+<h3 id="agent-skills-refresh-functional-requirements">Functional requirements</h3>
+<h4 id="agent-skills-refresh-hydrascale-setup">hydrascale-setup</h4>
+<ul>
+<li><strong>FR-refresh-1</strong> — The skill states each read-only command with its <code>sudo</code> need:
+</li>
+</ul>
+<p><code>status</code>, <code>diff</code>, <code>list</code>, <code>env</code>, and <code>version</code>.</p>
+<ul>
+<li><strong>FR-refresh-2</strong> — The <code>allowed-tools</code> field of the skill names each read-only command
+</li>
+</ul>
+<p>of FR-refresh-1 in the form the skill states it.</p>
+<ul>
+<li><strong>FR-refresh-3</strong> — The skill states every status value that <code>hydrascale status</code>
+</li>
+</ul>
+<p>prints, and the <code>ALIAS</code> column.</p>
+<ul>
+<li><strong>FR-refresh-4</strong> — The skill names every command that changes the host or a tailnet:
+</li>
+</ul>
+<p><code>apply</code>, <code>add</code>, <code>remove</code>, <code>init</code>, <code>init --force</code>, <code>uninstall</code> with each of its flags (<code>--yes</code>, <code>--purge</code>, <code>--keep-nodes</code>), <code>wrap --apply</code>, and the terminal interface. It also names the console actions Connect, Disconnect, Remove, Apply, and Push. For each one the skill prints the command and does not run it.</p>
+<ul>
+<li><strong>FR-refresh-5</strong> — The skill states that Push changes the policy of every device in a
+</li>
+</ul>
+<p>tailnet, not only this host.</p>
+<ul>
+<li><strong>FR-refresh-6</strong> — The skill states the configuration keys of version 1.5 that an
+</li>
+</ul>
+<p>operator sets most: <code>alias</code>, <code>resolver.resolve_aliases</code>, <code>route_table</code>, <code>ipv6</code>, <code>host_dns.mode</code>, and <code>socket_group</code>, and links to the configuration page of the site for the rest.</p>
+<ul>
+<li><strong>FR-refresh-7</strong> — The skill states that membership of <code>socket_group</code> gives the access
+</li>
+</ul>
+<p>of root.</p>
+<ul>
+<li><strong>FR-refresh-8</strong> — The skill states the upgrade to version 1.0 as a section of its own,
+</li>
+</ul>
+<p>for a host that still runs version 0.9 or 0.10. It no longer frames that upgrade as the current path.</p>
+<ul>
+<li><strong>FR-refresh-9</strong> — The skill states that an SSH tunnel to the console works on any
+</li>
+</ul>
+<p>local port.</p>
+<h4 id="agent-skills-refresh-tailnet-exec">tailnet-exec</h4>
+<ul>
+<li><strong>FR-refresh-10</strong> — The skill states that <code>hydrascale status</code> reads the host directly
+</li>
+</ul>
+<p>when the daemon does not run, and that a namespace that <code>status</code> lists still takes a routing form.</p>
+<ul>
+<li><strong>FR-refresh-11</strong> — The skill states that <code>exec</code>, <code>ping</code>, <code>ssh</code>, and <code>tailscale</code> each
+</li>
+</ul>
+<p>need root, because each runs <code>ip netns exec</code>.</p>
+<ul>
+<li><strong>FR-refresh-12</strong> — The skill states that every routing form takes a tailnet alias in
+</li>
+</ul>
+<p>place of the tailnet ID, and that the namespace name stays <code>ns-&lt;ID&gt;</code>.</p>
+<ul>
+<li><strong>FR-refresh-13</strong> — The skill states that a routing form reads the configuration file,
+</li>
+</ul>
+<p>so it needs read access to <code>/etc/hydrascale</code>.</p>
+<ul>
+<li><strong>FR-refresh-14</strong> — The skill states that <code>wrap</code> prints a unit drop-in and that
+</li>
+</ul>
+<p><code>wrap --apply</code> installs it, which changes the host.</p>
+<ul>
+<li><strong>FR-refresh-15</strong> — The skill states the alias zone name <code>&lt;peer&gt;.&lt;alias&gt;.ts.internal</code>.
+</li>
+</ul>
+<h4 id="agent-skills-refresh-hydrascale-troubleshoot">hydrascale-troubleshoot</h4>
+<ul>
+<li><strong>FR-refresh-16</strong> — <code>skills/hydrascale-troubleshoot/SKILL.md</code> exists, and
+</li>
+</ul>
+<p><code>hydrascale skills install</code> installs it with the other two skills.</p>
+<ul>
+<li><strong>FR-refresh-17</strong> — The skill runs read-only commands only. Its <code>allowed-tools</code> field
+</li>
+</ul>
+<p>names no command that changes the host.</p>
+<ul>
+<li><strong>FR-refresh-18</strong> — The skill states a diagnosis for IPv6: the event <code>ipv6.state</code>, the
+</li>
+</ul>
+<p><code>ipv6</code> key, the upstream device, and the NAT66 rule.</p>
+<ul>
+<li><strong>FR-refresh-19</strong> — The skill states a diagnosis for a direct connection: the listen
+</li>
+</ul>
+<p>port of each namespace in the range 41642 to 41895, the forward rule of that port, and <code>tailscale netcheck</code> inside the namespace.</p>
+<ul>
+<li><strong>FR-refresh-20</strong> — The skill states a diagnosis for DNS: <code>host_dns.mode</code>, the overlay
+</li>
+</ul>
+<p>mount, the event <code>dns.unprotected</code>, and a split DNS conflict with the event <code>dns.split_domain_conflict</code>.</p>
+<ul>
+<li><strong>FR-refresh-21</strong> — The skill states a diagnosis for a displaced jump rule: the event
+</li>
+</ul>
+<p><code>access.jump_displaced</code>, and the chains that Docker and tailscaled add.</p>
+<ul>
+<li><strong>FR-refresh-22</strong> — The skill states a diagnosis for a policy credential that the
+</li>
+</ul>
+<p>control server rejected, and it states that an absent credential is not a fault.</p>
+<ul>
+<li><strong>FR-refresh-23</strong> — For each diagnosis, the skill prints the command that repairs the
+</li>
+</ul>
+<p>fault and does not run it.</p>
+<ul>
+<li><strong>FR-refresh-24</strong> — Each diagnosis links to the matching page of the site.
+</li>
+</ul>
+<h4 id="agent-skills-refresh-contributor-skills">Contributor skills</h4>
+<ul>
+<li><strong>FR-refresh-25</strong> — <code>.claude/skills/run/SKILL.md</code> names no test that does not exist,
+</li>
+</ul>
+<p>names the SSH target <code>phobos@192.168.1.221</code>, and names the e2e suite in <code>e2e/</code>.</p>
+<ul>
+<li><strong>FR-refresh-26</strong> — <code>.claude/skills/test/SKILL.md</code> states every step of
+</li>
+</ul>
+<p><code>.github/workflows/ci.yml</code>, including <code>scripts/check-hygiene.sh</code>, <code>govulncheck</code>, and <code>scripts/docs-build.sh</code>, and the <code>node</code> and <code>python3</code> needs of the suite.</p>
+<ul>
+<li><strong>FR-refresh-27</strong> — <code>.claude/skills/check-hygiene/SKILL.md</code> states that the script
+</li>
+</ul>
+<p>exists and that CI runs it.</p>
+<ul>
+<li><strong>FR-refresh-28</strong> — <code>.claude/skills/verify-on-phobos/SKILL.md</code> checks the IPv6 chains,
+</li>
+</ul>
+<p>the chain <code>HYDRASCALE-OUT</code>, the NAT66 rule, the forward rule of each listen port, the routing policy rule of the route table, and <code>force_forwarding</code>.</p>
+<h4 id="agent-skills-refresh-drift-test">Drift test</h4>
+<ul>
+<li><strong>FR-refresh-29</strong> — The drift test fails when a skill names a flag that its command
+</li>
+</ul>
+<p>does not declare.</p>
+<ul>
+<li><strong>FR-refresh-30</strong> — The drift test fails when a skill names a configuration key in
+</li>
+</ul>
+<p>backticks that <code>internal/config</code> does not read.</p>
+<ul>
+<li><strong>FR-refresh-31</strong> — The drift test fails when a skill names an event type that the
+</li>
+</ul>
+<p>daemon does not record.</p>
+<ul>
+<li><strong>FR-refresh-32</strong> — The test of <code>skills/</code> reads the skill list from the embedded
+</li>
+</ul>
+<p>directory, so a new skill without a test fails the suite.</p>
+<ul>
+<li><strong>FR-refresh-33</strong> — A skill names no source line in the form <code>file.go:NN</code>, because a
+</li>
+</ul>
+<p>line number moves with each edit. The drift test fails on such a reference.</p>
+<ul>
+<li><strong>FR-refresh-34</strong> — Every link of a skill to the site uses the absolute URL under
+</li>
+</ul>
+<p><code>https://crank-git.github.io/Hydrascale/</code>, and a test checks that the page exists under <code>docs/site/</code>.</p>
+<h4 id="agent-skills-refresh-documentation">Documentation</h4>
+<ul>
+<li><strong>FR-refresh-35</strong> — The skills page of the site states the three skills, the <code>--dir</code>
+</li>
+</ul>
+<p>flag of <code>hydrascale skills install</code>, and that the command refuses to run as root.</p>
+<h3 id="agent-skills-refresh-user-flows">User flows</h3>
+<h4 id="agent-skills-refresh-flow-1-an-agent-diagnoses-a-fault">Flow 1: An agent diagnoses a fault</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Operator reports a fault] --&gt; B[Agent loads hydrascale-troubleshoot]
+  B --&gt; C[Agent runs read-only checks]
+  C --&gt; D{Fault found?}
+  D -- no --&gt; E[Agent states what it checked and links the troubleshooting page]
+  D -- yes --&gt; F[Agent states the cause with the output that proves it]
+  F --&gt; G[Agent prints the repair command]
+  G --&gt; H{Operator runs it?}
+  H -- yes --&gt; I[Operator runs the command]
+  H -- no --&gt; J[Nothing changes]</pre></div>
 <ol>
-<li>The engineer lists every control API route and its handler.
+<li>The operator reports a fault.
 </li>
-<li>The engineer reads each handler and records what it validates.
+<li>The coding agent loads <code>hydrascale-troubleshoot</code>.
 </li>
-<li>The engineer lists every <code>os/exec</code> call and records where each argument comes from.
+<li>The agent runs read-only checks.
 </li>
-<li>The engineer lists every <code>os.Chmod</code>, <code>os.Chown</code>, <code>os.WriteFile</code>, and <code>syscall.Umask</code>
+<li>If the agent finds no fault, it states what it checked and links the troubleshooting
 </li>
 </ol>
-<p>call and records the resulting mode.</p>
+<p>page.</p>
 <ol>
-<li>The engineer lists every resource that setup creates and checks that teardown removes
+<li>If the agent finds the fault, it states the cause with the output that proves it.
+</li>
+<li>The agent prints the repair command. The operator decides whether to run it.
 </li>
 </ol>
-<p>it.</p>
+<h4 id="agent-skills-refresh-flow-2-ci-catches-drift">Flow 2: CI catches drift</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Contributor renames a flag or a key] --&gt; B[Pull request]
+  B --&gt; C{Drift test}
+  C -- a skill names the old flag or key --&gt; D[CI fails and names the skill and the line]
+  D --&gt; E[Contributor updates the skill]
+  E --&gt; B
+  C -- clean --&gt; F[Merge]</pre></div>
 <ol>
-<li>The engineer reproduces each candidate finding on the test host where reproduction is
+<li>A contributor renames a flag, a key, or an event.
+</li>
+<li>The drift test reads each skill.
+</li>
+<li>If a skill names the old form, CI fails and names the skill and the line.
+</li>
+<li>The contributor updates the skill, and CI passes.
 </li>
 </ol>
-<p>possible.</p>
-<ol>
-<li>The engineer writes <code>docs/security-audit.md</code>.
-</li>
-<li>The operator reads the file and marks each finding as accepted or deferred.
-</li>
-</ol>
-<h4 id="security-audit-the-reachability-finding-is-reproduced">The reachability finding is reproduced</h4>
-<ol>
-<li>The engineer starts the daemon on the test host with two tailnets.
-</li>
-<li>The engineer records the veth address of each namespace from <code>ip addr</code>.
-</li>
-<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; ping -c1 &lt;veth address of b&gt;</code>.
-</li>
-<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; nc -vz &lt;a host on the host local network&gt; 22</code>.
-</li>
-<li>The engineer records the result of each command verbatim in the finding.
-</li>
-</ol>
-<h3 id="security-audit-screens-states">Screens &amp; states</h3>
-<p>This feature set has no screen.</p>
-<h3 id="security-audit-behaviour-rules">Behaviour rules</h3>
+<h3 id="agent-skills-refresh-screens-states">Screens &amp; states</h3>
+<p>No screen. A skill is a Markdown file that a coding agent reads.</p>
+<h3 id="agent-skills-refresh-behaviour-rules">Behaviour rules</h3>
 <ul>
-<li>The audit reads code and runs read-only commands. It changes no source file other than
+<li>A skill runs a command that changes the host only when the operator asks for that
 </li>
 </ul>
-<p><code>docs/security-audit.md</code>.</p>
+<p>command in the same turn. In every other case it prints the command.</p>
 <ul>
-<li>A finding that the audit cannot reproduce says so. It does not claim a reproduction it
+<li>A skill states a fact that the site also states once, and links to the site for the
 </li>
 </ul>
-<p>did not perform.</p>
+<p>detail.</p>
 <ul>
-<li>The audit quotes command output verbatim. It does not paraphrase evidence.
-</li>
-<li>The audit does not rank a finding by how easy the fix is. Severity describes harm.
+<li>Every skill follows <code>.claude/rules/ste.md</code> and the Terms table.
 </li>
 </ul>
-<h3 id="security-audit-data-touched">Data touched</h3>
-<p>No entity changes. The audit adds one document.</p>
-<h3 id="security-audit-interfaces">Interfaces</h3>
-<p>The audit inspects these routes, which <code>internal/api/server.go:47-59</code> registers:</p>
-<div class="table-wrap"><table>
-<tr><th>Method and path</th><th>Handler</th><th>Mutating</th></tr>
-<tr><td><code>/api/status</code></td><td><code>handleStatus</code></td><td>no</td></tr>
-<tr><td><code>/api/events</code></td><td><code>handleEvents</code></td><td>no</td></tr>
-<tr><td><code>/api/reconcile</code></td><td><code>handleReconcile</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/add</code></td><td><code>handleTailnetAdd</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/remove</code></td><td><code>handleTailnetRemove</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/connect</code></td><td><code>handleTailnetConnect</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/disconnect</code></td><td><code>handleTailnetDisconnect</code></td><td>yes</td></tr>
-<tr><td><code>/api/config/dns</code></td><td><code>handleConfigDNS</code></td><td>yes</td></tr>
-<tr><td><code>/api/config</code></td><td><code>handleConfig</code></td><td>yes</td></tr>
-<tr><td><code>GET /api/tailnet/{id}/detail</code></td><td><code>handleTailnetDetail</code></td><td>no</td></tr>
-</table></div>
-<h3 id="security-audit-edge-cases-failures">Edge cases &amp; failures</h3>
-<div class="table-wrap"><table>
-<tr><th>Case</th><th>Behaviour</th></tr>
-<tr><td>A candidate finding does not reproduce.</td><td>The finding records the attempt, the command, and the output, and it lowers its severity to reflect the uncertainty.</td></tr>
-<tr><td>The audit finds a defect that is not a security defect.</td><td>The audit records it in a separate <code>Other defects</code> section. Epic 3 does not have to fix it.</td></tr>
-<tr><td>The audit finds a high-severity defect that needs a large change.</td><td>The audit records it. The operator decides whether Epic 3 fixes it or whether it becomes its own epic.</td></tr>
-</table></div>
-<h3 id="security-audit-acceptance-criteria">Acceptance criteria</h3>
+<h3 id="agent-skills-refresh-data-touched">Data touched</h3>
+<p><code>skills/hydrascale-setup/SKILL.md</code>, <code>skills/tailnet-exec/SKILL.md</code>, <code>skills/hydrascale-troubleshoot/SKILL.md</code>, <code>skills/embed.go</code>, <code>skills/skills_test.go</code>, <code>cmd/hydrascale/skills_drift_test.go</code>, and the four files under <code>.claude/skills/</code>.</p>
+<h3 id="agent-skills-refresh-interfaces">Interfaces</h3>
+<p>The skill format is the one that <code>features/10-agent-skills.md</code> states: a Markdown file with the front-matter keys <code>name</code>, <code>description</code>, and <code>allowed-tools</code>.</p>
+<h3 id="agent-skills-refresh-edge-cases-failures">Edge cases &amp; failures</h3>
 <ul>
-<li>[ ] <code>docs/security-audit.md</code> exists and is tracked.
-</li>
-<li>[ ] Every finding has an identifier, a severity, and a <code>file:line</code> reference.
-</li>
-<li>[ ] The audit lists all ten control API routes and states what each validates.
-</li>
-<li>[ ] The audit lists every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
-</li>
-<li>[ ] The audit states, for the reachability finding, the exact commands it ran on the
+<li><strong>A skill states a flag in prose rather than in a command form.</strong> The drift test reads
 </li>
 </ul>
-<p>test host and their output.</p>
+<p>a flag only in a command form that starts with <code>hydrascale </code>. A flag in prose is a review item.</p>
 <ul>
-<li>[ ] The audit records the console threat model as a finding.
-</li>
-<li>[ ] The audit states whether an IPv6 firewall gap exists.
-</li>
-<li>[ ] The operator has marked every finding as accepted or deferred.
+<li><strong>A configuration key shares a name with a policy key.</strong> The drift test reads a key
 </li>
 </ul>
-<h3 id="security-audit-out-of-scope">Out of scope</h3>
+<p>only in the form that the configuration file uses, such as <code>host_dns.mode</code>. A key of a policy document, such as <code>tagOwners</code>, is not checked.</p>
 <ul>
-<li>Any code fix. Epic 3 fixes.
-</li>
-<li>A dependency vulnerability scan. The project has six direct dependencies and a
+<li><strong>The site moves a page.</strong> The link test of FR-refresh-34 fails, and the skill changes
 </li>
 </ul>
-<p>vendored tree; <code>govulncheck</code> belongs in Epic 3 as a continuous integration step rather than in a manual audit.</p>
+<p>in the same pull request as the move.</p>
+<h3 id="agent-skills-refresh-acceptance-criteria">Acceptance criteria</h3>
 <ul>
-<li>A review of the Tailscale client itself.
+<li><code>hydrascale skills install --dir &lt;tmp&gt;</code> writes three skill directories.
+</li>
+<li>A skill that names <code>hydrascale uninstall --no-such-flag</code> fails the drift test with the
 </li>
 </ul>
-<h3 id="security-audit-open-questions" class="callout-h">Open questions</h3>
+<p>skill name and the line.</p>
+<ul>
+<li>A skill that names <code>route_tables</code> in backticks fails the drift test.
+</li>
+<li>A skill that names <code>internal/api/console.go:16</code> fails the drift test.
+</li>
+<li>A new directory under <code>skills/</code> with no test entry fails <code>go test ./skills/...</code>.
+</li>
+<li><code>hydrascale-setup</code> states <code>sudo</code> for <code>status</code>, <code>diff</code>, <code>list</code>, and <code>env</code>.
+</li>
+<li><code>tailnet-exec</code> states that <code>ping</code>, <code>ssh</code>, and <code>tailscale</code> need root.
+</li>
+<li><code>hydrascale-troubleshoot</code> holds five diagnoses, each with a read-only check, a printed
+</li>
+</ul>
+<p>repair command, and a site link.</p>
+<ul>
+<li><code>.claude/skills/run/SKILL.md</code> names no <code>TestConsoleServer</code>.
+</li>
+<li><code>.claude/skills/test/SKILL.md</code> names every step of <code>.github/workflows/ci.yml</code>.
+</li>
+</ul>
+<h3 id="agent-skills-refresh-out-of-scope">Out of scope</h3>
+<ul>
+<li>A skill for policy edits. The console owns that task, and no command line form edits a
+</li>
+</ul>
+<p>policy.</p>
+<ul>
+<li>A test that runs a skill inside a coding agent.
+</li>
+</ul>
+<h3 id="agent-skills-refresh-open-questions" class="callout-h">Open questions</h3>
 <p>None.</p><nav class="pager">
-<a href="feature-desktop-client-removal.html">&larr; Feature: Desktop client removal and repository hygiene</a>
-<a href="feature-security-fixes.html">Feature: Security fixes &rarr;</a>
+<a href="feature-readme-slim.html">&larr; Feature: A short README that links to the documentation site</a>
+<span></span>
 </nav>
 </main>
 </div>
