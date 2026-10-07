@@ -18,6 +18,7 @@ import {
   sinceWords,
   textEquivalentMarkup,
   topologySVGMarkup,
+  pathListMarkup,
 } from "../static/topology.js";
 
 // statusWith builds one GET /api/status body. The Go type reconciler.TailnetState carries
@@ -383,21 +384,26 @@ test("the topology escapes every value that the daemon reports", () => {
   assert.ok(markup.includes("a&lt;b"));
 });
 
-test("a tailnet with no usable policy credential carries a second state on its node, and reachable does not change", () => {
+test("a tailnet whose credential the control server rejected carries a second state on its node, and reachable does not change", () => {
   // Issue #287. Local reachability and upstream policy are two independent systems, so
-  // the topology draws the credential problem beside reachable rather than in place of it.
+  // the topology draws the credential fault beside reachable rather than in place of it.
+  // A credential is optional, so an absent credential is not a fault and draws no dot; the
+  // board of the overview states it in the policy column.
   const status = statusWith({
     havoc: { reach: { state: "reachable" } },
     jbones: { reach: { state: "reachable" } },
+    tomb: { reach: { state: "reachable" } },
   });
   status.policy = [
-    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+    { id: "havoc", kind: "tailscale", credential_state: "rejected", reason: "the control server rejected the credential of \"havoc\"" },
     { id: "jbones", kind: "tailscale", credential_state: "usable" },
+    { id: "tomb", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"tomb\" has no Tailscale OAuth credential" },
   ];
   const access = accessWith(
     [
       { id: "havoc", peers: 1, veth: "10.99.0.2" },
       { id: "jbones", peers: 1, veth: "10.99.0.6" },
+      { id: "tomb", peers: 1, veth: "10.99.0.10" },
     ],
     [],
   );
@@ -405,12 +411,14 @@ test("a tailnet with no usable policy credential carries a second state on its n
 
   const havoc = model.nodes.find((node) => node.id === "havoc");
   const jbones = model.nodes.find((node) => node.id === "jbones");
+  const tomb = model.nodes.find((node) => node.id === "tomb");
   assert.equal(havoc.word, "reachable", "the reachability word does not change");
   assert.deepEqual(havoc.credential, {
     tone: "crit",
-    reason: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+    reason: "the control server rejected the credential of \"havoc\"",
   });
   assert.equal(jbones.credential, null);
+  assert.equal(tomb.credential, null, "an absent credential is not a fault");
 });
 
 test("the topology marks the node of a missing credential with a second dot, and names the reason in the text equivalent", () => {
@@ -442,4 +450,39 @@ test("a poll with no policy field draws no credential dot", () => {
     "homelab reaches host.",
     "corp-prod reaches internet.",
   ]);
+});
+
+test("the phone path list states one row per allowed path and no row for a denied path", () => {
+  const status = statusWith({ alpha: { reach: { state: "reachable" } }, beta: { reach: { state: "reachable" } } });
+  const access = accessWith(
+    [{ id: "alpha", peers: 1, veth: "10.99.0.2" }, { id: "beta", peers: 1, veth: "10.99.0.6" }],
+    [{ from: "alpha", to: "internet", ports: [] }, { from: "beta", to: "host", ports: ["tcp/22"] }],
+  );
+  const markup = pathListMarkup(buildTopology(status, access), null);
+  assert.equal((markup.match(/<li class="path-row">/g) || []).length, 2);
+  assert.match(markup, /tcp\/22/);
+  assert.doesNotMatch(markup, /alpha<\/span><span class="path-conn" aria-hidden="true"><\/span><span class="path-end mono">beta/);
+  // The two tailnets are sources. The host and the internet start no path here, so they
+  // take no button.
+  assert.equal((markup.match(/<button type="button" class="path-src"/g) || []).length, 2);
+});
+
+test("the phone path list draws the paths of the selection in the accent and mutes the rest", () => {
+  const status = statusWith({ alpha: {}, beta: {} });
+  const access = accessWith(
+    [{ id: "alpha", peers: 1, veth: "a" }, { id: "beta", peers: 1, veth: "b" }],
+    [{ from: "alpha", to: "internet", ports: [] }, { from: "beta", to: "internet", ports: [] }],
+  );
+  const markup = pathListMarkup(buildTopology(status, access), "alpha", { bySource: true });
+  assert.equal((markup.match(/class="path-row sel"/g) || []).length, 1);
+  assert.equal((markup.match(/class="path-row muted"/g) || []).length, 1);
+  assert.match(markup, /data-node="alpha" aria-pressed="true"/);
+});
+
+test("the phone path list escapes every value that the daemon reports", () => {
+  const hostile = '<img src=x onerror="alert(1)">';
+  const status = statusWith({ [hostile]: {} });
+  const access = accessWith([{ id: hostile, peers: 1, veth: "a" }], [{ from: hostile, to: "internet", ports: [hostile] }]);
+  const markup = pathListMarkup(buildTopology(status, access), null);
+  assert.doesNotMatch(markup, /<img/);
 });

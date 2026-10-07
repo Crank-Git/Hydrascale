@@ -167,7 +167,8 @@ test("the list states one row per tailnet with the identifier, the kind, and the
     reason: "",
     selected: false,
   });
-  assert.equal(rows[2].tone, "crit");
+  // A credential is optional, so an absent one is a quiet state and not a fault.
+  assert.equal(rows[2].tone, "");
   assert.equal(rows[2].word, "no credential");
 });
 
@@ -206,13 +207,14 @@ test("the list states the credential state as a coloured dot and a lowercase wor
   const markup = policyListMarkup(policyRows(listBody(), null));
 
   assert.match(markup, /<span class="dot ok"><\/span><span class="pol-word">read and write<\/span>/);
-  assert.match(markup, /<span class="dot crit"><\/span><span class="pol-word">no credential<\/span>/);
+  assert.match(markup, /<span class="dot "><\/span><span class="pol-word">no credential<\/span>/);
 });
 
-test("the row of a tailnet with no credential names the credential that it needs", () => {
+test("the list keeps the reason out of the row, and the editor region states it", () => {
+  // The reason is a paragraph of the daemon. The list keeps one line for each tailnet,
+  // and the editor region of the selected tailnet names the credential that it needs.
   const markup = policyListMarkup(policyRows(listBody(), null));
-
-  assert.match(markup, /HYDRASCALE_HS_API_KEY_LAB_HS/);
+  assert.doesNotMatch(markup, /HYDRASCALE_HS_API_KEY_LAB_HS/);
 });
 
 test("the list escapes a hostile tailnet identifier", () => {
@@ -1145,7 +1147,12 @@ test("the rejected state names the expected prefix to the operator", () => {
     }],
   });
 
-  assert.match(policyListMarkup(policyRows(body, null)), /tskey-client/);
+  // The list keeps one line for each tailnet, so the editor region of the selection
+  // states the reason.
+  const state = createPolicyState({ request: async () => documentBody() });
+  state.setList(body);
+  state.select("jbones");
+  assert.match(editorMarkup(entryOf(state, "jbones")), /tskey-client/);
 });
 
 test("a usable credential still reads as read and write", () => {

@@ -1,8 +1,12 @@
-/* Fast, small, and only on things the user touched. */
+/* Fast and small. A transition runs on what the operator touched, and one exception
+   runs on what the daemon changed: a board cell turns over once when its value changes.
+   No motion runs on load or on a poll that changed nothing. */
 :root{
   --dur-1:90ms;   /* @kind other */
   --dur-2:160ms;  /* @kind other */
   --dur-3:280ms;  /* @kind other */ /* path draw / panel reveal */
+  --dur-flip:180ms; /* @kind other */ /* one character of a turnover */
+  --stagger-flip:14ms; /* @kind other */ /* the delay between two characters */
   --ease:cubic-bezier(.2,.7,.3,1); /* @kind other */
 }
 @media (prefers-reduced-motion: reduce){
@@ -10,5 +14,7 @@
     --dur-1:0ms;  /* @kind other */
     --dur-2:0ms;  /* @kind other */
     --dur-3:0ms;  /* @kind other */
+    --dur-flip:0ms; /* @kind other */
+    --stagger-flip:0ms; /* @kind other */
   }
 }

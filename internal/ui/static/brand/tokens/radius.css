@@ -1,9 +1,10 @@
-/* Soft, generous, consistent. Nothing is square except the matrix grid. */
+/* Square. A cell of the board has no corner radius, and no control has one either. The
+   one round shape is the state dot. */
 :root{
-  --r-xs:6px;
-  --r-sm:9px;    /* buttons, chips, inputs */
-  --r:12px;      /* rows, small cards */
-  --r-lg:16px;   /* cards */
-  --r-xl:20px;   /* panels, dialogs */
+  --r-xs:0px;
+  --r-sm:0px;    /* buttons, chips, inputs */
+  --r:0px;       /* rows, cells */
+  --r-lg:0px;    /* sections */
+  --r-xl:0px;    /* panels, dialogs */
   --r-pill:999px;
 }

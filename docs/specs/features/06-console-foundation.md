@@ -140,7 +140,7 @@ access view.
 - **FR-console-42** — The console renders every machine value in the mono typeface.
 - **FR-console-43** — The console honours `prefers-reduced-motion`.
 - **FR-console-44** — The console contains no emoji.
-- **FR-console-45** — The console loads `Space Grotesk` and `Space Mono` from
+- **FR-console-45** — The console loads `Barlow Semi Condensed` and `Martian Mono` from
   `internal/ui/static/brand/fonts/`.
 - **FR-console-46** — `internal/ui/static/brand/tokens/fonts.css` holds one `@font-face`
   rule per font file, and each rule names a path under the console origin.
@@ -324,8 +324,8 @@ The console is served at `/`. Every JSON route stays under `/api/`.
 - [ ] The console JavaScript tests run under `go test ./internal/ui/...`.
 - [ ] The browser network log shows a request for each font file, and every request goes
       to the console origin.
-- [ ] The heading of the overview renders in `Space Grotesk`, and a machine value renders
-      in `Space Mono`.
+- [ ] The heading of the overview renders in `Barlow Semi Condensed`, and a machine value
+      renders in `Martian Mono`.
 - [ ] `internal/ui/static/brand/fonts/OFL.txt` is present.
 - [ ] `internal/ui/static/brand/tokens/fonts.css` holds no `TODO` marker.
 

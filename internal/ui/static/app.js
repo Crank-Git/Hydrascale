@@ -10,6 +10,8 @@
 // Issue #143, issue #144 and issue #145 add one module per view. A view module calls
 // registerView and reads the snapshot that the poll layer gives it.
 
+import { lastReconcileAt } from "./topology.js";
+
 /** The route that the console polls. */
 export const STATUS_ROUTE = "/api/status";
 
@@ -54,8 +56,8 @@ export const VIEWS = [
     id: "overview",
     heading: "Overview",
     lead: "The state of every tailnet on this host.",
-    empty: "No tailnet is configured. Add one, and this view shows the tailnet count, the peer count, the reconciler state, and the topology.",
-    pending: "This view shows the tailnet count, the peer count, the reconciler state, the topology, and the five newest events.",
+    empty: "No tailnet is configured. Add one, and this view shows one row per tailnet with its state, its reachability, and its peers, and the topology.",
+    pending: "This view shows one row per tailnet, the topology, and the newest events that are not routine reconcile ticks.",
   },
   {
     id: "namespaces",
@@ -74,7 +76,7 @@ export const VIEWS = [
   {
     id: "policy",
     heading: "Policy",
-    lead: "The access policy that each control server holds. A policy change affects every device in the tailnet, not only this host.",
+    lead: "The access policy that each control server holds.",
     empty: "The daemon declares no tailnet. Add one, and this view lists it with its control server kind and its credential state.",
     pending: "This view lists every tailnet with its control server kind and its credential state, and it shows the policy document of a selection.",
   },
@@ -457,11 +459,49 @@ function drawPollBar(snapshot) {
   text.append(element("span", "mono", snapshot.error));
 }
 
-/** drawVersion writes the daemon version. It writes no value that no poll returned. */
-function drawVersion(snapshot) {
-  const node = document.getElementById("daemon-version");
-  const version = snapshot.status && snapshot.status.server_version;
-  node.textContent = version ? version : "no version yet";
+/**
+ * drawTitleBlock writes the daemon version, the access mode, and the time of the last
+ * reconcile tick. It writes no value that no poll returned.
+ */
+function drawTitleBlock(snapshot) {
+  const status = snapshot.status;
+  const version = status && status.server_version;
+  document.getElementById("daemon-version").textContent = version ? version : "no version yet";
+
+  const access = status && status.access;
+  document.getElementById("title-access").textContent = access && access.mode
+    ? `${access.mode} · ${access.rules} ${access.rules === 1 ? "rule" : "rules"}`
+    : "no mode yet";
+
+  const tick = status ? lastReconcileAt(status.events) : null;
+  document.getElementById("title-tick").textContent = tick === null ? "no tick yet" : clockTime(tick);
+}
+
+/**
+ * isTyping reports whether the keyboard focus is in a control that takes text, where a
+ * digit is input and not a view shortcut.
+ */
+function isTyping(target) {
+  if (!target || !target.closest) {
+    return false;
+  }
+  return Boolean(target.closest("input, textarea, select, [contenteditable]"));
+}
+
+/**
+ * onViewKey opens a view when the operator presses its number. The navigation shows each
+ * number beside its entry.
+ */
+function onViewKey(event) {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isTyping(event.target)) {
+    return;
+  }
+  const index = Number(event.key) - 1;
+  if (!Number.isInteger(index) || index < 0 || index >= VIEWS.length) {
+    return;
+  }
+  event.preventDefault();
+  window.location.hash = `#/${VIEWS[index].id}`;
 }
 
 /** drawPlaceholder draws the frame of a view that a later issue fills. */
@@ -525,6 +565,9 @@ function drawCurrent() {
 
   document.getElementById("view-heading").textContent = view.heading;
   document.getElementById("view-lead").textContent = view.lead;
+  // A view can hide the head for the eye and keep it for a screen reader. The overview
+  // does, because its verdict is the display line and the rail already names the view.
+  document.getElementById("main").dataset.view = view.id;
 
   for (const entry of VIEWS) {
     const section = document.getElementById(`view-${entry.id}`);
@@ -568,12 +611,13 @@ function start() {
 
   poller.subscribe((snapshot) => {
     latest = snapshot;
-    drawVersion(snapshot);
+    drawTitleBlock(snapshot);
     drawPollBar(snapshot);
     drawCurrent();
   });
 
   window.addEventListener("hashchange", route);
+  document.addEventListener("keydown", onViewKey);
   route();
   poller.start();
 }
