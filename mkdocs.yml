@@ -14,9 +14,12 @@ theme:
   font: false
   logo: assets/brand/logo-lime.svg
   favicon: assets/brand/logo-lime.svg
-  # A mapping, not a list, so the header shows no toggle for the colour scheme.
+  # A mapping, not a list, so the header shows no toggle for the colour scheme. The value
+  # custom stops the colour presets of the theme, so brand.css sets every colour.
   palette:
     scheme: slate
+    primary: custom
+    accent: custom
 
 extra_css:
   - stylesheets/brand.css

@@ -277,6 +277,32 @@ func TestTheNavHoldsTheEightSections(t *testing.T) {
 	}
 }
 
+func TestTheThemeAppliesNoColourPreset(t *testing.T) {
+	// A preset of the theme sets the link colour through a selector that is more
+	// specific than brand.css, so a link shows blue instead of the body colour
+	// (FR-site-36). The value custom stops each preset.
+	data, err := os.ReadFile(filepath.Join("..", "mkdocs.yml"))
+	if err != nil {
+		t.Fatalf("read mkdocs.yml: %v", err)
+	}
+	var config struct {
+		Theme struct {
+			Palette map[string]string `yaml:"palette"`
+		} `yaml:"theme"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse mkdocs.yml: %v", err)
+	}
+	for _, key := range []string{"primary", "accent"} {
+		if got := config.Theme.Palette[key]; got != "custom" {
+			t.Errorf("theme.palette.%s is %q, want custom", key, got)
+		}
+	}
+	if got := config.Theme.Palette["scheme"]; got != "slate" {
+		t.Errorf("theme.palette.scheme is %q, want slate", got)
+	}
+}
+
 func TestTheDocsTestsFailOnAGateThatHoldsNoMkdocs(t *testing.T) {
 	// GitHub Actions sets CI, and the gate script of the test host sets HYDRASCALE_GATE.
 	for _, marker := range []string{"CI", "HYDRASCALE_GATE"} {

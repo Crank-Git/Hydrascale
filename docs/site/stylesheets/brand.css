@@ -91,6 +91,12 @@
   text-underline-offset: 0.15em;
 }
 
+/* The theme sets the page title in a muted colour. The brand sets every heading in the
+   body colour. */
+.md-typeset h1 {
+  color: #eceae6;
+}
+
 /* The lime accent. */
 .md-nav--primary .md-nav__item .md-nav__link--active,
 .md-nav--primary .md-nav__item .md-nav__link--active code {
