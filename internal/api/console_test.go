@@ -282,6 +282,46 @@ func TestAMutatingConsoleRequestRecordsTheConsoleRequestEvent(t *testing.T) {
 	}
 }
 
+func TestAPolicyParseRequestRecordsNoEvent(t *testing.T) {
+	// POST /api/policy/{id}/sections parses a document and changes nothing. An event for
+	// each parse filled the event list, because the console sends one each time the
+	// operator opens the visual editor. The route still requires the console header.
+	r := newTestReconciler(writeTestConfig(t, "alpha"))
+	_, origin := startTestConsole(t, r)
+
+	consoleCall(t, http.MethodPost, origin+"/api/policy/alpha/sections", `{"document":"{}"}`, consoleHeader)
+
+	for _, event := range r.Events() {
+		if event.Type == EventConsoleRequest {
+			t.Errorf("POST /api/policy/alpha/sections records the event %s with the message %q", event.Type, event.Message)
+		}
+	}
+
+	refused := consoleCall(t, http.MethodPost, origin+"/api/policy/alpha/sections", `{"document":"{}"}`, nil)
+	if refused.StatusCode != http.StatusForbidden {
+		t.Errorf("POST /api/policy/alpha/sections without the console header returns %d, want %d", refused.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestAPolicySectionEditStillRecordsTheConsoleRequestEvent(t *testing.T) {
+	// The exception names the parse route alone. A request to the edit route, which
+	// shares the prefix of the parse route, still records its event.
+	r := newTestReconciler(writeTestConfig(t, "alpha"))
+	_, origin := startTestConsole(t, r)
+
+	consoleCall(t, http.MethodPost, origin+"/api/policy/alpha/sections/edit", `{}`, consoleHeader)
+
+	found := false
+	for _, event := range r.Events() {
+		if event.Type == EventConsoleRequest && strings.Contains(event.Message, "/api/policy/alpha/sections/edit") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("POST /api/policy/alpha/sections/edit records no console.request event")
+	}
+}
+
 func TestAReadConsoleRequestRecordsNoEvent(t *testing.T) {
 	// FR-console-10 names a mutating request. A poll every 5 seconds would otherwise
 	// fill the event list and hide every real action.

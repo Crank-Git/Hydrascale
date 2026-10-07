@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 
 	"hydrascale/internal/config"
@@ -41,6 +42,13 @@ const (
 	// listener.
 	EventConsoleRequest = "console.request"
 )
+
+// parseRoute matches POST /api/policy/{id}/sections. The route parses the document in the
+// body and returns its sections. It changes no state, so it records no event. The console
+// sends it each time the operator opens the visual editor, and an event for each one filled
+// the event list with requests that changed nothing. The pattern matches the parse route
+// alone; /api/policy/{id}/sections/edit still records an event.
+var parseRoute = regexp.MustCompile(`^/api/policy/[^/]+/sections$`)
 
 // consoleReadHeaderTimeout bounds how long a client may take to send its request head.
 const consoleReadHeaderTimeout = 10 * time.Second
@@ -131,7 +139,9 @@ func (s *Server) consoleControls(next http.Handler) http.Handler {
 			// The message holds the method and the path only. A request body carries an
 			// auth key, and an event reaches the event log file and every reader of
 			// GET /api/events. See SA-1.
-			s.reconciler.RecordEvent(EventConsoleRequest, "", fmt.Sprintf("%s %s on the console listener", r.Method, r.URL.Path))
+			if !parseRoute.MatchString(r.URL.Path) {
+				s.reconciler.RecordEvent(EventConsoleRequest, "", fmt.Sprintf("%s %s on the console listener", r.Method, r.URL.Path))
+			}
 		}
 
 		next.ServeHTTP(w, r)
