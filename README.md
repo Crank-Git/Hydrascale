@@ -374,7 +374,7 @@ that Visual does not yet build.
 
 <p align="center"><i>The section grid. Rules opens by default, with a reachability matrix above the rule list.</i></p>
 
-The section nav lists ten sections, each with a count of the entries it holds:
+The section grid lists ten sections, each with a count of the entries it holds:
 
 - **Groups**, **Hosts**, **Tag owners**, and **IP sets** hold the named sets that a
   rule refers to.
