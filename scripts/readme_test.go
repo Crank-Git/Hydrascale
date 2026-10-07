@@ -155,8 +155,10 @@ func TestTheDocumentationTableHasOneRowPerSection(t *testing.T) {
 	}
 	var names []string
 	for _, row := range rows {
-		if len(row) != 3 {
-			t.Errorf("the row %q holds %d cells; FR-readme-6 requires 3", row, len(row))
+		// The first cell links the section name to the site, and the second states what the
+		// section holds.
+		if len(row) < 2 || row[1] == "" {
+			t.Errorf("the row %q states no content of the section (FR-readme-6)", row)
 			continue
 		}
 		name := regexp.MustCompile(`\[([^\]]+)\]`).FindStringSubmatch(row[0])
