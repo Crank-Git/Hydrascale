@@ -2,8 +2,8 @@
 id: agent-skills-refresh
 feature: Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test
 epic: "Epic 15: Agent skills refresh"
-status: planned
-issues: []
+status: issued
+issues: [434, 435, 436, 437, 438]
 mockups: []
 ---
 
