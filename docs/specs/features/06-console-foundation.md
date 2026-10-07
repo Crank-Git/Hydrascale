@@ -58,7 +58,8 @@ access view.
 - **FR-console-8** — Every mutating route requires the request header
   `X-Hydrascale-Console: 1`, and it returns HTTP 403 without it.
 - **FR-console-9** — A route returns HTTP 403 when the request has an `Origin` header
-  whose value is not the console origin.
+  whose host is not a loopback host. The route accepts a loopback host on any port,
+  because an SSH forward gives the browser a local port that is not the console port.
 - **FR-console-10** — The daemon records an event for every mutating request that it
   serves on the console listener.
 - **FR-console-11** — The daemon logs the console listener address at start, with the

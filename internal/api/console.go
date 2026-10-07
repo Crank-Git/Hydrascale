@@ -20,7 +20,8 @@ import (
 //  1. The listener binds a loopback address only, and StartConsole refuses and logs any
 //     other address.
 //  2. Every mutating route requires the header X-Hydrascale-Console: 1.
-//  3. A request whose Origin header names another origin gets HTTP 403.
+//  3. A request whose Origin header names a host that is not a loopback host gets
+//     HTTP 403.
 //  4. The daemon records one event for every mutating request on the console listener.
 //
 // Control 2 and control 3 stop a hostile web page, because a browser sets no custom
@@ -150,26 +151,25 @@ func isMutatingMethod(method string) bool {
 
 // isConsoleOrigin reports whether origin names the console itself.
 //
-// The console origin is HTTP on a loopback host and on the console port. isConsoleOrigin
-// accepts the name localhost here, although ValidateConsoleBindAddress refuses it as a
-// bind address: the browser has already connected to the loopback listener before it
-// sends the header, so the name names this console. A page on another host that resolves
-// to a loopback address still sends its own name in the header, and this check refuses
-// it.
+// The console origin is HTTP on a loopback host, on any port. An SSH forward such as
+// ssh -L 19443:127.0.0.1:9443 gives the browser a local port that is not the console
+// port, so a check on the port refuses the whole console behind the forward. A page on
+// another port of a loopback host runs as a local account, and control 3 does not stop a
+// local account. Control 2 stops that page, because a cross-origin request that carries
+// the console header needs a preflight that the daemon never approves.
+//
+// isConsoleOrigin accepts the name localhost here, although ValidateConsoleBindAddress
+// refuses it as a bind address: the browser has already connected to the loopback
+// listener before it sends the header, so the name names this console. A page on another
+// host that resolves to a loopback address still sends its own name in the header, and
+// this check refuses it.
 func (s *Server) isConsoleOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Scheme != "http" {
 		return false
 	}
 
-	_, consolePort, err := net.SplitHostPort(s.consoleAddress)
-	if err != nil {
-		return false
-	}
-	host, port, err := net.SplitHostPort(u.Host)
-	if err != nil || port != consolePort {
-		return false
-	}
+	host := u.Hostname()
 	if host == "localhost" {
 		return true
 	}

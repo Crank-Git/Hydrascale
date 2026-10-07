@@ -234,6 +234,45 @@ func TestTheConsoleOriginIsAccepted(t *testing.T) {
 	}
 }
 
+func TestALoopbackOriginOnAnotherPortIsAccepted(t *testing.T) {
+	// An SSH forward such as ssh -L 19443:127.0.0.1:9443 gives the browser a local port
+	// that is not the console port. The browser sends Origin on every module script and
+	// on every POST, so a check on the port refuses the whole console behind the forward.
+	_, origin := startTestConsole(t, newTestReconciler(writeTestConfig(t, "alpha")))
+
+	for _, value := range []string{"http://127.0.0.1:19443", "http://localhost:19443", "http://[::1]:19443"} {
+		script := consoleCall(t, http.MethodGet, origin+"/app.js", "", map[string]string{"Origin": value})
+		if script.StatusCode != http.StatusOK {
+			t.Errorf("GET /app.js with Origin: %s returns %d, want %d", value, script.StatusCode, http.StatusOK)
+		}
+
+		headers := map[string]string{ConsoleRequestHeader: "1", "Origin": value}
+		resp := consoleCall(t, http.MethodPost, origin+"/api/tailnet/remove", `{"id":"alpha"}`, headers)
+		if resp.StatusCode == http.StatusForbidden {
+			body, _ := io.ReadAll(resp.Body)
+			t.Errorf("POST with Origin: %s returns %d and the body %s, want no 403", value, resp.StatusCode, body)
+		}
+	}
+}
+
+func TestANonLoopbackOriginOnTheConsolePortReturns403(t *testing.T) {
+	// A DNS rebinding page reaches the loopback listener under its own name, and the
+	// browser sends that name in the Origin header.
+	_, origin := startTestConsole(t, newTestReconciler(writeTestConfig(t, "alpha")))
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(origin, "http://"))
+	if err != nil {
+		t.Fatalf("split the console origin %q: %v", origin, err)
+	}
+
+	for _, value := range []string{"http://rebind.example:" + port, "https://127.0.0.1:" + port} {
+		headers := map[string]string{ConsoleRequestHeader: "1", "Origin": value}
+		resp := consoleCall(t, http.MethodPost, origin+"/api/tailnet/remove", `{"id":"alpha"}`, headers)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("POST with Origin: %s returns %d, want %d", value, resp.StatusCode, http.StatusForbidden)
+		}
+	}
+}
+
 func TestEveryConsoleResponseCarriesTheContentSecurityPolicyHeader(t *testing.T) {
 	_, origin := startTestConsole(t, newTestReconciler(writeTestConfig(t, "alpha")))
 

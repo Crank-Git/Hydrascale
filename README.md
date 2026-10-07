@@ -230,7 +230,8 @@ Four controls reduce the risk:
    writes the reason to the log, and `hydrascale apply` refuses the same value.
 2. Every mutating route requires the header `X-Hydrascale-Console: 1`. A browser sets no
    custom header on a cross-origin form post.
-3. The daemon answers HTTP 403 when the `Origin` header names another origin.
+3. The daemon answers HTTP 403 when the `Origin` header names a host that is not a
+   loopback host.
 4. The daemon records one event for every mutating request, and the Activity view shows it.
 
 Control 2 and control 3 stop a hostile web page. Neither control stops a local account.
@@ -990,6 +991,9 @@ machine:
 ```bash
 ssh -L 9443:127.0.0.1:9443 user@linux-host
 ```
+
+The local port can be any free port. The daemon accepts an `Origin` header that names a
+loopback host on any port.
 
 The console has no authentication, so the SSH forward is the only control on that path.
 
