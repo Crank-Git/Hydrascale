@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -105,7 +106,8 @@ func TestTheRunSkillNamesNoMissingTest(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "vendor" || d.Name() == ".git") {
+		// .claude of the main checkout holds a worktree of each agent, so the walk skips it.
+		if d.IsDir() && slices.Contains([]string{"node_modules", "vendor", ".git", ".claude"}, d.Name()) {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && strings.HasSuffix(path, "_test.go") {
