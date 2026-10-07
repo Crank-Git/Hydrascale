@@ -25,7 +25,7 @@ var movedDocsPaths = []string{
 
 func TestNoFileNamesAMovedDocsPath(t *testing.T) {
 	// FR-site-30: a link to a moved file is dead. docs/specs/ records the old paths on
-	// purpose, so the search excludes it.
+	// purpose, and this file names them as search patterns, so the search excludes both.
 	for _, p := range movedDocsPaths {
 		if _, err := os.Stat(filepath.Join("..", p)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s still exists, want it moved into docs/site", p)
@@ -36,7 +36,7 @@ func TestNoFileNamesAMovedDocsPath(t *testing.T) {
 	for _, p := range movedDocsPaths {
 		args = append(args, "-e", p)
 	}
-	args = append(args, "--", ".", ":!docs/specs/")
+	args = append(args, "--", ".", ":!docs/specs/", ":!scripts/docs_moves_test.go")
 	cmd := exec.Command("git", args...)
 	cmd.Dir = ".."
 	out, err := cmd.Output()
