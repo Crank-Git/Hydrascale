@@ -13,110 +13,51 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8d867d" alt="The license"></a>
 </p>
 
-<p align="center">
-  <img src="docs/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events that are not routine reconcile ticks." width="900">
-</p>
-
-<p align="center"><i>The Overview view. The first line answers whether every tailnet is healthy, and a tailnet with a fault sorts to the top of the board. The tailnet names, the addresses, and the events are placeholders.</i></p>
-
-Hydrascale lets one Linux host join several Tailscale tailnets at the same time. It is for
-the operator who administers a host that must reach a work tailnet, a home tailnet, and a
-customer tailnet at once. The daemon holds each tailnet in its own network namespace, it
-enforces the reachability rules that the operator declares, and it serves a console on the
-loopback address.
-
-## Table of Contents
-
-- [What Hydrascale does](#what-hydrascale-does)
-- [Requirements](#requirements)
-- [Install](#install)
-- [Quick start](#quick-start)
-- [The console](#the-console)
-- [Local rules](#local-rules)
-- [Upstream policy](#upstream-policy)
-- [The Visual policy editor](#the-visual-policy-editor)
-- [Credentials](#credentials)
-- [Host access](#host-access)
-- [Headscale and a custom control server](#headscale-and-a-custom-control-server)
-- [Configuration reference](#configuration-reference)
-- [Remote access](#remote-access)
-- [Networking](#networking)
-- [Command line](#command-line)
-- [Agent skills](#agent-skills)
-- [Environment variables](#environment-variables)
-- [Control API](#control-api)
-- [Daemon mode](#daemon-mode)
-- [Architecture](#architecture)
-- [Uninstall](#uninstall)
-- [Troubleshooting](#troubleshooting)
-- [License](#license)
-
 ## What Hydrascale does
 
-Hydrascale creates one network namespace per tailnet and runs a separate `tailscaled`
-inside each. Traffic of one tailnet stays inside its own network stack. Overlapping IP
-ranges, independent firewall rules, and separate routing tables therefore work without an
-extra step.
+Hydrascale lets one Linux host join more than one tailnet at the same time. The daemon
+creates one network namespace for each tailnet, and it runs a separate `tailscaled` in
+each namespace. The traffic of one tailnet stays inside the network stack of its
+namespace. Overlapping IP ranges, separate firewall rules, and separate routing tables
+therefore work with no extra step.
 
 The operator declares the tailnets in a YAML configuration file. The reconciler drives the
-live host toward that file. Add a tailnet to the file and the daemon creates it. Remove a
-tailnet and the daemon deletes the namespace, stops the process, and removes the routes. A
-unified DNS resolver answers names across every tailnet, so the host reaches a peer by
-name.
+live host toward that file. The DNS forwarder answers names across every tailnet, so the
+host reaches a peer by name.
 
-The reconciler runs as a control loop. On each tick it reads the configuration, reads the
-live host, computes the difference, and applies the smallest set of actions. A tailnet that
-fails three times in a row enters an error state, and the reconciler skips it until the
-operator resets it. One broken tailnet therefore stops no other tailnet. The event log
-records every action.
-
-Version 1.0 adds three things to that loop:
-
-- **The console.** The daemon serves a web interface on `127.0.0.1:9443`. The console shows
-  the namespaces, the local rules, the upstream policy, and the event list.
-- **Local rules.** The daemon enforces a declared rule set on the host with iptables. A
-  path that no rule allows is denied.
-- **Upstream policy.** The daemon reads, validates, and writes the access-control document
-  that the control server of a tailnet holds.
-
-Version 1.4 gives each namespace an IPv6 path, and it forwards a UDP port of the host to
-each namespace, so a peer connects to a namespace directly over IPv4 and IPv6. See
-[Networking](#networking).
+The daemon serves a console on the loopback address. It enforces the local rules that the
+operator declares, and it reads, validates, and writes the policy that the control server
+of each tailnet holds.
 
 ## Requirements
 
-- **Linux.** A network namespace is a Linux kernel feature.
-- **Go 1.26 or later**, to build from source.
-- **Root, or the capability `CAP_NET_ADMIN`.**
+- **Linux.** A network namespace is a feature of the Linux kernel.
+- **Root.** `hydrascale init` refuses to run as any other account.
 - **Tailscale.** The commands `tailscaled` and `tailscale` must be in `$PATH`.
 - **iproute2.** The daemon runs `ip` to manage a namespace.
-- **iptables and ip6tables.** The daemon writes the NAT rules and the forward rules of
-  both address families. The `iptables` package of each distribution holds both commands.
-- **Kernel network namespace support** (`CONFIG_NET_NS`), which every current kernel holds.
-- **Kernel policy routing** (`CONFIG_IP_MULTIPLE_TABLES`, `CONFIG_IPV6_MULTIPLE_TABLES`).
-  [Host access](#host-access) needs it to propagate an accepted subnet route to the host.
-  Most distribution kernels hold it. Some single-board kernels omit it, and route
-  propagation then changes nothing.
+- **iptables and ip6tables.** The `iptables` package of each distribution holds both
+  commands.
 - **IP forwarding.** Run `sudo sysctl -w net.ipv4.ip_forward=1`.
-- **IPv6, if you want it.** The host needs an IPv6 default route, and Linux 6.17 or later.
-  An older kernel needs the key `ipv6: true`. See [IPv6](#ipv6).
+- **Go 1.26 or later**, for a build from source only.
+
+The [requirements page](https://crank-git.github.io/Hydrascale/get-started/requirements/)
+states the kernel options and the IPv6 requirements.
 
 ## Install
 
-### A released binary
+Install a released binary, or build the binary from source. Both ways put the binary at
+`/usr/local/bin/hydrascale`.
 
-Download a binary from the
-[GitHub Releases](https://github.com/Crank-Git/Hydrascale/releases) page:
+To install a released binary, download the archive for the host from the
+[GitHub Releases](https://github.com/Crank-Git/Hydrascale/releases) page. Then unpack it
+and install the binary:
 
 ```bash
 tar xzf hydrascale_*.tar.gz
 sudo install hydrascale /usr/local/bin/
 ```
 
-### A build from source
-
-Clone the repository and build it. `go install` does not work, because the module path
-`hydrascale` is not a path that the Go module proxy can fetch.
+To build from source, clone the repository and build it:
 
 ```bash
 git clone https://github.com/Crank-Git/Hydrascale.git
@@ -125,1343 +66,119 @@ go build -o hydrascale ./cmd/hydrascale
 sudo install hydrascale /usr/local/bin/
 ```
 
+`go install` does not work. The module path is `hydrascale`, and the Go module proxy
+cannot fetch that path.
+
 ## Quick start
 
-The interactive wizard is the shortest path. It runs the preflight checks, writes the
-configuration, sets up the authentication, starts the first tailnet, and confirms that the
-tailnet authenticated:
+The interactive wizard is the shortest path. It does these steps:
+
+1. It runs the preflight checks.
+2. It writes the configuration file.
+3. It asks for an auth key, or for a login in the browser.
+4. It starts the first tailnet.
+5. It confirms that the tailnet authenticated.
+
+Start the wizard as root:
 
 ```bash
 sudo hydrascale init
 ```
 
-To configure the host by hand instead:
+To configure the host without the wizard, do these steps.
 
 1. Write a configuration file at `/etc/hydrascale/config.yaml`:
 
-```yaml
-version: 2
-tailnets:
-  - id: corp-prod
-  - id: homelab
-    exit_node: exit-us.example.com
-access:
-  mode: enforce
-  rules:
-    - from: corp-prod
-      to: internet
-    - from: homelab
-      to: internet
-resolver:
-  mode: unified
-reconciler:
-  interval: 10s
-```
+    ```yaml
+    version: 2
+    tailnets:
+      - id: corp-prod
+      - id: homelab
+        exit_node: exit-us.example.com
+    access:
+      mode: enforce
+      rules:
+        - from: corp-prod
+          to: internet
+        - from: homelab
+          to: internet
+    resolver:
+      mode: unified
+    reconciler:
+      interval: 10s
+    ```
 
-2. Apply the configuration once:
+2. Apply the configuration one time:
 
-```bash
-sudo hydrascale apply
-```
+    ```bash
+    sudo hydrascale apply
+    ```
 
 3. Or run the daemon, which reconciles on every tick:
 
-```bash
-sudo hydrascale serve
-```
+    ```bash
+    sudo hydrascale serve
+    ```
 
 4. Open the console at `http://127.0.0.1:9443`.
 
 5. Read the state:
 
-```bash
-sudo hydrascale status
-```
+    ```bash
+    sudo hydrascale status
+    ```
 
 A tailnet needs about 20 seconds after a start of the daemon before `hydrascale status`
 reports `healthy` and `running`. An earlier read reports `down` and `degraded`, which is a
-normal state after a start. A tailnet that still reports `down` after 60 seconds has a
-real failure.
+normal state after a start. If a tailnet still reports `down` after 60 seconds, the
+tailnet has a real failure.
+
+The `access` block of this file sets the local rules. The mode `enforce` denies each path
+that no rule allows. If the host already uses its tailnets, read
+[Local rules](https://crank-git.github.io/Hydrascale/concepts/local-rules/) before you
+start the daemon.
 
 ## The console
 
-The daemon serves the console on the loopback address. The console is a static single-page
-application inside the binary, so it makes no request to another host and it needs no build
-step. It holds six views: Overview, Namespaces, Access, Policy, Activity, and Settings.
-
 <p align="center">
-  <img src="docs/images/console-namespaces.png" alt="The Namespaces view of the console. A table holds one row per tailnet with its state, reachability, policy credential, peer count, address, and namespace. The panel of the selected tailnet lists its fields, its peers, its recent events, and the Disconnect and Remove actions." width="900">
+  <img src="docs/site/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events that are not routine reconcile ticks. The names and the addresses are placeholders." width="900">
 </p>
 
-<p align="center"><i>The Namespaces view, with the panel of one tailnet open. The names and the addresses are placeholders.</i></p>
-
-The daemon serves the console when the configuration file holds no `console` key, so a
-version 0.9 file needs no edit. The default address is `127.0.0.1:9443`:
-
-```yaml
-console:
-  enabled: true                  # default: true
-  bind_address: "127.0.0.1:9443" # default: 127.0.0.1:9443
-```
-
-The daemon serves the JSON API on the console listener as well as on the control socket.
-
-To confirm the listener, read the status code:
-
-```bash
-curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9443/    # prints 200
-```
-
-The daemon writes the address and the authentication position to the log at every start:
-
-```bash
-sudo journalctl -u hydrascale | grep 'the console listens on'
-```
-
-### The console has no authentication
-
-**Warning — the console has no sign-in, and the daemon runs as root.** Any local account on
-the host reaches `http://127.0.0.1:9443` and drives the daemon. The operator accepted this
-risk for version 1.0. Give a local account on this host the trust that root needs.
-
-Four controls reduce the risk:
-
-1. The listener binds a loopback address only. The daemon refuses any other address, it
-   writes the reason to the log, and `hydrascale apply` refuses the same value.
-2. Every mutating route requires the header `X-Hydrascale-Console: 1`. A browser sets no
-   custom header on a cross-origin form post.
-3. The daemon answers HTTP 403 when the `Origin` header names a host that is not a
-   loopback host.
-4. The daemon records one event for every mutating request, and the Activity view shows it.
-
-Control 2 and control 3 stop a hostile web page. Neither control stops a local account.
-
-To close the listener, set `console.enabled: false`. The control socket keeps serving the
-JSON API.
-
-## Local rules
-
-A local rule is one reachability rule that the daemon enforces on the host with iptables.
-The daemon owns the chains `HYDRASCALE-FWD` and `HYDRASCALE-OUT`, and one jump rule into
-each of `FORWARD` and `INPUT`, in each address family. Outside those chains it writes only
-the NAT rules of each namespace; see [Networking](#networking). It moves no rule of the
-operator.
-
-The rule set holds no deny rule, because deny is the default. A path that no rule allows is
-denied.
-
-```yaml
-access:
-  mode: enforce        # default: enforce. The other mode is observe.
-  rules:
-    - from: corp-prod
-      to: internet     # every port and both protocols
-    - from: host
-      to: corp-prod
-      ports: ["tcp/22", "tcp/443"]
-    - from: homelab
-      to: corp-prod
-      ports: ["udp/1-1024"]
-```
-
-- `from` names a tailnet that the file declares, or the literal `host`. It never names
-  `internet`.
-- `to` names a tailnet that the file declares, or the literal `host`, or the literal
-  `internet`.
-- `internet` means a public address. For IPv4 it excludes the RFC 1918 ranges, the
-  link-local range, and the loopback range. For IPv6 it excludes the unique local range
-  `fc00::/7`, the link-local range, the loopback address, and each global prefix of the
-  host. A rule to `internet` therefore never reaches the local network of the host.
-- `from` and `to` must differ.
-- `ports` holds entries of the form `tcp/<n>`, `udp/<n>`, `tcp/<n>-<m>`, or `udp/<n>-<m>`.
-  A port number is between 1 and 65535. An empty list allows every port and both protocols.
-
-The daemon validates the whole block before it writes a rule. A rule that names an unknown
-tailnet stops the load, and the error names every failure together.
-
-### The two modes
-
-`enforce` drops a packet that no rule allows. `observe` writes a kernel log line for that
-packet and then accepts it.
-
-The tail of each daemon chain accepts in the mode `observe`, therefore the mode drops no
-packet of a namespace. A packet that the tail accepts reaches no later chain, and
-`ts-forward`, `DOCKER-USER` and `DOCKER-FORWARD` do not see it.
-
-Read the lines of the mode `observe` with:
-
-```bash
-journalctl -u hydrascale | grep hydrascale-would-deny
-```
-
-The mode `observe` rate-limits the log to 60 packets each minute.
-
-**Warning — a first start on a host with no `access` key changes reachability.** When the
-configuration file holds no `access` key, the daemon writes one. It copies the file to
-`<config>.pre-v1.backup` first. The rule set it writes holds one rule per tailnet, from that
-tailnet to `internet`, in the mode `enforce`. No tailnet reaches another tailnet, and the
-host reaches no tailnet.
-
-**Warning — an `access` block that the operator writes by hand suppresses the migration.**
-The daemon detects the migration by the presence of the `access` key. That operator
-therefore gets no preserving rule set and no copy at `<config>.pre-v1.backup`. To start
-version 1.0 in the mode `observe`, write `mode: observe` and one rule per tailnet to
-`internet` together. [docs/UPGRADING.md](docs/UPGRADING.md), section "To upgrade with no
-enforcement at all", holds that order and the steps after it.
-
-The Access view of the console shows the rule set, stages an edit, and applies it. The
-reconciler writes the changed rule set on the next tick.
-
-<p align="center">
-  <img src="docs/images/console-access.png" alt="The Access view of the console. A dotted curve joins each tailnet to the internet node or the host node. A reachability matrix marks the four allowed paths, and the rule list beside it holds one row per rule with its port field." width="900">
-</p>
-
-<p align="center"><i>The Access view. A filled square and a drawn curve each mark an allowed path. A denied path has neither.</i></p>
-
-## Upstream policy
-
-A policy is the huJSON access-control document that a control server holds for a tailnet.
-The Policy view of the console reads that document, validates it, and writes it back. This
-is the upstream half of reachability; the local rules are the half that this host enforces.
-
-<p align="center">
-  <img src="docs/images/console-policy.png" alt="The Policy view of the console. The tailnet list states the credential state of each tailnet. The policy document of the selected tailnet shows in the Text editor, with line numbers, the etag, and the Validate, Discard, and Push actions." width="900">
-</p>
-
-<p align="center"><i>The Policy view, with the document of one tailnet open in the Text editor. A tailnet with no credential states the exact keys that a policy read needs when you select it.</i></p>
-
-The daemon takes the control server kind from the control URL of the tailnet. A tailnet
-that declares no `control_url` is a Tailscale tailnet. Every other tailnet is a Headscale
-tailnet.
-
-The daemon sends the document to the validate route of the control server before it writes.
-A document that validate rejects returns HTTP 400 with the answer of the control server,
-and the write route receives no request.
-
-A Tailscale write carries the `ETag` value of the read in the `If-Match` header. When the
-policy changed between the read and the write, the control server answers HTTP 412 and the
-console reports a conflict. The console re-reads the document and keeps the text of the
-operator, so that the operator compares the two.
-
-**A Headscale control server needs `policy.mode: "database"` for a policy write.** A server
-that runs the file policy mode rejects `PUT /api/v1/policy`, and the daemon returns the
-message of the control server word for word:
-
-```json
-{"code":2,"message":"update is disabled for modes other than 'database'","details":[]}
-```
-
-`hscontrol/types/config.go:54` of the Headscale source at tag `v0.29.3` declares the two
-values:
-
-```go
-PolicyModeDB   = "database"
-PolicyModeFile = "file"
-```
-
-Policy access also needs Headscale v0.29 or later, because an older server exposes no
-policy route.
-
-## The Visual policy editor
-
-The Policy view offers a second way to read and change the policy document: the
-**Visual** tab, next to **Text**. The Visual tab shows the document as sections, and it
-stages an edit to one section at a time. Text stays the way to read or change a section
-that Visual does not yet build.
-
-<p align="center">
-  <img src="docs/images/console-policy-visual-rules.png" alt="The section grid of the Visual editor, with ten sections and their entry counts, and the Rules section open below it with the reachability matrix and the rule list." width="900">
-</p>
-
-<p align="center"><i>The section grid. Rules opens by default, with a reachability matrix above the rule list.</i></p>
-
-The section grid lists ten sections, each with a count of the entries it holds:
-
-- **Groups**, **Hosts**, **Tag owners**, and **IP sets** hold the named sets that a
-  rule refers to.
-- **Rules** holds the reachability matrix and the rule list. A filled square in the
-  matrix marks an allowed path, in the same visual language as the Access view.
-- **SSH access** holds the rules that grant or check an SSH connection, each with a
-  source, a destination, a user list, and an action.
-- **Auto-approvers** holds the routes and the exit node that the control server
-  approves without an operator step.
-- **Node attributes** holds the `nodeAttrs` entries of the document, each with a
-  target list and an attribute list.
-- **Postures** holds the device posture definitions that a check rule refers to.
-- **Tests** holds the assertions that the document declares. A **Run** button sends
-  the staged document to the validate route of the control server, and each row shows
-  its result as a state dot and a word.
-
-<p align="center">
-  <img src="docs/images/console-policy-visual-ssh.png" alt="The SSH access section, with two rules after Add, and Validate and Discard enabled." width="900">
-</p>
-
-<p align="center"><i>The SSH access section. A staged rule enables Validate and Discard, the same as a Text edit. Push is available after a validate passes.</i></p>
-
-<p align="center">
-  <img src="docs/images/console-policy-visual-tests.png" alt="The Tests section, with one test marked pass after Run." width="900">
-</p>
-
-<p align="center"><i>The Tests section, after Run. A test marks pass or names the reason the control server gives.</i></p>
-
-`docs/manual/policy-visual-editor.md` walks each section in order, with a screenshot
-per step.
-
-## Credentials
-
-A credential authenticates the daemon to a control server. A policy read and a policy write
-need one. The daemon reads a credential at the moment it needs one and holds none between
-requests.
-
-A credential never enters the configuration file, never reaches the log, and never reaches
-a control API answer. It lives in the secrets file, which the key `secrets_file` names. The
-default path is `/etc/hydrascale/secrets.yaml`. The daemon refuses a secrets file that
-grants group access or other access, so the file needs the mode `0600` and the owner root.
-
-```yaml
-# /etc/hydrascale/secrets.yaml, mode 0600, owner root
-tailnets:
-  corp-prod:
-    tailscale_oauth_client_id: "..."
-    tailscale_oauth_client_secret: "..."
-  homelab:
-    headscale_api_key: "..."
-    headscale_address: "https://headscale.example.com"
-```
-
-Write the file with the mode in place:
-
-```bash
-sudo install -m 0600 /dev/null /etc/hydrascale/secrets.yaml
-sudo "$EDITOR" /etc/hydrascale/secrets.yaml
-```
-
-The console writes the same values through `PUT /api/policy/{id}/credentials`.
-
-### A Tailscale credential
-
-The daemon authenticates to the Tailscale API with an OAuth client. Create the client in
-the Tailscale admin console:
-
-1. Open `https://login.tailscale.com/admin/settings/trust-credentials`.
-2. Select the button **Credential**.
-3. Select **OAuth**.
-4. Select the scopes.
-5. Select **Generate credential**.
-
-**Warning — the admin console shows the client secret one time only.** Copy the secret
-into the secrets file before you leave the page.
-
-**A policy write needs three scopes, not one.** Give the client the scopes:
-
-- `policy_file`
-- `devices:posture_attributes`
-- `devices:core:read`
-
-The admin console grants `devices:core:read` and `devices:posture_attributes` on its own
-when the operator selects the policy file scope at write. The source of the path is
-`https://tailscale.com/kb/1215/oauth-clients`, retrieved on 2026-08-05.
-
-`https://tailscale.com/kb/1623/`, "Trust credentials", section `Scopes`, states verbatim:
-
-> policy_file The credential has access to read, validate, and modify the tailnet policy
-> file. devices:posture_attributes and devices:core:read are required when using this
-> scope. Endpoints from policy_file:read POST /api/v2/tailnet/:tailnet/acl
-
-The Tailscale OpenAPI schema states `OAuth Scope: policy_file.` in the description of
-`operationId: setPolicyFile`. Both sources were retrieved on 2026-08-05. A client that
-holds `policy_file` alone fails at the write with a permission error that names no cause.
-
-Write the client identifier and the client secret into the secrets file as
-`tailscale_oauth_client_id` and `tailscale_oauth_client_secret`. The daemon exchanges them
-for an access token at `https://api.tailscale.com/api/v2/oauth/token`, and that token
-expires after one hour.
-
-### A Headscale credential
-
-Create an API key on the Headscale host:
-
-```bash
-headscale apikeys create --expiration 90d
-```
-
-Write the key into the secrets file as `headscale_api_key`, and write the base address of
-the control server as `headscale_address`. The daemon sends the key as a bearer token.
-
-Set `policy.mode: "database"` in the Headscale configuration before a policy write. A
-server in the file policy mode serves a policy read and refuses a policy write.
-
-### An environment variable overrides a file value
-
-An environment variable overrides the matching file value, and it overrides that value
-alone. `<ID>` is the tailnet identifier in upper case, with each dash replaced by an
-underscore.
-
-| Variable | Overrides |
+The daemon serves the console on `127.0.0.1:9443`. The console shows the namespaces, the
+local rules, the upstream policy, and the event list. **Warning — the console has no
+authentication, and the daemon runs as root.** Any local account on the host reaches the
+console and drives the daemon. Read the
+[Security](https://crank-git.github.io/Hydrascale/security/console/) section before you
+start the daemon on a shared host.
+
+## Documentation
+
+The [documentation site](https://crank-git.github.io/Hydrascale/) states every other
+topic.
+
+| Section | Holds |
 |---|---|
-| `HYDRASCALE_TS_CLIENT_ID_<ID>` | `tailscale_oauth_client_id` |
-| `HYDRASCALE_TS_CLIENT_SECRET_<ID>` | `tailscale_oauth_client_secret` |
-| `HYDRASCALE_HS_API_KEY_<ID>` | `headscale_api_key` |
-
-## Host access
-
-Each tailnet stays inside its own namespace by default. The host reaches a peer through a
-namespace-scoped command such as `hydrascale exec` or `hydrascale ping`. **Host access**
-changes that: the host reaches the peers of every managed tailnet directly.
-
-```bash
-# Without host access
-sudo hydrascale ping havoc bigboy    # works, but needs the wrapper
-
-# With host access
-ping havoc-bigboy
-ssh havoc-mars
-curl http://havoc-webserver:8080
-```
-
-Enable it globally, or per tailnet:
-
-```yaml
-# Global: the host reaches every tailnet
-host_access: true
-
-# Or per tailnet
-tailnets:
-  - id: corp-prod
-    host_access: true     # the host reaches this tailnet
-  - id: personal
-    host_access: false    # isolated (default)
-```
-
-A local rule still governs the path. A host that reaches a tailnet needs a rule from `host`
-to that tailnet.
-
-### How host access works
-
-The daemon does four things on each reconciliation tick of a tailnet that holds host
-access:
-
-1. **Host routes.** The daemon adds a host route for the Tailscale address of each peer,
-   for IPv4 and for IPv6, through the veth pair of the namespace. The kernel then sends a
-   packet to the right namespace. The daemon writes each route into the main table, or into
-   the table that `route_table` declares. See "A dedicated route table" below.
-
-2. **Namespace masquerade.** The daemon adds an iptables masquerade rule inside the
-   namespace on `tailscale0`. Traffic of the host then carries the Tailscale address of the
-   namespace, and `tailscaled` forwards it to the peer.
-
-3. **DNS entries.** The daemon writes `/etc/hosts` entries, so the host resolves a peer by
-   name.
-
-4. **A MagicDNS route per tailnet.** The daemon registers the MagicDNS suffix of each
-   tailnet, such as `taildf854a.ts.net`, with the DNS forwarder, and points it at the veth
-   gateway of that tailnet. A PREROUTING DNAT rule on the veth carries the query to the
-   MagicDNS resolver of that namespace at `100.100.100.100`. Several tailnets therefore
-   answer MagicDNS queries on one host.
-
-5. **A short name per tailnet.** With `resolver.resolve_aliases` set, the daemon answers
-   `<peer>.<alias>.ts.internal` with the tailnet address of that peer. See "Short names
-   for a peer" below.
-
-The daemon syncs the routes and the DNS entries on every tick. It removes them at shutdown,
-and when host access is disabled.
-
-### Short names for a peer
-
-A MagicDNS name holds the suffix of the control server, such as
-`laptop.taildf854a.ts.net`. The operator gives a tailnet a second name with the key
-`alias`, and the daemon answers a name under that alias for the same peer:
-
-```yaml
-resolver:
-  mode: unified
-  resolve_aliases: true
-host_dns:
-  mode: resolved
-tailnets:
-  - id: Ta1a1a1a1a1CNTRL
-    alias: mmo
-    host_access: true
-```
-
-With this file, `laptop.mmo.ts.internal` resolves to the tailnet address of the peer
-`laptop` of that tailnet. The daemon answers an A record and an AAAA record with a time to
-live of 30 seconds. It writes no entry in `/etc/hosts` for this name.
-
-ICANN reserved the top level domain `.internal` in 2024 for a private name, therefore a
-name under `ts.internal` never collides with a name of the public domain name system.
-
-The name below the alias holds every label that the MagicDNS name holds below the suffix
-of the tailnet. A control server that names a peer `a.b.taildf854a.ts.net` therefore gives
-`a.b.mmo.ts.internal`, and a nested name keeps its shape.
-
-Three conditions apply, and the daemon answers no alias name when one of them is absent:
-
-- `resolver.resolve_aliases` is `true`.
-- `host_dns.mode` is `resolved`. The `hosts` mode writes a file, and a file holds no zone.
-- The tailnet holds an `alias` and `host_access: true`.
-
-An alias becomes one DNS label, therefore `LoadConfig` refuses an alias that is not a DNS
-label when `resolve_aliases` is set. An alias may hold `_`, and a DNS label may not.
-`LoadConfig` also refuses two aliases that differ by case alone, because a domain name
-folds case.
-
-The daemon builds the zone as follows:
-
-- The DNS forwarder answers on the host side veth address of each tailnet, on port 53, for
-  UDP and for TCP.
-- The daemon registers two domains on the veth device of that tailnet: the MagicDNS suffix
-  and `<alias>.ts.internal`. A link of systemd-resolved carries one server list for every
-  domain that it holds, therefore both domains reach the forwarder, and the forwarder
-  routes a MagicDNS query onward to the namespace.
-- A query of a name below the alias that the zone does not hold returns NXDOMAIN. The
-  forwarder sends no such query to an upstream server.
-- The reconciler rebuilds the zone on each tick, therefore a peer that the control server
-  adds resolves within one interval of `reconciler.interval`.
-
-The veth address carries the traffic of the namespace as well as the traffic of the host,
-so a process inside a namespace can send a packet to this port. The listener therefore
-answers the host alone: the host holds one end of every veth pair, and the namespace holds
-the other end, which the host does not hold. A query from an address that no interface of
-the host holds gets REFUSED, and the daemon logs the refusal with that address. A namespace
-reads no name of another tailnet through this port.
-
-Port 53 of the veth address may already belong to another resolver of the host. The daemon
-opens the socket before it registers a domain. If the socket does not open, the daemon logs
-the failure, registers the MagicDNS suffix alone, and points the link at the namespace side
-address, therefore MagicDNS keeps working and the alias zone alone is absent. The daemon
-opens the socket again on the next tick.
-
-A name that the key does not cover, such as `laptop.taildf854a.ts.net`, reaches
-systemd-resolved on the same path as before. The daemon rewrites no query.
-
-The key is unset by default, and an unset key changes nothing: the veth device carries the
-MagicDNS suffix alone, and the link names the namespace side address.
-
-### The DNS lifecycle of tailscaled
-
-Two subtleties matter for a MagicDNS route per tailnet, and the daemon handles both.
-
-**Namespace upstreams.** Each namespace gets `/etc/netns/<ns>/resolv.conf` with the real
-upstream resolvers of the host. The daemon reads them from
-`/run/systemd/resolve/resolv.conf` or from `/etc/resolv.conf`, it removes a loopback
-address, and it falls back to `1.1.1.1`. The address `100.100.100.100` must not go into
-that file: `tailscaled` removes its own address as a self-loop, an empty resolver chain
-returns SERVFAIL for every query, and the daemon then answers no name at all.
-
-**A refresh after a restart.** The reconciler restarts an unhealthy `tailscaled`. The new
-process loads its state from disk and does not read `resolv.conf` again, which can leave
-its MagicDNS proxy stopped. The daemon waits for `BackendState=Running`, then sets
-`--accept-dns=false` and `--accept-dns=true`, which rebuilds the resolver chain. DNS
-therefore recovers on every restart, and the operator runs no `tailscale set` by hand.
-
-### The overlay mount on /etc
-
-`tailscaled` replaces `/etc/resolv.conf` with a temporary file and a rename whenever its
-DNS configuration changes. A bind mount on the single file cannot hold a rename: the new
-file lands in the shared `/etc` of the host and replaces the host resolver configuration.
-
-The daemon therefore starts each namespaced `tailscaled` under an overlay mount on `/etc`.
-The lower layer is the `/etc` of the host, and the upper layer is a directory per tailnet.
-Every write to `/etc`, including that rename, stays inside the namespace, and the process
-still reads the `/etc` of the host through the lower layer. The daemon never changes
-`/etc/resolv.conf` on the host.
-
-`tailscaled` also restarts `systemd-resolved` after each write of its `resolv.conf`, and the
-namespace reaches the systemd of the host. Five restarts within ten seconds stop the host
-resolver. The daemon therefore places `/dev/null` over `systemctl` inside the mount
-namespace of each `tailscaled`, so that `tailscaled` restarts no service of the host.
-
-A host that cannot mount OverlayFS fails the start of the namespace, because a namespace
-without the overlay mount can replace the resolver configuration of the host. To start such
-a namespace anyway, set:
-
-```yaml
-dns:
-  allow_unprotected: false   # default: false
-```
-
-Set `allow_unprotected: true` only on a host where the overlay mount cannot work. The
-daemon records the event `dns.unprotected`, and the Overview view of the console shows the
-namespace as unprotected.
-
-<p align="center">
-  <img src="docs/images/console-settings.png" alt="The Settings view of the console. Six frames in two columns state the resolver, the split DNS domains, the protection state of each namespace, the host file checksum, the paths and the poll interval of the daemon, and the console warning." width="900">
-</p>
-
-<p align="center"><i>The Settings view, which holds the resolver state and the protection state of each namespace.</i></p>
-
-### Accepted subnet routes
-
-When a peer advertises a subnet route and the `tailscaled` of the namespace runs with
-`--accept-routes`, the daemon propagates that route to the host. On each tick it reads the
-routing table 52 inside the namespace, which is where `tailscaled` installs an accepted
-route, and it adds the matching route on the host through the veth gateway.
-
-Pass `--accept-routes` at the login:
-
-```bash
-sudo hydrascale tailscale corp-prod -- up --accept-routes
-```
-
-The configuration file needs no change. A subnet route appears on the host within one tick
-after the login, and the daemon removes it when the tailnet goes away.
-
-### The naming convention
-
-Each peer takes the name `<tailnet-id>-<hostname>`. Two tailnets with a peer of the same
-name therefore produce two different names on the host.
-
-| Tailnet | Peer | Name on the host |
-|---------|------|-----------------|
-| havoc | bigboy | `havoc-bigboy` |
-| havoc | mars | `havoc-mars` |
-| personal | pixel 8a | `personal-pixel-8a` |
-| personal | nas | `personal-nas` |
-
-The daemon lowercases a name and it replaces each space with a dash.
-
-### The two host DNS modes
-
-The key `host_dns.mode` selects the mode.
-
-**`hosts`, the default.** The daemon owns a marked block in `/etc/hosts`:
-
-```
-# BEGIN HYDRASCALE MANAGED BLOCK - DO NOT EDIT
-100.98.107.70  havoc-mars
-fd7a:115c:a1e0::1  havoc-mars
-100.73.198.12  havoc-bigboy
-# END HYDRASCALE MANAGED BLOCK
-```
-
-This mode works on every Linux system. The daemon rewrites the block only when the peer
-data changes, and it writes the file atomically. It changes no other entry of `/etc/hosts`.
-
-**`resolved`.** The daemon registers a routing domain with `systemd-resolved` through
-`resolvectl`. The daemon registers the MagicDNS suffix, the alias zone, and every split
-DNS domain of each tailnet, so a query of a split domain reaches the resolver of that
-tailnet. Names below the reserved `ts.net` zone are not exported. This mode needs
-`systemd-resolved`, and it changes no file.
-
-The DNS forwarder routes the same split DNS domains in every mode. When a tailnet holds a
-split domain that another tailnet claims, the first tailnet in sorted identifier order
-keeps it, and the daemon records a `dns.split_domain_conflict` event. The Settings view of
-the console shows the domains of each tailnet in the Split DNS card, and it shows each
-conflict as a critical alert that names both tailnets.
-
-### Teardown
-
-When host access goes away for a tailnet, through a configuration change or a removal, the
-daemon removes:
-
-- Every host route of the peers of that tailnet.
-- The masquerade rule and the DNS DNAT rule inside the namespace.
-- The entries of that tailnet in `/etc/hosts`, or the `systemd-resolved` registration.
-
-A graceful shutdown removes the same state. A graceful shutdown also removes the two
-routing policy rules and empties the route table, when `route_table` declares one.
-
-### A dedicated route table
-
-The key `route_table` names the routing table that holds every route the daemon writes on
-the host. Leave the key out to keep the main table, which is the behaviour of version 0.9.
-
-53 is the suggested value, because `tailscaled` already uses the table 52 inside each
-namespace. The kernel reserves 253, 254 and 255, and the daemon refuses each of them.
-
-```yaml
-route_table: 53
-```
-
-A route in a table other than the main table reaches no packet until a routing policy rule
-sends a lookup to that table. The daemon therefore owns one rule per address family:
-
-```
-ip rule add priority 32000 from all lookup 53
-ip -6 rule add priority 32000 from all lookup 53
-```
-
-The priority 32000 comes after every rule of `tailscaled`, which holds 5210 to 5270, and
-before the main table, which the kernel consults at 32766. A host that runs its own
-`tailscaled` therefore keeps its precedence, and a route of the daemon still wins over the
-main table. The daemon reads the rule list on each tick and it adds no second copy. A
-shutdown removes each rule and empties the table.
-
-### Compatibility
-
-- **A standard Linux distribution.** Every feature works, including a MagicDNS name per
-  tailnet.
-- **Tegra and Jetson**, and any kernel without `xt_connmark`. Every feature works. The DNS
-  forwarder and the veth DNAT rule carry a MagicDNS query without `xt_connmark`, so a name
-  such as `mars.taildf854a.ts.net` resolves.
-- **A host without `systemd-resolved`.** Use the mode `hosts`, which is the default.
-
-## Headscale and a custom control server
-
-The key `control_url` points a tailnet at [Headscale](https://github.com/juanfont/headscale)
-or at another Tailscale-compatible control server. A self-hosted tailnet therefore runs
-beside a tailnet of the Tailscale coordination server.
-
-Set the key per tailnet, or set a global default:
-
-```yaml
-version: 2
-control_url: "https://headscale.example.com"   # the default for every tailnet
-
-tailnets:
-  - id: homelab
-    # takes the global control_url
-
-  - id: corp-infra
-    control_url: "https://headscale.corp.internal"
-    # takes its own Headscale instance
-
-  - id: personal
-    # no control_url: the Tailscale coordination server
-```
-
-A per-tailnet `control_url` overrides the global default. A tailnet that declares neither
-joins the Tailscale coordination server. The URL needs the scheme `https`, unless the host
-is a loopback address.
-
-### Log in without an auth key
-
-Without a pre-authentication key, log in after the daemon creates the namespace. Start the
-daemon, or run `apply`, then run the login for each tailnet:
-
-```bash
-# Start the daemon, which creates the namespaces and starts tailscaled
-sudo hydrascale serve &
-
-# Log in to a Headscale tailnet
-sudo hydrascale tailscale corp-prod -- up --login-server https://headscale.example.com
-
-# Log in to the Tailscale coordination server
-sudo hydrascale tailscale personal -- up
-```
-
-The daemon prints the authentication URL. Open it in a browser and approve the device. The
-namespace stays up, and the daemon manages it from that point.
-
-### What to check with Headscale
-
-- **The auth key format.** A Headscale auth key has a different form from a Tailscale
-  `tskey-auth-*` key. The daemon checks no form and passes the key to `tailscale up` through
-  `TS_AUTHKEY`. Use the key type of the control server.
-
-- **MagicDNS.** Host access DNS resolution depends on the DNS configuration of the control
-  server. Headscale serves MagicDNS, and its suffix and its behaviour can differ from
-  Tailscale. The daemon also exports the split DNS domains of each tailnet to the host
-  resolver, and a Headscale control server may serve no split DNS. When a name does not
-  resolve, read the Headscale DNS configuration.
-
-- **DERP relays.** Tailscale runs its own global DERP relay network. Headscale uses the same
-  relays, its own relays, or both. When two peers cannot connect, read the DERP map of the
-  Headscale instance. A direct connection through STUN works without the control server.
-
-## Configuration reference
-
-```yaml
-# The schema version. The daemon migrates a v1 file when the key is absent.
-version: 2
-
-# Transparent host access to every tailnet peer (default: false).
-host_access: false
-
-# The control server URL for Headscale (default: empty, which means Tailscale).
-# It applies to every tailnet that declares none. It needs the scheme https,
-# unless the host is a loopback address.
-# control_url: "https://headscale.example.com"
-
-# The subnet of the veth pairs between the host and the namespaces
-# (default: 10.200.0.0/16). Change it when 10.200.0.0/16 collides with a route on
-# the network. It must be an IPv4 CIDR of at least /16.
-# infra_subnet: "10.200.0.0/16"
-
-# The routing table that holds every route the daemon writes on the host
-# (default: absent, which is the main table). A declared table makes the daemon own
-# one `ip rule` per address family, at the priority 32000, which sends a lookup to
-# that table. 53 is the suggested value, because tailscaled already uses the table 52
-# inside each namespace. The kernel reserves 253, 254 and 255.
-# route_table: 53
-
-# Let the daemon set net.ipv6.conf.all.forwarding on a kernel older than Linux 6.17
-# (default: false). A newer kernel gets the IPv6 path of each namespace without this key.
-# See "IPv6" under "Networking".
-# ipv6: true
-
-# The Unix group that reaches the control socket (default: empty, which is root only).
-# Warning: membership of this group is equivalent to root access on this host, because a
-# member sends a command to the daemon and the daemon runs as root.
-# A client that is not root needs it, and a client that reaches the socket over an SSH
-# forward needs it. The daemon then makes /var/lib/hydrascale and api.sock
-# group-accessible. See "Remote access" below.
-# socket_group: hydrascale
-
-# The root-only file that holds a credential per tailnet
-# (default: /etc/hydrascale/secrets.yaml). The file needs the mode 0600 and the owner
-# root. See "Credentials" above.
-# secrets_file: "/etc/hydrascale/secrets.yaml"
-
-# The tailnets that the daemon manages
-tailnets:
-  - id: "corp-prod"                # unique; letters, digits, dots, hyphens, underscores; 63 characters at most
-    alias: "prod"                  # optional second name; letters, digits, hyphens, underscores
-    exit_node: "node1.example.com" # optional exit node name
-    auth_key: "tskey-auth-xxxxx"   # optional auth key for an unattended setup
-    host_access: true              # optional, and it overrides the global value
-    # control_url: "https://headscale.example.com"  # optional per-tailnet control server
-
-# The local rule set (default: the mode enforce, and the preserving rules that the
-# migration writes). See "Local rules" above.
-access:
-  mode: enforce                    # enforce (default) or observe
-  rules:
-    - from: corp-prod              # a tailnet, or the literal host
-      to: internet                 # a tailnet, or the literal host, or the literal internet
-      ports: []                    # empty allows every port and both protocols
-
-# The console listener. See "The console" above.
-console:
-  enabled: true                    # default: true
-  bind_address: "127.0.0.1:9443"   # default: 127.0.0.1:9443, and it must be a loopback address
-
-# The DNS protection setting. See "The overlay mount on /etc" above.
-dns:
-  allow_unprotected: false         # default: false
-
-# The DNS resolver
-resolver:
-  mode: unified                    # the one mode the daemon runs
-  bind_address: "127.0.0.53:5354"  # optional, and it defaults to 127.0.0.53:5354
-  resolve_aliases: false           # default: false. See "Short names for a peer" above.
-
-# The host DNS mode, which host access uses
-host_dns:
-  mode: hosts                      # hosts (default) writes /etc/hosts entries
-  # mode: resolved                 # registers with systemd-resolved through resolvectl
-
-# The address that each namespace sends one packet to, so that the status answer reports
-# measured reachability. An empty value selects a public default. Declare an IP address
-# and never a name.
-# probe_target: "100.100.100.100"
-
-# The reconciler
-reconciler:
-  interval: 10s                    # the tick of the control loop, as a Go duration
-```
-
-## Remote access
-
-The daemon serves the control API on the control socket `/var/lib/hydrascale/api.sock`. The
-socket is root only by default: the mode is `0600`, and no other account traverses
-`/var/lib/hydrascale`. A client that is not root needs group access to the socket. A client
-on another machine reaches the socket over an SSH forward, and the SSH account needs the
-same group access.
-
-**Warning — membership of `socket_group` is equivalent to root access.** A member of the
-group sends a command to the daemon, and the daemon runs as root. The member creates a
-namespace, writes a host route, and runs a command as root. Name a group that holds only
-trusted operators. The daemon refuses to start when `socket_group` names the root group.
-
-Create the group and add the account to it:
-
-```bash
-sudo groupadd hydrascale
-sudo usermod -aG hydrascale "$USER"    # log out and in for it to take effect
-# set `socket_group: hydrascale` in the config, then restart the daemon
-```
-
-`hydrascale init` offers this as a step. With `socket_group` set, the daemon owns the socket
-`root:hydrascale 0660` and makes the directory group-traversable. A member of the group then
-reaches the control API without root.
-
-**From another machine.** Forward the socket over SSH, then send the request to the
-forwarded path. The SSH account must be a member of the socket group on the host:
-
-```bash
-ssh -L /tmp/hydrascale.sock:/var/lib/hydrascale/api.sock user@linux-host
-curl --unix-socket /tmp/hydrascale.sock http://unix/api/status
-```
-
-Forward the console port the same way when the operator wants the console from another
-machine:
-
-```bash
-ssh -L 9443:127.0.0.1:9443 user@linux-host
-```
-
-The local port can be any free port. The daemon accepts an `Origin` header that names a
-loopback host on any port.
-
-The console has no authentication, so the SSH forward is the only control on that path.
-
-## Networking
-
-### IP forwarding
-
-The daemon needs `net.ipv4.ip_forward=1` on the host, so that traffic from inside a
-namespace reaches the internet for the tailnet coordination. Enable it for this boot:
-
-```bash
-sudo sysctl -w net.ipv4.ip_forward=1
-```
-
-To keep it across a restart, write `/etc/sysctl.d/99-hydrascale.conf`:
-
-```
-net.ipv4.ip_forward = 1
-```
-
-### Veth pairs
-
-A veth pair connects each namespace to the host. The interface names come from a short hash
-of the tailnet identifier: `vh<hash>` on the host side and `vn<hash>` inside the namespace.
-The names therefore stay inside the Linux limit of 15 characters. Each pair takes a `/30`
-block from the infra subnet, which defaults to `10.200.0.0/16`.
-
-When `10.200.0.0/16` collides with a route on the network, set `infra_subnet` to a free
-range; see [Configuration reference](#configuration-reference). The value must be IPv4 and
-at least a `/16`.
-
-### NAT and masquerade
-
-The daemon writes these rules in the `nat` table for each namespace:
-
-- **MASQUERADE**, so that the IPv4 traffic of the namespace leaves through the default
-  interface of the host.
-- **NAT66**, when the IPv6 path is on, so that the IPv6 traffic of the namespace leaves
-  with the global address of the host. See [IPv6](#ipv6).
-- **A DNAT rule per address family** in `PREROUTING`, which sends inbound UDP for the listen
-  port of the namespace to its `tailscaled`. See [Direct connections](#direct-connections).
-
-### Direct connections
-
-The `tailscaled` of each namespace listens on a fixed UDP port: 41641 plus the veth index
-of the namespace, so a port from 41642 to 41895. The host forwards inbound UDP for that
-port to the namespace, for IPv4 and for IPv6. A peer then reaches the namespace directly,
-as it reaches the `tailscaled` of the host on 41641. Read the port of a namespace with
-`ip netns exec ns-<id> ss -lunp`.
-
-**Warning: the host forwards each inbound UDP packet for that port to the namespace.** A
-host service that listens on a port from 41642 to 41895 stops receiving that traffic.
-
-### IPv6
-
-Each namespace gets an IPv6 path when the host holds an IPv6 default route. The daemon
-gives the namespace an address from the unique local prefix `fd5c:9a3e:7b10::/48`. The
-host translates that address to its own global address with one NAT66 rule. The local
-rules apply to IPv6 as they apply to IPv4: the daemon writes `HYDRASCALE-FWD` and
-`HYDRASCALE-OUT` in the IPv6 filter table too.
-
-The host must forward IPv6, and the kernel decides how:
-
-- **Linux 6.17 or later.** The daemon sets `force_forwarding` on each upstream device and
-  on each host side veth device. The host keeps its own router advertisements. No key is
-  necessary.
-- **An older kernel.** Only `net.ipv6.conf.all.forwarding` forwards IPv6. That key stops
-  each device with `accept_ra` 1 from accepting a router advertisement, so the host can
-  lose its own IPv6 default route. The daemon therefore sets it only when you add the
-  key `ipv6: true`. It changes `accept_ra` from 1 to 2 on each device first.
-
-```yaml
-ipv6: true
-```
-
-The event `ipv6.state` states whether the path is on and why. Read it with
-`journalctl -u hydrascale | grep ipv6.state`. A host with no IPv6 default route reports
-`off: the host holds no IPv6 default route`.
-
-**Warning: `force_forwarding` on the upstream device lets the host forward internet
-traffic to any other host device.** The daemon drops that traffic in `HYDRASCALE-FWD`
-when the host did not forward IPv6 before. A shutdown resets `force_forwarding` before it
-removes the chains.
-
-### Docker
-
-Docker sets the policy of the `FORWARD` chain to `DROP`, which stops the traffic between a
-namespace and the host. The daemon sends every forwarded packet into `HYDRASCALE-FWD`
-before that policy applies, so a local rule that allows the path keeps it open. Version 0.9
-wrote an `ACCEPT` rule per namespace into `FORWARD`, and version 1.0 removes those rules at
-the start. The operator writes no iptables rule by hand.
-
-The daemon inserts its jump rule at position 1 of `FORWARD` and of `INPUT`. That position is
-not stable, because `ts-forward`, `DOCKER-USER`, and `DOCKER-FORWARD` each take position 1
-after the daemon starts. The reconciler reads the position on every tick, records the event
-`access.jump_displaced` when the position changes, and writes the jump rule again when the
-parent chain holds none.
-
-## Command line
-
-```
-hydrascale add <id>                   Add a tailnet to the config and reconcile
-hydrascale apply                      Reconcile once
-hydrascale diff                       Show what a reconcile would change
-hydrascale env <tailnet-id>           Print the exports and the shell function hstn for a tailnet
-hydrascale exec <tailnet-id> -- <cmd> Run a command inside the namespace of a tailnet (needs root)
-hydrascale init                       Run the first-run wizard
-hydrascale install                    Install the daemon as a systemd service
-hydrascale list                       List the configured tailnets
-hydrascale ping <tailnet-id> <target> Ping a peer from inside the namespace of a tailnet
-hydrascale remove <id>                Remove a tailnet from the config and reconcile
-hydrascale serve                      Run the daemon and the control loop
-hydrascale skills install             Write the agent skills to the skill directory
-hydrascale skills list                List the name and the description of each skill
-hydrascale ssh  <tailnet-id> <target> Open an SSH session to a peer through a namespace
-hydrascale status                     Show the declared state and the live state
-hydrascale switch <id>                Print the namespace name for a tailnet (changes no state)
-hydrascale tailscale <tailnet-id> -- <args>
-                                      Run a tailscale command inside the namespace of a tailnet
-hydrascale tui                        Open the terminal interface, which needs a running daemon
-hydrascale uninstall                  Remove Hydrascale from the host
-hydrascale version                    Print the version
-hydrascale wrap <service> <tailnet-id>
-                                      Write a systemd drop-in that isolates a service
-```
-
-Pass `--config <path>` on any command to name another configuration file. The default is
-`/etc/hydrascale/config.yaml`, which the systemd unit also passes.
-
-Each command that takes a `<tailnet-id>` also takes the `alias` of that tailnet. An alias
-is unique, and it is the identifier of no tailnet. `hydrascale list` prints the alias, and
-`hydrascale status` shows it in the column `ALIAS`.
-
-`env` reads the configuration file to resolve an alias. On a host where only root can read
-`/etc/hydrascale`, run `sudo hydrascale env <tailnet-id>`.
-
-The namespace-scoped subcommands `exec`, `ping`, `ssh`, and `tailscale` replace a raw
-`ip netns exec` line:
-
-```bash
-# Before
-sudo ip netns exec ns-personal tailscale --socket=/var/lib/hydrascale/state/personal/tailscaled.sock ping Mars
-
-# After
-sudo hydrascale ping personal Mars
-```
+| [Home](https://crank-git.github.io/Hydrascale/) | What Hydrascale does, and the reconciler. |
+| [Get started](https://crank-git.github.io/Hydrascale/get-started/) | The requirements, the install, and the quick start. |
+| [Guides](https://crank-git.github.io/Hydrascale/guides/) | The console views, the credentials, host access, and Headscale. |
+| [Concepts](https://crank-git.github.io/Hydrascale/concepts/) | The local rules, the upstream policy, DNS, and networking. |
+| [Reference](https://crank-git.github.io/Hydrascale/reference/) | The configuration file, the command line, the environment variables, the control API, the events, and the agent skills. |
+| [Operations](https://crank-git.github.io/Hydrascale/operations/) | Daemon mode, remote access, the upgrade, the uninstall, and troubleshooting. |
+| [Architecture](https://crank-git.github.io/Hydrascale/architecture/) | The namespaces, the veth pairs, and the managers of the reconciler. |
+| [Security](https://crank-git.github.io/Hydrascale/security/) | The console risk, its four controls, and the security audit. |
 
 ## Agent skills
 
-A skill is one Markdown file that states how a coding agent performs one task. The binary
-holds the skill set, so a host needs no checkout of this repository.
-
-Write the skills to the skill directory of the operator:
+A skill is one Markdown file that states how a coding agent does one task. The binary
+holds the skill set. Run this command as the account that runs the coding agent, without
+`sudo`:
 
 ```bash
 hydrascale skills install
 ```
 
-The command writes each skill to `$HOME/.claude/skills/<name>/SKILL.md`. Run it as the
-account that runs the coding agent. Run it without `sudo`. The command keeps a file that
-exists. Pass `--force` to write that file. Pass `--dry-run` to print each path and write no
-file. `hydrascale skills list` prints the name and the description of each skill.
-
-The binary holds two skills:
-
-- **`hydrascale-setup`** reads the Hydrascale state of a host and reports it. It runs the
-  five commands that change no state: `status`, `list`, `diff`, `env`, and `version`. It
-  prints every command that changes the host, with the precondition and the risk, and it
-  runs none of them.
-- **`tailnet-exec`** sends a command into the namespace of one tailnet rather than to the
-  host network. It states the five routing forms: `exec`, `tailscale`, `ping`, `ssh`, and
-  `wrap`. It reads the tailnet identifier from `hydrascale list`.
-
-`skills/tailnet-exec/SKILL.md` and `skills/hydrascale-setup/SKILL.md` hold the source of
-the two skills. A test reads each file, extracts each `hydrascale <command>` string, and
-fails when the command tree of the binary holds no such command. A skill therefore states
-no command that a later release removed.
-
-## Environment variables
-
-| Variable | Description |
-|---|---|
-| `HYDRASCALE_AUTHKEY_<ID>` | Overrides the `auth_key` of the tailnet `<ID>`. `<ID>` is the identifier in upper case, with each dash replaced by an underscore. For the tailnet `corp-prod`, set `HYDRASCALE_AUTHKEY_CORP_PROD=tskey-auth-xxxxx`. |
-| `HYDRASCALE_TS_CLIENT_ID_<ID>` | Overrides `tailscale_oauth_client_id` in the secrets file. |
-| `HYDRASCALE_TS_CLIENT_SECRET_<ID>` | Overrides `tailscale_oauth_client_secret` in the secrets file. |
-| `HYDRASCALE_HS_API_KEY_<ID>` | Overrides `headscale_api_key` in the secrets file. |
-
-## Control API
-
-The daemon serves the JSON API on the control socket `/var/lib/hydrascale/api.sock`, and on
-the console listener at `127.0.0.1:9443`. The `tui` command and the `status` command use the
-control socket. Every mutating route on the console listener requires the header
-`X-Hydrascale-Console: 1`.
-
-| Route | Method | Description |
-|---|---|---|
-| `/api/status` | GET | The declared state and the live state of every tailnet |
-| `/api/events` | GET | The recent events of the reconciler |
-| `/api/reconcile` | POST | Run one reconciliation now |
-| `/api/tailnet/add` | POST | Add a tailnet to the config and reconcile |
-| `/api/tailnet/remove` | POST | Remove a tailnet from the config and reconcile |
-| `/api/tailnet/connect` | POST | Clear the error state and reconnect a tailnet |
-| `/api/tailnet/disconnect` | POST | Stop the process of a tailnet and keep the config |
-| `/api/tailnet/{id}/detail` | GET | The peers, the routes, and the addresses of one tailnet |
-| `/api/tailnet/{id}/removal-plan` | GET | What a removal of one tailnet deletes |
-| `/api/config` | GET | The current configuration, with every credential removed |
-| `/api/config/dns` | POST | Change the resolver configuration |
-| `/api/dns` | GET | The resolver state, the DNS protection state, and the split DNS domains and conflict per namespace |
-| `/api/access` | GET, PUT | Read and write the local rule set |
-| `/api/policy` | GET | The control server kind and the write availability per tailnet |
-| `/api/policy/{id}` | GET, PUT | Read and write the policy of one tailnet |
-| `/api/policy/{id}/validate` | POST | Validate a policy document at the control server |
-| `/api/policy/{id}/credentials` | PUT | Write the credential of one tailnet |
-
-Every mutating route validates the whole request body before it changes anything. A failure
-returns HTTP 400 and the body `{"error": "<message>"}`.
-
-## Daemon mode
-
-### The systemd unit
-
-```bash
-sudo mkdir -p /var/lib/hydrascale
-sudo cp contrib/hydrascale.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now hydrascale
-```
-
-The unit at `contrib/hydrascale.service` runs the daemon with ambient capabilities and the
-systemd sandbox settings. `hydrascale install` writes the same unit.
-
-### SIGHUP
-
-SIGHUP makes the daemon read the configuration file and reconcile at once, without a wait
-for the next tick. Under systemd, `systemctl reload hydrascale` sends the signal.
-
-### A graceful shutdown
-
-SIGINT and SIGTERM cancel the control loop. The daemon stops every tailnet process
-concurrently, with a timeout of 30 seconds, and exits.
-
-### Monitoring
-
-```bash
-sudo systemctl status hydrascale
-sudo journalctl -u hydrascale -f
-```
-
-## Architecture
-
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="One Linux host. The config file, the reconciler, the console and the DNS forwarder sit on the host. A veth pair joins the host to one network namespace per tailnet, and each namespace runs its own tailscaled and its own tailscale0 interface." width="900">
-</p>
-
-The daemon runs one network namespace per tailnet. A veth pair joins each namespace to the
-host, and the reconciler, the console, and the DNS forwarder run on the host itself.
-
-The reconciler builds that state from three managers:
-
-```
-                      +-----------------------+
-                      |    config.yaml        |
-                      |  (declared state)     |
-                      +-----------+-----------+
-                                  |
-                                  v
-                      +-----------+-----------+
-                      |     Reconciler        |
-                      |  read the config      |
-                      |  read the live host   |
-                      |  compute the diff     |
-                      |  apply the actions    |
-                      +-+--------+----------+-+
-                        |        |          |
-               +--------+   +---+---+   +--+--------+
-               v             v           v
-    +----------+--+  +------+------+  +-+----------+
-    |  Namespace  |  |   Daemon    |  |  Routing   |
-    |  Manager    |  |   Manager   |  |  Manager   |
-    | (ip netns)  |  | (tailscaled)|  | (netlink)  |
-    +-------------+  +-------------+  +------------+
-          |                |                |
-          v                v                v
-    ns-corp-prod     tailscaled         route sync
-    ns-homelab       per namespace      per namespace
-```
-
-Each tick of the reconciler:
-
-1. **Read** the declared state from `config.yaml`.
-2. **Read** the live state: the namespaces that exist, the processes that are healthy, the
-   routes that are installed, and the position of the jump rule.
-3. **Compute** the difference, which produces a list of actions.
-4. **Apply** the actions in order, and count the failures per tailnet.
-5. After three failures in a row, place the tailnet in an error state and skip it until the
-   operator resets it.
-
-The reconciler takes a file lock before each tick, so two ticks never change the host at
-once.
-
-## Uninstall
-
-`uninstall` stops every tailnet, deletes the namespaces, the veth pairs, the iptables and
-ip6tables rules, the host routes, and the DNS entries, then removes the systemd service and
-`/var/lib/hydrascale`. It finds the tailnets from the namespaces on the host, and it does
-not change the configuration file:
-
-```bash
-sudo hydrascale uninstall
-```
-
-The command logs each tailnet node out, so no node stays in the tailnet admin console. Pass
-`--keep-nodes` to keep them. A plain `uninstall` keeps the binary and `/etc/hydrascale`, so
-the command runs again. Pass `--purge` to remove those too, and `--yes` to skip the
-confirmation.
-
-If a teardown step fails, `uninstall` lists each failure, keeps `/var/lib/hydrascale` and
-the service unit, and exits non-zero. Correct the failure and run it again.
-
-## Troubleshooting
-
-**`bind: address in use` for the control socket**
-A daemon that crashed left the socket file. Delete it and start again:
-```bash
-sudo rm /var/lib/hydrascale/api.sock
-sudo hydrascale serve
-```
-
-**The console does not open**
-Read the log for the bind address. The daemon refuses a `console.bind_address` that is not
-a loopback host and a port, and it refuses a port that another process holds:
-```bash
-sudo journalctl -u hydrascale | grep console
-```
-
-**A tailnet cannot reach the internet after an upgrade to version 1.0**
-The rule set denies the path. Read the rules, and set `access.mode: observe` to see the
-paths that the mode `enforce` denies:
-```bash
-sudo journalctl -u hydrascale | grep hydrascale-would-deny
-```
-
-**`hydrascale status` reports `down` and `degraded` after a restart**
-A tailnet needs about 20 seconds after a start of the daemon to reach `healthy` and
-`running`. Wait 30 seconds and read the state again:
-```bash
-sleep 30 && sudo hydrascale status
-```
-A tailnet that still reports `down` after 60 seconds has a real failure. Read the events:
-```bash
-sudo journalctl -u hydrascale -n 50
-```
-
-**A policy write returns a permission error on Tailscale**
-The OAuth client holds the scope `policy_file` alone. Add `devices:posture_attributes` and
-`devices:core:read`, then write the new client identifier and client secret into the
-secrets file.
-
-**A policy write fails on Headscale**
-The control server runs the file policy mode, and the answer holds the message
-`update is disabled for modes other than 'database'`. Set `policy.mode: "database"` in the
-Headscale configuration and restart the control server.
-
-**The daemon refuses the secrets file**
-The file grants group access or other access. Set the mode and the owner:
-```bash
-sudo chown root:root /etc/hydrascale/secrets.yaml
-sudo chmod 0600 /etc/hydrascale/secrets.yaml
-```
-
-**`netcheck` in a namespace reports `IPv6: no`**
-Read the reason that the daemon records:
-```bash
-sudo journalctl -u hydrascale | grep ipv6.state
-```
-`the host holds no IPv6 default route` means the host has no IPv6 upstream.
-`the kernel holds no force_forwarding` means the kernel is older than Linux 6.17; add
-`ipv6: true` to the configuration file. See [IPv6](#ipv6).
-
-**`tailscale ping` reports `direct connection not established`**
-A peer reaches the namespace on its listen port. Read the port, and confirm the DNAT rule:
-```bash
-sudo ip netns exec ns-<id> ss -lunp | grep tailscaled
-sudo iptables -t nat -S PREROUTING | grep DNAT
-```
-A firewall in front of the host, such as the firewall of a cloud provider, must allow
-inbound UDP on that port.
-
-**Traffic of a namespace cannot reach the internet**
-IP forwarding is off. Read the value and set it:
-```bash
-sudo sysctl net.ipv4.ip_forward          # it must print 1
-sudo sysctl -w net.ipv4.ip_forward=1     # set it
-```
-
-**The host resolves no public name, and a tailscaled of the host changes the resolver**
-A `tailscaled` that the host runs outside Hydrascale, with `accept-dns` on, rewrites
-`/etc/resolv.conf` to `100.100.100.100` alone. When that tailnet holds no public upstream,
-the host loses public DNS and the resolver of Hydrascale takes the dead upstream. Turn the
-DNS management of that process off, and give `/etc/resolv.conf` back to `systemd-resolved`:
-```bash
-sudo tailscale set --accept-dns=false
-sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-```
-`hydrascale init` detects this in the preflight checks and offers to turn it off.
-
-**`failed to listen on /var/lib/hydrascale/api.sock: no such file or directory`**
-The state directory does not exist. `hydrascale init` and `hydrascale install` create it. To
-create it by hand:
-```bash
-sudo mkdir -p /var/lib/hydrascale/state
-```
-
-**Docker stops the traffic of a namespace**
-The daemon writes its jump rule at position 1 of `FORWARD`, but another rule can come
-first. Read the chain:
-```bash
-sudo iptables -L FORWARD -v
-```
-Look for a `DROP` rule before the jump rule of Hydrascale, and remove it or move it.
-
-**The infra subnet collides with a route**
-When `10.200.0.0/16` overlaps a route on the host, the veth setup fails or the traffic goes
-to the wrong place. Read the routes:
-```bash
-ip route | grep 10.200
-```
-On a match, set `infra_subnet` to a free range:
-```yaml
-infra_subnet: "10.201.0.0/16"
-```
-Then restart the daemon. It deletes the namespaces and builds them again with the new
-addresses.
-
-**A host route does not carry traffic**
-A route in a table other than the main table reaches no packet until a routing policy rule
-sends a lookup to that table. Read the rules and the table:
-```bash
-ip rule
-ip -6 rule
-ip route show table 53
-ip -6 route show table 53
-```
-The rule list holds `32000: from all lookup 53` for IPv4 and for IPv6, and the table holds
-one route per peer. When the rule is absent, read the log for `hostaccess`. When another
-rule of the operator already holds the priority 32000, the daemon adds none and it states
-the table that the rule looks up.
-
-**`name not a valid ifname`**
-An older version used the whole tailnet identifier as the interface name, which passes the
-Linux limit of 15 characters. Install the current release, which uses the hash names
-`vh<hash>` and `vn<hash>`.
-
-**MagicDNS returns SERVFAIL for a tailnet name**
-First read the log for `refresh_dns` after `start_daemon` on that tailnet:
-```bash
-journalctl -u hydrascale | grep -E 'start_daemon|refresh_dns'
-```
-When `refresh_dns` is absent or timed out, `tailscaled` never reached
-`BackendState=Running`. The cause is a bad auth key, no network route, or a control server
-that does not answer. Read `sudo hydrascale tailscale <id> -- status`. When `refresh_dns`
-ran and a query still returns SERVFAIL, read the resolv.conf of the namespace; it must hold
-real upstreams and never `100.100.100.100`:
-```bash
-cat /etc/netns/ns-<id>/resolv.conf
-```
-As a last step, restart the service with `sudo systemctl restart hydrascale`. The reconciler
-runs the DNS refresh again on the next tick.
+The [Agent skills](https://crank-git.github.io/Hydrascale/reference/skills/) page states
+each skill and each flag.
 
 ## License
 

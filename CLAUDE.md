@@ -50,7 +50,14 @@ gofmt -l .                     # must print nothing
 govulncheck ./...              # dependency check
 node --version                 # the test suite needs node
 python3 --version              # the test suite needs python3
+scripts/docs-build.sh          # build the documentation site into build/site
 ```
+
+`scripts/docs-build.sh` needs `mkdocs`. Install it with
+`pip install -r docs/site/requirements.txt`. The script runs `mkdocs build --strict`, so a
+link to a missing page fails the build. The tests of `scripts/docs_build_test.go` follow
+the gate rule below: a developer machine that holds no `mkdocs` skips them, and a gate
+that holds no `mkdocs` fails.
 
 The test suite needs `node` and `python3` as well as the Go tools.
 `TestTheConsoleJavaScriptTestsPass` in `internal/ui/shell_test.go` runs the console

@@ -22,7 +22,7 @@ func deletedRules(rec *execx.Recorder) []string {
 
 func TestThePlanNamesTheSameIptablesRulesThatTheTeardownDeletes(t *testing.T) {
 	// The console dialog states the rule count, therefore the plan and the teardown must
-	// read one source. SA-3 and SA-14 of docs/security-audit.md record what a route and a
+	// read one source. SA-3 and SA-14 of docs/site/security/audit.md record what a route and a
 	// loader did when each held the same rule.
 	const id, infraSubnet, stateBase = "team-prod", "10.200.0.0/16", "/var/lib/hydrascale/state"
 	nsName := GetNamespaceName(id)

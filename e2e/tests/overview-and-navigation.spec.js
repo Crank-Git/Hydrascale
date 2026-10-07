@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// Covers the "Get oriented in the console" manual page: docs/manual/first-run.md.
+// Covers the "Get oriented in the console" manual page: docs/site/guides/first-run.md.
 
 test("lands on Overview and lists every tailnet with its reconciler state", async ({ page }) => {
   await page.goto("/");

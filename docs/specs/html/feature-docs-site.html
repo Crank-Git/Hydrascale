@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydrascale v1.0 — Feature: Documentation site</title>
+<style>
+:root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
+        --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#14141b; --fg:#e8e8ee; --muted:#9a9aa8; --line:#2c2c38; --accent:#8ea6ff;
+          --card:#1c1c26; --warn-bg:#2a2318; --warn-line:#a87c2a; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:16px/1.6 system-ui,-apple-system,sans-serif; }
+.layout { display:flex; min-height:100vh; }
+aside.site { width:17rem; flex:none; border-right:1px solid var(--line);
+             padding:1.2rem 1rem 3rem; position:sticky; top:0; height:100vh;
+             overflow-y:auto; background:var(--card); }
+aside.site h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+                color:var(--muted); margin:1.2rem 0 .3rem; border:none; padding:0; }
+aside.site ul { list-style:none; margin:0; padding:0; }
+aside.site li { margin:.15rem 0; }
+aside.site a { text-decoration:none; color:var(--fg); font-size:.92rem;
+               display:block; padding:.15rem .5rem; border-radius:6px; }
+aside.site a:hover { background:var(--bg); }
+aside.site a.current { background:var(--accent); color:#fff; }
+aside.site a.sub { padding-left:1.3rem; font-size:.84rem; color:var(--muted); }
+aside.site .brand { font-weight:700; font-size:1.05rem; }
+main { max-width:60rem; margin:0 auto; padding:2rem 1.5rem 6rem; min-width:0; flex:1; }
+h1,h2,h3,h4 { line-height:1.25; }
+h1 { font-size:2rem; margin:.2rem 0; }
+h2 { border-bottom:1px solid var(--line); padding-bottom:.3rem; margin-top:2.5rem; }
+a { color:var(--accent); }
+code { background:var(--card); padding:.1em .35em; border-radius:4px; font-size:.9em; }
+pre.code { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; overflow-x:auto; }
+pre.code code { background:none; padding:0; }
+.table-wrap { overflow-x:auto; }
+table { border-collapse:collapse; margin:1rem 0; min-width:50%; }
+th,td { border:1px solid var(--line); padding:.4rem .7rem; text-align:left; }
+th { background:var(--card); }
+blockquote { border-left:3px solid var(--accent); margin:1rem 0; padding:.2rem 1rem;
+             color:var(--muted); }
+.meta { color:var(--muted); margin-bottom:2rem; }
+.badge { display:inline-block; padding:.1rem .6rem; border-radius:999px;
+         border:1px solid var(--accent); color:var(--accent); font-size:.85rem; }
+.diagram { background:var(--card); border:1px solid var(--line); border-radius:8px;
+           padding:1rem; margin:1rem 0; overflow-x:auto; }
+.diagram pre.mermaid { margin:0; }
+.diagram.raw::before { content:"diagram source (assets/mermaid.min.js not vendored)";
+                       display:block; color:var(--muted); font-size:.8rem;
+                       margin-bottom:.5rem; }
+.callout-h, .callout-h ~ p, .callout-h ~ ul { background:var(--warn-bg); }
+.callout-h { border-left:4px solid var(--warn-line); padding:.3rem .8rem; }
+.mockup { margin:1.5rem 0; }
+.mockup iframe { width:100%; height:32rem; border:1px solid var(--line);
+                 border-radius:8px; background:#fff; }
+nav.pager { display:flex; justify-content:space-between; margin-top:3rem;
+            border-top:1px solid var(--line); padding-top:1rem; }
+@media (max-width: 900px) {
+  .layout { display:block; }
+  aside.site { width:auto; height:auto; position:static; border-right:none;
+               border-bottom:1px solid var(--line); }
+}
+h1[id]:hover .rv-add, h2[id]:hover .rv-add, h3[id]:hover .rv-add,
+h4[id]:hover .rv-add { opacity:1; }
+.rv-add { opacity:0; margin-left:.5rem; font-size:.75rem; cursor:pointer;
+          border:1px solid var(--accent); color:var(--accent); background:none;
+          border-radius:6px; padding:0 .45rem; vertical-align:middle;
+          transition:opacity .15s; }
+.rv-comment { border:1px solid var(--warn-line); border-left-width:4px;
+              background:var(--warn-bg); border-radius:8px; padding:.6rem .9rem;
+              margin:.8rem 0; font-size:.92rem; }
+.rv-comment.rv-resolved { opacity:.6; border-left-color:var(--line); }
+.rv-comment .rv-head { display:flex; gap:.6rem; align-items:center;
+                       color:var(--muted); font-size:.8rem; margin-bottom:.3rem; }
+.rv-comment .rv-head button { font-size:.75rem; cursor:pointer; background:none;
+                              border:1px solid var(--line); border-radius:6px;
+                              color:var(--muted); padding:0 .4rem; }
+.rv-comment .rv-body { white-space:pre-wrap; }
+.rv-editor textarea { width:100%; min-height:5rem; background:var(--bg);
+                      color:var(--fg); border:1px solid var(--line);
+                      border-radius:6px; padding:.5rem; font:inherit; }
+.rv-editor .rv-actions { margin-top:.4rem; display:flex; gap:.5rem; }
+.rv-editor button { cursor:pointer; border-radius:6px; padding:.2rem .8rem;
+                    border:1px solid var(--accent); background:var(--accent);
+                    color:#fff; }
+.rv-editor button.rv-cancel { background:none; color:var(--accent); }
+#rv-toggle { position:fixed; right:1rem; bottom:1rem; z-index:60;
+             background:var(--accent); color:#fff; border:none; cursor:pointer;
+             border-radius:999px; padding:.5rem 1rem; font-size:.85rem;
+             box-shadow:0 2px 10px rgba(0,0,0,.2); }
+#rv-drawer { position:fixed; top:0; right:0; bottom:0; width:21rem; z-index:55;
+             background:var(--card); border-left:1px solid var(--line);
+             display:flex; flex-direction:column; transform:translateX(100%);
+             transition:transform .2s ease; box-shadow:-4px 0 16px rgba(0,0,0,.12); }
+body.rv-open #rv-drawer { transform:none; }
+body.rv-open .layout { padding-right:21rem; }
+#rv-drawer header { padding:.8rem 1rem .5rem; border-bottom:1px solid var(--line); }
+#rv-drawer header .rv-count { color:var(--muted); font-size:.8rem; }
+#rv-drawer .rv-compose { padding:.8rem 1rem; border-bottom:1px solid var(--line); }
+#rv-drawer .rv-compose label { display:block; font-size:.75rem;
+                               color:var(--muted); margin-bottom:.25rem; }
+#rv-drawer .rv-compose select { width:100%; margin-bottom:.4rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.3rem; font:inherit; font-size:.85rem; }
+#rv-drawer .rv-compose textarea { width:100%; min-height:5.5rem;
+             background:var(--bg); color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:.5rem; font:inherit; font-size:.9rem; }
+#rv-drawer .rv-compose .rv-live { font-size:.72rem; color:var(--muted); }
+#rv-drawer .rv-list { flex:1; overflow-y:auto; padding:.6rem 1rem; }
+#rv-drawer .rv-item { border:1px solid var(--line); border-left:3px solid
+             var(--warn-line); border-radius:8px; padding:.45rem .6rem;
+             margin-bottom:.6rem; font-size:.82rem; cursor:pointer; }
+#rv-drawer .rv-item.rv-resolved { opacity:.55; border-left-color:var(--line); }
+#rv-drawer .rv-item .rv-where { color:var(--accent); font-size:.72rem; }
+#rv-drawer .rv-item .rv-meta { color:var(--muted); font-size:.72rem;
+                               display:flex; gap:.5rem; align-items:center; }
+#rv-drawer .rv-item .rv-meta button { font-size:.7rem; cursor:pointer;
+             background:none; border:1px solid var(--line); border-radius:5px;
+             color:var(--muted); padding:0 .35rem; }
+#rv-drawer .rv-item .rv-text { white-space:pre-wrap; margin:.15rem 0; }
+#rv-drawer footer { padding:.6rem 1rem; border-top:1px solid var(--line);
+                    display:flex; gap:.5rem; flex-wrap:wrap; }
+#rv-drawer footer button, #rv-drawer .rv-compose button {
+  cursor:pointer; border:1px solid var(--accent); background:none;
+  color:var(--accent); border-radius:6px; padding:.2rem .7rem; font-size:.8rem; }
+#rv-drawer .rv-compose button.rv-primary { background:var(--accent); color:#fff; }
+#rv-drawer .rv-otherpages { color:var(--muted); font-size:.75rem;
+                            margin:.4rem 0 0; }
+@media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
+</style>
+</head>
+<body data-page="feature-docs-site" data-rvkey="hydrascale-v1">
+<div class="layout">
+<aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
+<h2>Spec</h2><ul>
+<li><a href="../spec.html">Overview &amp; index</a></li>
+</ul>
+<h2>Features</h2><ul>
+<li><a href="feature-foundation.html">Foundation</a></li>
+<li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
+<li><a href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-fixes.html">Security fixes</a></li>
+<li><a href="feature-dns-integrity.html">DNS integrity</a></li>
+<li><a href="feature-reachability-model.html">Local reachability model</a></li>
+<li><a href="feature-console-foundation.html">Console foundation</a></li>
+<li><a href="feature-console-access-editor.html">Console access editor</a></li>
+<li><a href="feature-upstream-policy.html">Upstream policy control</a></li>
+<li><a href="feature-docs-and-release.html">Documentation, terminal interface restyle, and the release</a></li>
+<li><a href="feature-agent-skills.html">Agent skills for the operator, and the two command defects they expose</a></li>
+<li><a href="feature-policy-document-model.html">Policy document model</a></li>
+<li><a href="feature-visual-acl-editor.html">Visual ACL editor</a></li>
+<li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
+<li><a class="current" href="feature-docs-site.html">Documentation site</a></li>
+<li><a href="feature-readme-slim.html">A short README that links to the documentation site</a></li>
+<li><a href="feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
+</ul></aside>
+<main>
+<h1>Feature: Documentation site</h1>
+<p class="meta">Epic 14: Documentation site &nbsp; <span class="badge">built</span></p>
+<h3 id="docs-site-purpose">Purpose</h3>
+<p><code>README.md</code> holds 1468 lines. It states what Hydrascale does, how to install it, and then the whole reference: the local rules, the upstream policy, the credentials, host access, DNS, networking, the configuration keys, the command line, the control API, daemon mode, the architecture, the uninstall, and the troubleshooting. An operator who wants one fact scrolls through all of it. The repository also holds a manual under <code>docs/manual/</code>, an upgrade guide, and a security audit that the README does not reach.</p>
+<p>This feature set publishes one documentation site on GitHub Pages. The site holds the operator documentation in sections with a navigation and a search. The README keeps the introduction and links to the site. <code>features/15-readme-slim.md</code> shortens the README.</p>
+<p>The site builds with MkDocs and the Material for MkDocs theme. The theme takes the brand of the console: the lime accent on the warm dark surfaces, Barlow Semi Condensed, and Martian Mono. The site publishes from <code>main</code>, so the site always states the newest release.</p>
+<h3 id="docs-site-user-stories">User stories</h3>
+<ul>
+<li>As an operator, I want one page per topic with a search, so that I find a configuration
+</li>
+</ul>
+<p>key without a scroll through the README.</p>
+<ul>
+<li>As an operator, I want the documentation of the release that I run, so that the site
+</li>
+</ul>
+<p>states no feature that my release lacks.</p>
+<ul>
+<li>As an operator, I want the security audit on the site, so that I can judge the daemon
+</li>
+</ul>
+<p>before I install it.</p>
+<ul>
+<li>As a contributor, I want the build to fail on a broken link, so that a moved page never
+</li>
+</ul>
+<p>reaches the site with a dead link.</p>
+<h3 id="docs-site-functional-requirements">Functional requirements</h3>
+<h4 id="docs-site-source-and-build">Source and build</h4>
+<ul>
+<li><strong>FR-site-1</strong> — <code>mkdocs.yml</code> at the repository root declares the site.
+</li>
+<li><strong>FR-site-2</strong> — <code>mkdocs.yml</code> sets <code>docs_dir</code> to <code>docs/site</code>.
+</li>
+<li><strong>FR-site-3</strong> — <code>mkdocs.yml</code> sets <code>site_dir</code> to <code>build/site</code>, which <code>.gitignore</code> already
+</li>
+</ul>
+<p>ignores through the entry <code>build/</code>.</p>
+<ul>
+<li><strong>FR-site-4</strong> — <code>mkdocs.yml</code> sets <code>site_url</code> to <code>https://crank-git.github.io/Hydrascale/</code>.
+</li>
+<li><strong>FR-site-5</strong> — <code>docs/site/requirements.txt</code> pins <code>mkdocs-material==9.7.7</code>.
+</li>
+<li><strong>FR-site-6</strong> — <code>scripts/docs-build.sh</code> copies the brand font files and the logo from
+</li>
+</ul>
+<p><code>internal/ui/static/brand/</code> into <code>docs/site/assets/brand/</code>, then runs <code>mkdocs build --strict</code>.</p>
+<ul>
+<li><strong>FR-site-7</strong> — <code>.gitignore</code> ignores <code>docs/site/assets/brand/</code>, so the repository
+</li>
+</ul>
+<p>holds one copy of each font file and of the logo.</p>
+<ul>
+<li><strong>FR-site-8</strong> — <code>scripts/docs-build.sh</code> exits non-zero when <code>mkdocs build --strict</code>
+</li>
+</ul>
+<p>reports a warning.</p>
+<ul>
+<li><strong>FR-site-9</strong> — The <code>CLAUDE.md</code> command list names <code>scripts/docs-build.sh</code>.
+</li>
+</ul>
+<h4 id="docs-site-navigation-and-pages">Navigation and pages</h4>
+<ul>
+<li><strong>FR-site-10</strong> — The navigation holds these sections, in this order: Home, Get started,
+</li>
+</ul>
+<p>Guides, Concepts, Reference, Operations, Architecture, Security.</p>
+<ul>
+<li><strong>FR-site-11</strong> — Home states what Hydrascale does, shows the Overview screenshot, and
+</li>
+</ul>
+<p>links to Get started.</p>
+<ul>
+<li><strong>FR-site-12</strong> — Get started holds the requirements, the install of a released binary,
+</li>
+</ul>
+<p>the build from source, and the quick start.</p>
+<ul>
+<li><strong>FR-site-13</strong> — Guides holds the console tour, the access editor, the policy editor,
+</li>
+</ul>
+<p>and the visual editor. These are the four pages of <code>docs/manual/</code>.</p>
+<ul>
+<li><strong>FR-site-14</strong> — Guides holds a credentials page, a host access page, and a Headscale
+</li>
+</ul>
+<p>page.</p>
+<ul>
+<li><strong>FR-site-15</strong> — Concepts holds a page for the local rules and their two modes, for the
+</li>
+</ul>
+<p>upstream policy, for DNS, and for networking.</p>
+<ul>
+<li><strong>FR-site-16</strong> — The networking page states IP forwarding, the veth pairs, NAT, direct
+</li>
+</ul>
+<p>connections and the listen port of each namespace, IPv6, and Docker.</p>
+<ul>
+<li><strong>FR-site-17</strong> — Reference holds a page for the configuration file, the command line,
+</li>
+</ul>
+<p>the environment variables, the control API, and the events.</p>
+<ul>
+<li><strong>FR-site-18</strong> — The configuration page states every key that <code>internal/config</code> reads.
+</li>
+<li><strong>FR-site-19</strong> — The events page states every event type that the daemon records.
+</li>
+<li><strong>FR-site-20</strong> — Operations holds a page for daemon mode, remote access, the upgrade,
+</li>
+</ul>
+<p>the uninstall, and the troubleshooting.</p>
+<ul>
+<li><strong>FR-site-21</strong> — The upgrade page holds the content of <code>docs/UPGRADING.md</code>.
+</li>
+<li><strong>FR-site-22</strong> — Architecture holds the architecture diagram and its text.
+</li>
+<li><strong>FR-site-23</strong> — Security holds a page that states that the console has no
+</li>
+</ul>
+<p>authentication, and the controls that reduce the risk.</p>
+<ul>
+<li><strong>FR-site-24</strong> — Security holds the security audit.
+</li>
+<li><strong>FR-site-25</strong> — The site holds no page for <code>docs/DESIGN.md</code> and no page for the
+</li>
+</ul>
+<p>specification.</p>
+<h4 id="docs-site-moved-files">Moved files</h4>
+<ul>
+<li><strong>FR-site-26</strong> — <code>git mv</code> moves <code>docs/manual/*.md</code> into <code>docs/site/guides/</code>.
+</li>
+<li><strong>FR-site-27</strong> — <code>git mv</code> moves <code>docs/images/</code> to <code>docs/site/images/</code>.
+</li>
+<li><strong>FR-site-28</strong> — <code>git mv</code> moves <code>docs/UPGRADING.md</code> to <code>docs/site/operations/upgrade.md</code>.
+</li>
+<li><strong>FR-site-29</strong> — <code>git mv</code> moves <code>docs/security-audit.md</code> to
+</li>
+</ul>
+<p><code>docs/site/security/audit.md</code>.</p>
+<ul>
+<li><strong>FR-site-30</strong> — Every link in the repository that names a moved file names its new
+</li>
+</ul>
+<p>path.</p>
+<h4 id="docs-site-theme">Theme</h4>
+<ul>
+<li><strong>FR-site-31</strong> — <code>mkdocs.yml</code> sets <code>theme.name</code> to <code>material</code> and <code>theme.font</code> to
+</li>
+</ul>
+<p><code>false</code>, so the site loads no font from another host.</p>
+<ul>
+<li><strong>FR-site-32</strong> — <code>docs/site/stylesheets/brand.css</code> declares an <code>@font-face</code> rule for
+</li>
+</ul>
+<p>each file of <code>docs/site/assets/brand/fonts/</code>.</p>
+<ul>
+<li><strong>FR-site-33</strong> — <code>brand.css</code> sets <code>--md-text-font</code> to Barlow Semi Condensed and
+</li>
+</ul>
+<p><code>--md-code-font</code> to Martian Mono.</p>
+<ul>
+<li><strong>FR-site-34</strong> — The site has one colour scheme, which is dark.
+</li>
+<li><strong>FR-site-35</strong> — <code>brand.css</code> sets the page background to <code>#0d0c0b</code>, the body text to
+</li>
+</ul>
+<p><code>#eceae6</code>, and the accent to <code>#c8ff2e</code>.</p>
+<ul>
+<li><strong>FR-site-36</strong> — The accent marks the current navigation entry and nothing else. A link
+</li>
+</ul>
+<p>takes the body colour and an underline, as a link of the console does.</p>
+<ul>
+<li><strong>FR-site-37</strong> — The header shows the lime mark and the wordmark <code>hydrascale</code>.
+</li>
+<li><strong>FR-site-38</strong> — A built page requests no resource from a host other than the site
+</li>
+</ul>
+<p>host. The search runs in the browser.</p>
+<h4 id="docs-site-publish">Publish</h4>
+<ul>
+<li><strong>FR-site-39</strong> — <code>.github/workflows/docs.yml</code> builds the site on a push to <code>main</code>, and
+</li>
+</ul>
+<p>on a manual run.</p>
+<ul>
+<li><strong>FR-site-40</strong> — The workflow deploys <code>build/site</code> with <code>actions/configure-pages@v6</code>,
+</li>
+</ul>
+<p><code>actions/upload-pages-artifact@v5</code>, and <code>actions/deploy-pages@v5</code>.</p>
+<ul>
+<li><strong>FR-site-41</strong> — The deploy job holds the permissions <code>pages: write</code> and
+</li>
+</ul>
+<p><code>id-token: write</code>, and it runs in the environment <code>github-pages</code>.</p>
+<ul>
+<li><strong>FR-site-42</strong> — The publishing source of the repository is GitHub Actions.
+</li>
+<li><strong>FR-site-43</strong> — <code>.github/workflows/ci.yml</code> runs <code>scripts/docs-build.sh</code> on every pull
+</li>
+</ul>
+<p>request, so a broken link fails the pull request and never reaches <code>main</code>.</p>
+<h4 id="docs-site-content-rules">Content rules</h4>
+<ul>
+<li><strong>FR-site-44</strong> — Every page follows <code>.claude/rules/ste.md</code> and the Terms table of
+</li>
+</ul>
+<p><code>docs/specs/spec.md</code>.</p>
+<ul>
+<li><strong>FR-site-45</strong> — Every screenshot on the site shows placeholder data. No screenshot
+</li>
+</ul>
+<p>shows a real tailnet name, a real peer name, or a real tailnet address.</p>
+<ul>
+<li><strong>FR-site-46</strong> — Every page that moves out of <code>README.md</code> keeps the facts of the
+</li>
+</ul>
+<p>README. A fact that the move finds wrong is corrected against the code, and the pull request names the correction.</p>
+<h3 id="docs-site-user-flows">User flows</h3>
+<h4 id="docs-site-flow-1-a-change-reaches-the-site">Flow 1: A change reaches the site</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Contributor edits a page in docs/site] --&gt; B[Pull request into dev]
+  B --&gt; C{ci.yml runs scripts/docs-build.sh}
+  C -- a warning or a broken link --&gt; D[CI fails, the pull request cannot merge]
+  D --&gt; A
+  C -- clean --&gt; E[Merge into dev]
+  E --&gt; F[Release pull request dev into main]
+  F --&gt; G[Merge into main]
+  G --&gt; H[docs.yml builds build/site]
+  H --&gt; I{deploy-pages}
+  I -- success --&gt; J[The site states the new release]
+  I -- failure --&gt; K[The site keeps the last deploy, the workflow run is red]</pre></div>
+<ol>
+<li>A contributor edits a page under <code>docs/site/</code>.
+</li>
+<li>The contributor opens a pull request into <code>dev</code>.
+</li>
+<li><code>ci.yml</code> runs <code>scripts/docs-build.sh</code>.
+</li>
+<li>If the build reports a warning or a broken link, CI fails and the pull request cannot
+</li>
+</ol>
+<p>merge. The contributor fixes the page.</p>
+<ol>
+<li>The release pull request merges <code>dev</code> into <code>main</code>.
+</li>
+<li><code>docs.yml</code> builds the site and deploys it.
+</li>
+<li>If the deploy fails, the site keeps the last deploy and the workflow run shows the
+</li>
+</ol>
+<p>failure.</p>
+<h4 id="docs-site-flow-2-an-operator-finds-a-fact">Flow 2: An operator finds a fact</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Operator opens README.md] --&gt; B[Link table]
+  B --&gt; C[Site section]
+  A2[Operator opens the site] --&gt; D[Search box]
+  D --&gt; E[Search result]
+  C --&gt; F[Page]
+  E --&gt; F
+  F --&gt; G[Fact, with a link to the next page]</pre></div>
+<ol>
+<li>The operator opens the README, or the site.
+</li>
+<li>From the README, the operator follows a row of the link table to a site section.
+</li>
+<li>On the site, the operator types into the search box and selects a result.
+</li>
+<li>The page states the fact.
+</li>
+</ol>
+<h3 id="docs-site-screens-states">Screens &amp; states</h3>
+<p>The site uses the page layout of Material for MkDocs: a header, a navigation column, the page, and a table of contents of the page. The brand changes the colours and the fonts, not the layout.</p>
+<ul>
+<li><strong>Header.</strong> The lime mark, the wordmark, the search box, and a link to the repository.
+</li>
+<li><strong>Navigation.</strong> The eight sections of FR-site-10. The current page is the one accent use
+</li>
+</ul>
+<p>of the navigation.</p>
+<ul>
+<li><strong>Search, empty result.</strong> The theme states that no page matches.
+</li>
+<li><strong>Phone.</strong> The theme moves the navigation into a drawer. No page scrolls sideways at
+</li>
+</ul>
+<p>390 pixels.</p>
+<h3 id="docs-site-behaviour-rules">Behaviour rules</h3>
+<ul>
+<li>The site publishes from <code>main</code> alone. A page change on <code>dev</code> reaches the site with the
+</li>
+</ul>
+<p>next release.</p>
+<ul>
+<li>The site holds one version: the newest release. It holds no version selector.
+</li>
+<li>A page states a command, a key, and a path in the mono typeface, inside backticks.
+</li>
+</ul>
+<h3 id="docs-site-data-touched">Data touched</h3>
+<p>No data of the daemon. The repository gains <code>mkdocs.yml</code>, <code>docs/site/</code>, <code>scripts/docs-build.sh</code>, and <code>.github/workflows/docs.yml</code>, and the moved files of FR-site-26 to FR-site-29.</p>
+<h3 id="docs-site-interfaces">Interfaces</h3>
+<ul>
+<li><strong>MkDocs and Material for MkDocs.</strong> Package <code>mkdocs-material</code> version 9.7.7, which
+</li>
+</ul>
+<p>requires <code>mkdocs&gt;=1.6,&lt;2</code> and Python 3.8 or later (<code>https://pypi.org/pypi/mkdocs-material/json</code>, read 2026-10-07). <code>theme.font: false</code> stops the Google Fonts request, and the custom properties <code>--md-text-font</code> and <code>--md-code-font</code> set the fonts (<code>https://squidfunk.github.io/mkdocs-material/setup/changing-the-fonts/</code>, read 2026-10-07).</p>
+<ul>
+<li><strong>GitHub Pages from a custom workflow.</strong> The publishing source is GitHub Actions. The
+</li>
+</ul>
+<p>deploy job needs <code>pages: write</code> and <code>id-token: write</code>, and the environment <code>github-pages</code> (<code>https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages</code>, read 2026-10-07). The newest releases on 2026-10-07 are <code>actions/configure-pages</code> v6.0.0, <code>actions/upload-pages-artifact</code> v5.0.0, <code>actions/deploy-pages</code> v5.0.1, and <code>actions/setup-python</code> v7.0.0. <code>.github/workflows/release.yml</code> pins each action to the newest major version for the same reason.</p>
+<ul>
+<li><strong>Enable Pages.</strong> The repository has no Pages site on 2026-10-07
+</li>
+</ul>
+<p>(<code>GET /repos/Crank-Git/Hydrascale/pages</code> returns 404). The operator, or the worker with the operator's consent, creates it with <code>gh api -X POST repos/Crank-Git/Hydrascale/pages -f build_type=workflow</code>.</p>
+<h3 id="docs-site-edge-cases-failures">Edge cases &amp; failures</h3>
+<ul>
+<li><strong>A page links to a moved file.</strong> <code>mkdocs build --strict</code> fails on the dead link, and
+</li>
+</ul>
+<p>CI fails the pull request.</p>
+<ul>
+<li><strong>A brand font file changes name.</strong> <code>scripts/docs-build.sh</code> copies the directory, and
+</li>
+</ul>
+<p><code>brand.css</code> names each file. A test compares the two lists.</p>
+<ul>
+<li><strong>The deploy fails after a release.</strong> The site keeps the last deploy. The release is
+</li>
+</ul>
+<p>not blocked, because the release workflow and the docs workflow are separate.</p>
+<ul>
+<li><strong>A screenshot holds real data.</strong> The review of the pull request refuses it, per
+</li>
+</ul>
+<p>FR-site-45.</p>
+<h3 id="docs-site-acceptance-criteria">Acceptance criteria</h3>
+<ul>
+<li><code>scripts/docs-build.sh</code> exits 0 on a fresh clone, and <code>build/site/index.html</code> exists.
+</li>
+<li>A page that links to a missing file makes <code>scripts/docs-build.sh</code> exit non-zero.
+</li>
+<li><code>https://crank-git.github.io/Hydrascale/</code> serves the site after the first merge into
+</li>
+</ul>
+<p><code>main</code> that holds this feature.</p>
+<ul>
+<li>The navigation shows the eight sections of FR-site-10 in order.
+</li>
+<li>A search for <code>route_table</code> returns the configuration page.
+</li>
+<li>The configuration page names every key of <code>internal/config</code>. A test lists the keys of
+</li>
+</ul>
+<p>the configuration struct and fails when the page omits one.</p>
+<ul>
+<li><code>build/site</code> holds no reference to <code>fonts.googleapis.com</code> and no <code>&lt;script&gt;</code> or
+</li>
+</ul>
+<p><code>&lt;link&gt;</code> element whose URL names another host.</p>
+<ul>
+<li><code>docs/manual/</code>, <code>docs/images/</code>, <code>docs/UPGRADING.md</code>, and <code>docs/security-audit.md</code> no
+</li>
+</ul>
+<p>longer exist, and no file of the repository links to them.</p>
+<ul>
+<li>At 390 pixels no page scrolls sideways.
+</li>
+</ul>
+<h3 id="docs-site-out-of-scope">Out of scope</h3>
+<ul>
+<li>A version selector, and a page per older release.
+</li>
+<li>A custom domain.
+</li>
+<li>A blog, a changelog page, and translations.
+</li>
+<li>A page for <code>docs/DESIGN.md</code> or for the specification.
+</li>
+</ul>
+<h3 id="docs-site-open-questions" class="callout-h">Open questions</h3>
+<p>None.</p><nav class="pager">
+<a href="feature-visual-policy-advanced.html">&larr; Feature: Visual policy editor — SSH and advanced constructs</a>
+<a href="feature-readme-slim.html">Feature: A short README that links to the documentation site &rarr;</a>
+</nav>
+</main>
+</div>
+<script>document.querySelectorAll('.diagram').forEach(function(d){d.classList.add('raw')});</script>
+<script type="application/json" id="rv-embedded">[]</script>
+<script>
+(function(){
+  'use strict';
+  var PAGE = document.body.getAttribute('data-page');
+  // storage key carries the spec's slug: file:// pages can share one
+  // localStorage pool, and two specs must never share a comment store
+  var RVKEY = 'spec-review:' + (document.body.getAttribute('data-rvkey') || 'spec');
+  var EMBED = [];
+  var embedEl = document.getElementById('rv-embedded');
+  if (embedEl) { try { EMBED = JSON.parse(embedEl.textContent); } catch(e){} }
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(RVKEY)) || {comments:[], deleted:[]}; } catch(e){ return {comments:[], deleted:[]}; } }
+  function saveLocal(s){ try { localStorage.setItem(RVKEY, JSON.stringify(s)); } catch(e){} }
+  function cid(c){ return c.page + '|' + c.section + '|' + (c.date||'') + '|' + c.body.slice(0,24); }
+  function allComments(){
+    var s = loadLocal(), map = {};
+    EMBED.forEach(function(c){ map[cid(c)] = c; });
+    s.comments.forEach(function(c){ map[cid(c)] = c; });
+    s.deleted.forEach(function(id){ delete map[id]; });
+    return Object.keys(map).map(function(k){ return map[k]; });
+  }
+  function upsert(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    s.comments.push(c);
+    s.deleted = s.deleted.filter(function(x){ return x !== id; });
+    saveLocal(s); refresh();
+  }
+  function remove(c){
+    var s = loadLocal(), id = cid(c);
+    s.comments = s.comments.filter(function(x){ return cid(x) !== id; });
+    if (EMBED.some(function(x){ return cid(x) === id; })) s.deleted.push(id);
+    saveLocal(s); refresh();
+  }
+  function today(){ return new Date().toISOString().slice(0,10); }
+  function exportMd(){
+    var lines = ['# Review comments', '',
+      '<!-- Exported from the spec review layer. Save this file as',
+      '     docs/specs/review-comments.md and re-run render-spec.py to embed',
+      '     every comment under its section for the next review round. -->', ''];
+    allComments().sort(function(a,b){
+      return (a.page+a.section).localeCompare(b.page+b.section);
+    }).forEach(function(c){
+      lines.push('## [' + c.page + '] ' + (c.section||''));
+      lines.push('status: ' + (c.status||'open'));
+      lines.push('date: ' + (c.date||today()));
+      lines.push(c.body); lines.push('');
+    });
+    var blob = new Blob([lines.join('\n')], {type:'text/markdown'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-comments.md';
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function importMd(file){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var text = String(reader.result);
+      var blocks = text.split(/^## /m).slice(1);
+      blocks.forEach(function(b){
+        var head = b.match(/^\[([^\]]+)\]\s*(\S*)/);
+        if (!head) return;
+        var status = (b.match(/^status:\s*(\S+)/m)||[])[1] || 'open';
+        var date = (b.match(/^date:\s*(\S+)/m)||[])[1] || today();
+        var body = b.replace(/^\[[^\]]*\]\s*\S*\s*\n/, '')
+                    .replace(/^status:.*\n?/m,'').replace(/^date:.*\n?/m,'').trim();
+        if (body) upsert({page:head[1], section:head[2]||'', status:status, date:date, body:body});
+      });
+      refresh();
+    };
+    reader.readAsText(file);
+  }
+  function commentBox(c){
+    var div = document.createElement('div');
+    div.className = 'rv-comment' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var head = document.createElement('div'); head.className = 'rv-head';
+    head.textContent = '💬 ' + (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(){ remove(c); c = Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'}); upsert(c); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(){ if (confirm('Delete this comment?')) remove(c); };
+    head.appendChild(tog); head.appendChild(del);
+    var body = document.createElement('div'); body.className = 'rv-body';
+    body.textContent = c.body;
+    div.appendChild(head); div.appendChild(body);
+    return div;
+  }
+  function editor(section, after){
+    var wrap = document.createElement('div');
+    wrap.className = 'rv-comment rv-editor';
+    var ta = document.createElement('textarea');
+    ta.placeholder = 'Comment on this section…';
+    var actions = document.createElement('div'); actions.className = 'rv-actions';
+    var save = document.createElement('button'); save.textContent = 'Save';
+    save.onclick = function(){
+      if (ta.value.trim()) upsert({page:PAGE, section:section, status:'open', date:today(), body:ta.value.trim()});
+      wrap.remove();
+    };
+    var cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+    cancel.className = 'rv-cancel'; cancel.onclick = function(){ wrap.remove(); };
+    actions.appendChild(save); actions.appendChild(cancel);
+    wrap.appendChild(ta); wrap.appendChild(actions);
+    after.insertAdjacentElement('afterend', wrap);
+    ta.focus();
+  }
+  // --- headings, inline buttons ---
+  var mainH1 = document.querySelector('main h1');
+  if (mainH1 && !mainH1.id) { mainH1.id = 'page-title'; }
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll('main h1[id], main h2[id], main h3[id], main h4[id]'));
+  headings.forEach(function(h){
+    var b = document.createElement('button');
+    b.className = 'rv-add'; b.textContent = '💬 comment'; b.title = 'Comment on this section';
+    b.onclick = function(){ editor(h.id, h); };
+    h.appendChild(b);
+  });
+  function headingTitle(h){
+    var t = h.childNodes[0] ? h.childNodes[0].textContent : h.textContent;
+    return t.trim();
+  }
+  function titleFor(section){
+    var el = section && document.getElementById(section);
+    return el ? headingTitle(el) : (section || '(page)');
+  }
+
+  // --- drawer ---
+  var drawer = document.createElement('div');
+  drawer.id = 'rv-drawer';
+  drawer.innerHTML =
+    '<header><strong>Review</strong> <span class="rv-count"></span></header>' +
+    '<div class="rv-compose">' +
+    '<div class="rv-live">Commenting on the section in view:</div>' +
+    '<label for="rv-sec"></label><select id="rv-sec"></select>' +
+    '<textarea id="rv-text" placeholder="Type as you read… (Ctrl+Enter saves)"></textarea>' +
+    '<div style="margin-top:.4rem; display:flex; gap:.5rem;">' +
+    '<button class="rv-primary" id="rv-save">Save comment</button>' +
+    '<button id="rv-clear">Clear</button></div></div>' +
+    '<div class="rv-list"></div>' +
+    '<footer><button id="rv-export">Export .md</button>' +
+    '<button id="rv-import">Import</button>' +
+    '<span class="rv-otherpages"></span></footer>';
+  document.body.appendChild(drawer);
+  var toggle = document.createElement('button');
+  toggle.id = 'rv-toggle';
+  toggle.onclick = function(){
+    document.body.classList.toggle('rv-open');
+    try { localStorage.setItem(RVKEY + ':open', document.body.classList.contains('rv-open') ? '1' : ''); } catch(e){}
+  };
+  document.body.appendChild(toggle);
+  try { if (localStorage.getItem(RVKEY + ':open')) document.body.classList.add('rv-open'); } catch(e){}
+
+  var sel = drawer.querySelector('#rv-sec');
+  headings.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h.id; opt.textContent = headingTitle(h);
+    sel.appendChild(opt);
+  });
+  var followScroll = true;
+  sel.onchange = function(){ followScroll = false; };
+
+  // scroll spy: pick the last heading above the upper third of the viewport
+  function currentSection(){
+    var line = window.innerHeight * 0.33, best = headings[0];
+    for (var i = 0; i < headings.length; i++) {
+      if (headings[i].getBoundingClientRect().top <= line) best = headings[i];
+    }
+    return best ? best.id : '';
+  }
+  window.addEventListener('scroll', function(){
+    if (!followScroll) return;
+    var s = currentSection();
+    if (s && sel.value !== s) sel.value = s;
+  }, {passive:true});
+  // typing pins the target section so a stray scroll can't retarget the comment
+  drawer.querySelector('#rv-text').addEventListener('input', function(){
+    if (this.value.trim()) followScroll = false;
+    else followScroll = true;
+  });
+
+  function saveFromDrawer(){
+    var ta = drawer.querySelector('#rv-text');
+    if (!ta.value.trim()) return;
+    upsert({page:PAGE, section:sel.value, status:'open', date:today(), body:ta.value.trim()});
+    ta.value = ''; followScroll = true;
+  }
+  drawer.querySelector('#rv-save').onclick = saveFromDrawer;
+  drawer.querySelector('#rv-text').addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveFromDrawer();
+  });
+  drawer.querySelector('#rv-clear').onclick = function(){
+    drawer.querySelector('#rv-text').value = ''; followScroll = true;
+  };
+  drawer.querySelector('#rv-export').onclick = exportMd;
+  var fileIn = document.createElement('input');
+  fileIn.type = 'file'; fileIn.accept = '.md,text/markdown'; fileIn.style.display = 'none';
+  fileIn.onchange = function(){ if (fileIn.files[0]) importMd(fileIn.files[0]); };
+  drawer.appendChild(fileIn);
+  drawer.querySelector('#rv-import').onclick = function(){ fileIn.click(); };
+
+  function drawerItem(c){
+    var div = document.createElement('div');
+    div.className = 'rv-item' + (c.status === 'resolved' ? ' rv-resolved' : '');
+    var where = document.createElement('div'); where.className = 'rv-where';
+    where.textContent = titleFor(c.section);
+    var text = document.createElement('div'); text.className = 'rv-text';
+    text.textContent = c.body;
+    var meta = document.createElement('div'); meta.className = 'rv-meta';
+    meta.textContent = (c.date||'') + ' · ' + (c.status||'open');
+    var tog = document.createElement('button');
+    tog.textContent = c.status === 'resolved' ? 'reopen' : 'resolve';
+    tog.onclick = function(e){ e.stopPropagation(); remove(c);
+      upsert(Object.assign({}, c, {status: c.status === 'resolved' ? 'open' : 'resolved'})); };
+    var del = document.createElement('button'); del.textContent = 'delete';
+    del.onclick = function(e){ e.stopPropagation();
+      if (confirm('Delete this comment?')) remove(c); };
+    meta.appendChild(tog); meta.appendChild(del);
+    div.appendChild(where); div.appendChild(text); div.appendChild(meta);
+    div.onclick = function(){
+      var el = c.section && document.getElementById(c.section);
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+    return div;
+  }
+
+  function refresh(){
+    document.querySelectorAll('.rv-comment:not(.rv-editor)').forEach(function(el){ el.remove(); });
+    var all = allComments();
+    var mine = all.filter(function(c){ return c.page === PAGE; });
+    mine.forEach(function(c){
+      var target = c.section && document.getElementById(c.section);
+      var anchor = target || mainH1 || document.body.querySelector('main') || document.body;
+      anchor.insertAdjacentElement('afterend', commentBox(c));
+    });
+    var open = all.filter(function(c){ return c.status !== 'resolved'; }).length;
+    toggle.textContent = '💬 Review (' + open + ')';
+    drawer.querySelector('.rv-count').textContent =
+      open + ' open / ' + all.length + ' total';
+    var list = drawer.querySelector('.rv-list');
+    list.innerHTML = '';
+    mine.slice().reverse().forEach(function(c){ list.appendChild(drawerItem(c)); });
+    var others = {};
+    all.forEach(function(c){ if (c.page !== PAGE) others[c.page] = (others[c.page]||0) + 1; });
+    var otherKeys = Object.keys(others);
+    drawer.querySelector('.rv-otherpages').textContent = otherKeys.length
+      ? 'Other pages: ' + otherKeys.map(function(k){ return k + ' (' + others[k] + ')'; }).join(', ')
+      : '';
+  }
+  refresh();
+  var s0 = currentSection();
+  if (s0) sel.value = s0;
+})();
+</script>
+</body>
+</html>

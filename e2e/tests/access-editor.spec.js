@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// Covers the "Change a local rule in Access" manual page: docs/manual/access-editor.md.
+// Covers the "Change a local rule in Access" manual page: docs/site/guides/access-editor.md.
 // Each test starts on a fresh page load, so the console holds no staged edit at the
 // start (a staged edit lives in the browser only; the console never persists one).
 
