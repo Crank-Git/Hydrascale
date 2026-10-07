@@ -340,11 +340,13 @@ func formFlags(text string) []string {
 		if formEnd[word] {
 			break
 		}
+		word, _, _ = strings.Cut(word, "=")
+		word = strings.TrimRight(word, ".,:;")
+		// A lone dash names standard input, not a flag.
 		if !strings.HasPrefix(word, "-") || word == "-" {
 			continue
 		}
-		word, _, _ = strings.Cut(word, "=")
-		flags = append(flags, strings.TrimRight(word, ".,:;)"))
+		flags = append(flags, word)
 	}
 	return flags
 }
@@ -668,6 +670,7 @@ func TestFlagDrift(t *testing.T) {
 		"```sh\nsudo hydrascale status | grep -c running\n```\n",
 		"Run `hydrascale status`, then `grep --count running`.\n",
 		"allowed-tools: Read, Bash(hydrascale version:*), Bash(sudo iptables -S:*)\n",
+		"Run hydrascale status -.\n",
 	} {
 		t.Run("reports no message for "+strings.TrimSpace(content), func(t *testing.T) {
 			if messages := flagDrift(rootCommand(), file, content); len(messages) != 0 {
