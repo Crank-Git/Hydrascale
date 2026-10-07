@@ -1,0 +1,104 @@
+/* The brand of the console, applied to Material for MkDocs 9.7.7.
+
+   The site self-hosts the two brand typefaces, because a built page requests no resource
+   from another host (FR-site-38). scripts/docs-build.sh copies each font file from
+   internal/ui/static/brand/fonts/ into docs/site/assets/brand/fonts/, so the repository
+   holds one copy of each file. TestBrandCSSDeclaresEachFontFile in
+   scripts/docs_build_test.go fails when this file and that directory name different
+   files. internal/ui/static/brand/tokens/fonts.css states the source and the licence of
+   each file. */
+
+@font-face {
+  font-family: 'Barlow Semi Condensed';
+  src: url('../assets/brand/fonts/BarlowSemiCondensed-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Barlow Semi Condensed';
+  src: url('../assets/brand/fonts/BarlowSemiCondensed-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Barlow Semi Condensed';
+  src: url('../assets/brand/fonts/BarlowSemiCondensed-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* The quotes are necessary, because the file name holds brackets and a comma. */
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('../assets/brand/fonts/MartianMono[wdth,wght].woff2') format('woff2-variations');
+  font-weight: 100 800;
+  font-stretch: 75% 112.5%;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* The theme reads these two properties when theme.font is false. */
+:root {
+  --md-text-font: 'Barlow Semi Condensed';
+  --md-code-font: 'Martian Mono';
+}
+
+/* The site has one colour scheme. The values come from
+   internal/ui/static/brand/tokens/colors.css. */
+[data-md-color-scheme='slate'] {
+  --md-hue: 30;
+
+  --md-default-bg-color: #0d0c0b;
+  --md-default-fg-color: #eceae6;
+  --md-default-fg-color--light: #a39b90;
+  --md-default-fg-color--lighter: #8a8277;
+  --md-default-fg-color--lightest: #262320;
+
+  --md-typeset-color: #eceae6;
+
+  /* The header and the tab bar take the card surface, so the accent stays free for
+     the current navigation entry. */
+  --md-primary-fg-color: #141312;
+  --md-primary-fg-color--light: #1c1a18;
+  --md-primary-fg-color--dark: #0d0c0b;
+  --md-primary-bg-color: #eceae6;
+  --md-primary-bg-color--light: #a39b90;
+
+  /* The theme uses the accent property for each hover and each focus. The accent of
+     the brand marks the current navigation entry and nothing else (FR-site-36), so the
+     property takes the body colour. */
+  --md-accent-fg-color: #eceae6;
+  --md-accent-fg-color--transparent: #1c1a18;
+  --md-accent-bg-color: #0d0c0b;
+
+  --md-code-fg-color: #eceae6;
+  --md-code-bg-color: #141312;
+
+  --md-footer-bg-color: #141312;
+  --md-footer-bg-color--dark: #0d0c0b;
+
+  /* A link of the console takes the body colour and an underline. */
+  --md-typeset-a-color: #eceae6;
+}
+
+.md-typeset a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* The lime accent. */
+.md-nav--primary .md-nav__item .md-nav__link--active,
+.md-nav--primary .md-nav__item .md-nav__link--active code {
+  color: #c8ff2e;
+}
+
+/* The scroll position marks a heading of the table of contents. That mark is not the
+   current navigation entry, so it takes the body colour. */
+.md-nav--secondary .md-nav__link--active {
+  color: #eceae6;
+}
