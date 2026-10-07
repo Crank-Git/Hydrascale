@@ -72,7 +72,7 @@ function draw(section, snapshot) {
   }
   const redraw = () => draw(section, snapshot);
 
-  const frame = element("section", "frame");
+  const frame = element("section", "frame log-frame");
   frame.setAttribute("aria-labelledby", "events-heading");
   const head = element("div", "frame-head");
   const heading = element("h2", "frame-title", "Events");

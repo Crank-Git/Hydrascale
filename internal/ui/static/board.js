@@ -12,20 +12,31 @@ import { reachabilityOf } from "./topology.js";
 
 /**
  * The columns of the board, in order. `key` names the field of a row, `head` is the
- * column head, `numeric` aligns the value to the right edge of the cell, and `narrow`
- * keeps the column on a phone. The tailnet column is the row header.
+ * column head, and `numeric` aligns the value to the right edge of the cell. `tier`
+ * states the narrowest screen that keeps the column: "phone" keeps it everywhere,
+ * "tablet" keeps it from 601 pixels, and "desktop" keeps it from 901 pixels. The tailnet
+ * column is the row header.
  */
 export const COLUMNS = [
-  { key: "id", head: "Tailnet", narrow: true },
-  { key: "state", head: "State", narrow: true },
-  { key: "reach", head: "Reachability", narrow: true },
-  { key: "target", head: "Probe" },
-  { key: "peers", head: "Peers", numeric: true, narrow: true },
-  { key: "paths", head: "Paths", numeric: true },
-  { key: "exit", head: "Exit node" },
-  { key: "host", head: "Host access" },
-  { key: "policy", head: "Policy" },
+  { key: "id", head: "Tailnet", tier: "phone" },
+  { key: "state", head: "State", tier: "phone" },
+  { key: "reach", head: "Reachability", tier: "phone" },
+  { key: "target", head: "Probe", tier: "desktop" },
+  { key: "peers", head: "Peers", numeric: true, tier: "phone" },
+  { key: "paths", head: "Paths", numeric: true, tier: "tablet" },
+  { key: "exit", head: "Exit node", tier: "desktop" },
+  { key: "host", head: "Host access", tier: "desktop" },
+  { key: "policy", head: "Policy", tier: "tablet" },
 ];
+
+/**
+ * byFaultThenID orders two rows: a row with a fault first, then by identifier. The
+ * namespace view orders by identifier, so a healthy host lists its tailnets in the same
+ * order in both views.
+ */
+export function byFaultThenID(a, b) {
+  return b.rank - a.rank || a.id.localeCompare(b.id);
+}
 
 /** The marker of a value that the daemon does not report. */
 const ABSENT = "none";
@@ -86,11 +97,12 @@ function hostAccessWord(desired) {
 }
 
 /**
- * buildBoard returns one row per tailnet of the topology model, faults first.
+ * buildBoard returns one row per tailnet of the topology model, faults first, then by
+ * identifier.
  *
  * status is the merged body of the poll and model comes from buildTopology, which holds
- * the peer count and the path count of every tailnet. Rows of equal rank keep the order
- * of the model, so a row moves only when its rank changes.
+ * the peer count and the path count of every tailnet. A row moves only when its rank
+ * changes.
  */
 export function buildBoard(status, model) {
   const desired = (status && status.desired) || {};
@@ -117,7 +129,7 @@ export function buildBoard(status, model) {
         policy,
       };
     });
-  rows.sort((a, b) => b.rank - a.rank || a.order - b.order);
+  rows.sort(byFaultThenID);
   return rows;
 }
 

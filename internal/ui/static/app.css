@@ -168,11 +168,12 @@ h2{
 .card > .label:first-child,
 .card > .card-head:first-child{
   display:flex;
-  align-items:baseline;
+  align-items:center;
   justify-content:space-between;
   gap:var(--sp-3);
+  min-height:44px;
   margin:calc(var(--sp-4) * -1) calc(var(--sp-4) * -1) var(--sp-4);
-  padding:var(--sp-2) var(--sp-4);
+  padding:0 var(--sp-4);
   background:var(--surface-card);
   border-bottom:1px solid var(--border-default);
 }
@@ -244,6 +245,15 @@ h2{
   background:var(--surface-inset);
   color:var(--text-body);
 }
+select.field{
+  appearance:none;
+  padding-right:var(--sp-7);
+  /* Two gradients draw the chevron, so the page names no image file and no other host. */
+  background-image:linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%), linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+  background-repeat:no-repeat;
+  background-size:5px 5px, 5px 5px;
+  background-position:calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+}
 .row{display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap}
 .row + .row{margin-top:var(--sp-4)}
 
@@ -288,8 +298,10 @@ h2{
 .verdict-counts{margin:0 0 0 auto; color:var(--text-secondary); display:flex; flex-wrap:wrap; column-gap:var(--sp-2)}
 /* The separator ends the item before it, so a wrapped line never starts with one. */
 .count:not(:last-child)::after{content:"·"; margin-left:var(--sp-2); color:var(--text-tertiary)}
-.count-tick{display:none}
-.count:nth-last-child(2)::after{content:none}
+.count-tick,
+.count-mode{display:none}
+.count:nth-last-child(2)::after,
+.count:nth-last-child(3)::after{content:none}
 
 /* The board: one frame, fixed columns, and a hairline gutter between square cells. A
    column never moves; only the values in it change. */
@@ -326,11 +338,11 @@ h2{
 .board tbody tr{cursor:pointer}
 .board tbody tr:hover th,
 .board tbody tr:hover td{background-color:var(--surface-raised)}
-/* The selection is the one accent use of the overview: the selected row names its
-   tailnet in the accent, and the topology draws its paths in the accent. */
-.board tbody tr[aria-selected="true"] th{color:var(--accent)}
+/* The selection is an inset row with the tailnet in the body colour, in every view. The
+   accent means an allowed path and nothing else: the topology draws the paths of the
+   selection in it. */
 .board tbody tr[aria-selected="true"] th,
-.board tbody tr[aria-selected="true"] td{background-color:var(--surface-raised)}
+.board tbody tr[aria-selected="true"] td{background-color:var(--surface-inset)}
 
 /* The turnover. A changed value turns over once, one character after the next. */
 .val{display:inline-block}
@@ -355,17 +367,22 @@ h2{
 .frame{border:1px solid var(--border-default); background:var(--surface-page); padding:0 var(--sp-4) var(--sp-4)}
 .frame-head{
   display:flex;
-  align-items:baseline;
+  align-items:center;
   justify-content:space-between;
   gap:var(--sp-3);
+  min-height:44px;
   margin:0 calc(var(--sp-4) * -1) var(--sp-4);
-  padding:var(--sp-2) var(--sp-4);
+  padding:0 var(--sp-4);
   background:var(--surface-card);
   border-bottom:1px solid var(--border-default);
 }
 .frame-title{font-size:var(--fs-body); margin:0}
 .frame-head:has(.frame-tools){align-items:center; flex-wrap:wrap}
 .frame-tools{display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-right:auto; margin-left:var(--sp-3)}
+/* A control in a header strip is compact, so no tool makes the strip taller than 44
+   pixels. */
+.frame-head .btn,
+.frame-head .seg button{padding:var(--sp-1) var(--sp-3); min-height:30px}
 .frame-meta{color:var(--text-tertiary)}
 .frame-link{color:var(--text-secondary); font-size:var(--fs-sm)}
 .frame-link:hover{color:var(--text-body)}
@@ -388,7 +405,7 @@ svg.flow{width:100%; max-width:660px; height:auto; display:block; overflow:visib
    draws the ring with the outline property. The ring is not the accent: the accent of
    this view belongs to the selection. */
 .node:focus-visible{outline:2px solid var(--text-body); outline-offset:2px; border-radius:var(--r)}
-.node[aria-pressed="true"] rect{stroke:var(--accent)}
+.node[aria-pressed="true"] rect{stroke:var(--text-body)}
 
 /* An allowed path is a dotted curve. A denied path has no line at all, therefore this
    file declares no rule for one. The accent belongs to the paths of the selected node. */
@@ -429,8 +446,21 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
    card, a whole row, or a whole edge. See FR-console-40. */
 
 /* The settings view: titled frames in two columns, each as tall as its content. */
-.settings-grid{columns:2 420px; column-gap:var(--sp-5)}
-.settings-grid > .frame{break-inside:avoid; margin-bottom:var(--sp-5)}
+/* Two columns in rows, so the frames of one row share a top edge and a bottom edge. An
+   alert spans both columns. */
+.settings-grid{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:var(--sp-5); align-items:start}
+.set-interval{margin-top:var(--sp-4); padding-top:var(--sp-3); border-top:1px solid var(--border-default)}
+.set-sub{margin:0 0 var(--sp-2); font-size:var(--fs-sm); font-weight:var(--fw-semibold); color:var(--text-secondary)}
+.settings-grid > .alert{grid-column:1 / -1}
+@media (max-width:1040px){
+  .settings-grid{grid-template-columns:minmax(0,1fr)}
+}
+/* An alert inside a frame states its dot and its sentences with no second box. */
+.frame .alert,
+.card .alert{border:none; padding:0; background:transparent}
+/* A machine value inside a sentence takes the value size, which matches the sans by eye,
+   and no line break divides it. */
+.note .mono{font-size:var(--fs-data); white-space:nowrap}
 .frame > .note,
 .frame > .alert,
 .frame > .nsrows,
@@ -444,7 +474,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .kv-list{margin:0}
 .kv{
   display:grid;
-  grid-template-columns:140px minmax(0,1fr);
+  grid-template-columns:var(--w-kv) minmax(0,1fr);
   gap:var(--sp-4);
   padding:var(--sp-2) 0;
   border-bottom:1px solid var(--border-soft);
@@ -468,7 +498,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
    of a description list, so a frame holds one left edge for its values. */
 .nsrow{
   display:grid;
-  grid-template-columns:140px minmax(0,1fr);
+  grid-template-columns:var(--w-kv) minmax(0,1fr);
   gap:var(--sp-1) var(--sp-4);
   padding:var(--sp-2) 0;
   border-bottom:1px solid var(--border-soft);
@@ -498,7 +528,17 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
 /* The activity log: fixed columns, one date header for each day, and one folded row for
    each reconcile tick. The message column takes the width that remains. */
+.log-frame{padding:0}
+.log-frame .frame-head{margin:0}
+.log-frame > .note,
+.log-frame .log-wrap > .note,
+.log-frame .log-wrap > .alert{margin:var(--sp-4)}
 .log-wrap{overflow-x:auto}
+.log thead th:first-child,
+.log td:first-child,
+.log tr.day th{padding-left:var(--sp-4)}
+.log.no-tailnet th:nth-child(2),
+.log.no-tailnet td:nth-child(2){display:none}
 .log{width:100%; border-collapse:collapse; table-layout:fixed}
 .log thead th{
   font-family:var(--font-body);
@@ -508,12 +548,12 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   text-transform:uppercase;
   color:var(--text-tertiary);
   text-align:left;
-  padding:0 var(--sp-3) var(--sp-2);
+  padding:var(--sp-3) var(--sp-3) var(--sp-2);
   border-bottom:1px solid var(--border-default);
 }
 .log thead th:nth-child(1){width:96px}
 .log thead th:nth-child(2){width:132px}
-.log thead th:nth-child(3){width:220px}
+.log thead th:nth-child(3){width:180px}
 .log td{padding:var(--sp-2) var(--sp-3); border-bottom:1px solid var(--border-soft); vertical-align:baseline; overflow-wrap:anywhere}
 .log tr.day th{
   text-align:left;
@@ -542,10 +582,20 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   .lower{grid-template-columns:1fr}
 }
 
+/* A tablet keeps the columns of the phone tier and the tablet tier of the board. */
+@media (max-width:900px){
+  .board .opt{display:none}
+  .verdict-counts{margin-left:0}
+}
+
 /* A narrow screen puts the rail on top as one row that scrolls sideways, and the title
    block moves out of the way: the verdict states the state of the daemon. */
 @media (max-width:900px){
-  .app{grid-template-columns:1fr; background:none}
+  /* A narrow screen keeps the brand in a bar at the top and moves the six views into a
+     fixed index of six cells at the bottom, so every view is one press away and none
+     hides behind a sideways scroll. The current view reverses its cell, as it does in
+     the rail. */
+  .app{grid-template-columns:1fr; grid-template-rows:auto 1fr; align-content:start; background:none}
   .nav{
     position:static;
     height:auto;
@@ -553,40 +603,61 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
     border-bottom:1px solid var(--border-default);
     flex-direction:row;
     align-items:center;
-    gap:var(--sp-4);
-    padding:var(--sp-2) var(--sp-3);
-    overflow-x:auto;
+    padding:var(--sp-3) var(--sp-4);
   }
-  .brand{padding:0; flex:none}
-  .nav-index{flex-direction:row; flex:none}
-  .title-block{display:none}
-  .count-tick{display:inline}
-  .count:nth-last-child(2)::after{content:"·"}
-  .main{padding:var(--sp-4) var(--sp-4) var(--sp-7)}
+  .brand{padding:0}
+  .nav-index{
+    position:fixed;
+    inset:auto 0 0 0;
+    z-index:5;
+    display:grid;
+    grid-template-columns:repeat(6, minmax(0,1fr));
+    gap:1px;
+    background:var(--border-default);
+    border-top:1px solid var(--border-default);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .nav-link{
+    flex-direction:column;
+    justify-content:center;
+    gap:2px;
+    min-height:56px;
+    padding:var(--sp-1) 0;
+    background:var(--surface-card);
+    font-size:var(--fs-micro);
+    text-align:center;
+    white-space:nowrap;
+  }
+  .nav-link[aria-current]{background:var(--surface-raised)}
+  .key{width:22px; height:22px}
+  /* The title block becomes one row of the top bar, beside the brand. */
+  .title-block{display:flex; margin:0 0 0 auto; border:none}
+  .title-block div{flex-direction:row; align-items:baseline; gap:var(--sp-2); padding:0 0 0 var(--sp-4)}
+  .title-block div + div{border-top:none}
+  .main{padding:var(--sp-4) var(--sp-4) calc(var(--sp-7) + 56px + env(safe-area-inset-bottom))}
 }
 
 /* A phone keeps the narrow columns of the board, and it reads the topology as its text
    equivalent, because the picture is too small to read there. */
 @media (max-width:600px){
-  .board .opt{display:none}
+  .board .mid{display:none}
+  /* A phone has no width for the title block, so the verdict line states the access mode
+     and the last tick. */
+  .title-block{display:none}
+  .count-tick,
+  .count-mode{display:inline}
+  .count:nth-last-child(2)::after,
+  .count:nth-last-child(3)::after{content:"·"}
   .board th,
   .board td{padding:var(--sp-2)}
-  .verdict-counts{margin-left:0}
-  #view-overview .flow-wrap{display:none}
-  .topology-text{position:static; width:auto; height:auto; overflow:visible; clip-path:none; white-space:normal; color:var(--text-body); font-size:var(--fs-sm)}
   .log thead{display:none}
   .log, .log tbody{display:block}
   .log tr.day{display:block}
-  .log tr.day th{display:block; padding-left:0}
+  .log tr.day th{display:block}
   .log tr.log-row{display:grid; grid-template-columns:auto 1fr; column-gap:var(--sp-3); row-gap:2px; padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
   .log tr.log-row td{padding:0; border:none}
   .log tr.log-row .n:empty{display:none}
-  .log tr.log-row .k{grid-column:1 / -1}
   .log tr.log-row .m{grid-column:1 / -1}
-  .topology-text > p:first-child{display:none}
-  .topology-text ul{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; background:var(--surface-page)}
-  .topology-text li{padding:var(--sp-2) var(--sp-3); background:var(--surface-card)}
-  .topology-text ul + p{margin:var(--sp-3) 0 0; color:var(--text-secondary)}
 }
 
 /* The namespace view: the list, the panel, the add flow, and the removal dialog. The
@@ -595,7 +666,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
 .btn.primary:hover{filter:brightness(.92)}
 
-.ns-sm{padding:var(--sp-1) var(--sp-3); font-size:var(--fs-sm)}
+.ns-sm{font-size:var(--fs-sm)}
 .ns-danger{color:var(--status-crit); border-color:var(--status-crit)}
 
 /* The table of tailnets and, when a row is selected, the panel beside it. */
@@ -615,7 +686,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-board tbody tr[aria-selected="true"] th,
 .ns-board tbody tr[aria-selected="true"] td{background-color:var(--surface-inset)}
 .ns-muted{opacity:.5; cursor:default}
-.ns-state{display:inline-flex; align-items:center; gap:var(--sp-2)}
+.ns-state{display:inline}
+.ns-state .dot{margin-right:var(--sp-2); vertical-align:middle}
 .ns-word{color:var(--text-body); font-family:var(--font-data); font-stretch:var(--stretch-mono); font-size:var(--fs-data)}
 .ns-none{color:var(--text-tertiary)}
 .ns-pending{color:var(--text-tertiary); font-size:var(--fs-sm)}
@@ -624,33 +696,36 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-addr{
   display:block;
   max-width:24ch;
-  color:var(--text-secondary);
+  color:var(--text-body);
   min-width:0;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
 }
 
-.ns-panel{position:sticky; top:var(--sp-5); max-height:calc(100vh - var(--sp-8)); overflow:auto}
-.ns-panel .frame-head{position:sticky; top:0; z-index:1}
+.ns-panel{position:sticky; top:var(--sp-5)}
 .ns-panel .frame-head .btn{margin-left:auto}
 .ns-panel-states{display:flex; flex-wrap:wrap; gap:var(--sp-2) var(--sp-4)}
 /* A section of the panel opens with a column head and a rule, as the board does. */
 .ns-section{display:block; margin-top:var(--sp-5); padding-bottom:var(--sp-2); border-bottom:1px solid var(--border-default)}
 
 .ns-kv{margin:var(--sp-4) 0 0}
-.ns-pair{display:grid; grid-template-columns:120px minmax(0,1fr); gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
+.ns-pair{display:grid; grid-template-columns:var(--w-kv) minmax(0,1fr); gap:var(--sp-4); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
 .ns-pair:last-child{border-bottom:none}
 .ns-pair dt{color:var(--text-secondary); font-size:var(--fs-sm)}
 .ns-pair dd{margin:0; color:var(--text-body); overflow-wrap:anywhere}
 
 /* A tailnet with 200 peers scrolls inside the panel and never pushes the actions away. */
-.ns-peers-list{margin-top:var(--sp-3); max-height:190px; overflow:auto}
+.ns-peers-list{margin-top:var(--sp-3)}
+.ns-more{margin-top:var(--sp-2)}
+/* The detail row of the board shows on a phone only. */
+.board-detail{display:none}
+.board .board-detail td{background:var(--surface-inset); background-image:none; height:auto; padding:var(--sp-2) var(--sp-3)}
 .ns-peer{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
 .ns-peer:last-child{border-bottom:none}
 .ns-peer-addr{color:var(--text-tertiary); font-size:var(--fs-micro)}
 
-.ns-events{margin-top:var(--sp-3); max-height:150px; overflow:auto}
+.ns-events{margin-top:var(--sp-3)}
 .ns-event{display:grid; grid-template-columns:132px minmax(0,1fr); gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
 .ns-event:last-child{border-bottom:none}
 .ns-event-kind{color:var(--text-tertiary); font-size:var(--fs-micro); overflow-wrap:anywhere}
@@ -688,20 +763,34 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   padding:var(--sp-6);
   z-index:9;
 }
+/* A dialog is a frame: one border, a header strip that holds the title, and a rule above
+   the actions. The scrim sets it apart from the page, so it carries no shadow. */
 .ns-dialog,
 .ac-dialog{
-  background:var(--surface-card);
+  background:var(--surface-page);
   border:1px solid var(--border-default);
   border-radius:var(--r-xl);
-  padding:var(--pad-card-lg);
+  padding:0 var(--sp-5) var(--sp-5);
   max-width:560px;
   width:100%;
   max-height:86vh;
   overflow:auto;
-  box-shadow:var(--shadow-pop);
 }
-.ns-dialog h3,
-.ac-dialog h3{font-family:var(--font-display); font-size:var(--fs-h2); letter-spacing:var(--ls-h2); margin:0 0 var(--sp-2)}
+.ns-dialog > h3:first-child,
+.ac-dialog > h3:first-child{
+  display:flex;
+  align-items:center;
+  min-height:48px;
+  margin:0 calc(var(--sp-5) * -1) var(--sp-4);
+  padding:0 var(--sp-5);
+  background:var(--surface-card);
+  border-bottom:1px solid var(--border-default);
+  font-family:var(--font-display);
+  font-size:var(--fs-h3);
+  font-weight:var(--fw-semibold);
+}
+.ns-dialog .ns-dialog-acts,
+.ac-dialog .ns-dialog-acts{border-top:1px solid var(--border-default); padding-top:var(--sp-4)}
 
 .ns-form{display:flex; flex-direction:column; gap:var(--sp-4); margin-top:var(--sp-4)}
 .ns-field{display:flex; flex-direction:column; gap:var(--sp-2)}
@@ -840,7 +929,9 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-end{color:var(--text-body); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .ac-conn{width:100%; height:0; border-top:1.4px dotted var(--edge)}
 .ac-ports{display:flex; gap:var(--sp-2); flex-wrap:wrap}
-.ac-noports{color:var(--text-tertiary)}
+.ac-noports{color:var(--text-tertiary); white-space:nowrap}
+.ac-states .chip{min-height:38px; padding:0 var(--sp-3)}
+.ac-rule .chip{min-height:36px}
 .ac-portfield{width:18ch}
 /* A phone stacks the controls of a rule row below the path. */
 @media (max-width:600px){
@@ -867,6 +958,11 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
    FR-policy-22 to FR-policy-28. */
 
 .pol-grid{display:grid; grid-template-columns:var(--w-side) minmax(0,1fr); gap:var(--sp-5); align-items:start}
+/* A frame inside the policy document frame is a section: a rule and a title, with no
+   second border and no second strip. */
+.pol-region .card{border:none; border-top:1px solid var(--border-default); padding:0; background:transparent; margin-top:var(--sp-4)}
+.pol-region .card > .label:first-child,
+.pol-region .card > .card-head:first-child{margin:0 0 var(--sp-3); padding:0; min-height:40px; background:transparent; border-bottom:none}
 .pol-side{min-width:0}
 .pol-main{min-width:0}
 
@@ -897,7 +993,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
 .pol-region{min-width:0}
 .pol-region > .pol-acts{margin-left:0; margin-right:0}
-.pol-warning{margin:0 0 var(--sp-3); padding-bottom:var(--sp-3); border-bottom:1px solid var(--border-default); color:var(--text-secondary)}
+.pol-warning{max-width:none; margin:0 0 var(--sp-3); padding-bottom:var(--sp-3); border-bottom:1px solid var(--border-default); color:var(--text-secondary)}
 .pol-name{display:block; color:var(--text-secondary); font-size:var(--fs-micro)}
 .pol-detail{
   margin:var(--sp-3) 0 0;
@@ -987,10 +1083,11 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   cursor:pointer;
 }
 .seg button:hover{color:var(--text-body)}
-/* The current choice reverses its cell, as the current entry of the navigation does. It
-   takes no accent. */
+.seg button{white-space:nowrap}
+/* The current choice is an inset cell with the body colour. It takes no accent, and it
+   matches the selection of a table row. */
 .seg button[aria-selected="true"],
-.seg button[aria-pressed="true"]{background:var(--text-body); color:var(--surface-page)}
+.seg button[aria-pressed="true"]{background:var(--surface-inset); color:var(--text-body); box-shadow:inset 0 0 0 1px var(--text-tertiary)}
 .seg button:disabled{color:var(--text-tertiary); cursor:not-allowed}
 .seg button:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-parse-error{color:var(--crit)}
@@ -1011,7 +1108,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-visual .name{color:var(--text-secondary)}
 .pol-visual .setrow[role="button"]{cursor:pointer}
 .pol-visual .setrow[role="button"]:focus-visible{outline:none; box-shadow:var(--ring-focus)}
-.pol-visual .setrow.selected{border:1px solid var(--accent)}
+.pol-visual .setrow.selected{border:1px solid var(--text-tertiary)}
 
 /* The section grid: ten cells with a hairline gutter. The open section reverses its cell
    and takes no accent, because the accent of this view marks an allowed path. */
@@ -1019,9 +1116,8 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .pol-sections .setrow{padding:var(--sp-2) var(--sp-3); background:var(--surface-card); border:none}
 .pol-sections .setrow + .setrow{margin-top:0}
 .pol-sections .setrow:hover{background:var(--surface-raised)}
-.pol-sections .setrow.selected{border:none; background:var(--text-body)}
-.pol-sections .setrow.selected .name,
-.pol-sections .setrow.selected .mono{color:var(--surface-page)}
+.pol-sections .setrow.selected{border:none; background:var(--surface-inset); box-shadow:inset 0 0 0 1px var(--text-tertiary)}
+.pol-sections .setrow.selected .name{color:var(--text-body)}
 @media (max-width:900px){
   .pol-sections{grid-template-columns:repeat(2, minmax(0,1fr))}
 }
@@ -1122,3 +1218,162 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 @media (max-width:1040px){
   .pol-grid{grid-template-columns:1fr}
 }
+
+/* The topology of a phone: a row of source buttons and one row per allowed path. A wider
+   screen draws the picture and hides the list. */
+.path-wrap{display:none}
+.path-srcs{display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-bottom:var(--sp-3)}
+.path-src{
+  display:inline-flex;
+  align-items:center;
+  gap:var(--sp-2);
+  min-height:44px;
+  padding:0 var(--sp-3);
+  border:1px solid var(--border-default);
+  border-radius:var(--r-sm);
+  background:var(--surface-card);
+  color:var(--text-body);
+  font:inherit;
+  cursor:pointer;
+}
+.path-src[aria-pressed="true"]{background:var(--surface-inset); border-color:var(--text-tertiary)}
+.path-src:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+.path-rows{list-style:none; margin:0; padding:0; border-top:1px solid var(--border-soft)}
+.path-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr);
+  align-items:center;
+  gap:var(--sp-1) var(--sp-3);
+  padding:var(--sp-3) 0;
+  border-bottom:1px solid var(--border-soft);
+}
+.path-end{color:var(--text-body); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* The connector is the dotted curve of the brand, drawn straight: a 2 pixel dash, a 6
+   pixel gap, and a 1.4 pixel stroke. */
+.path-conn{height:1.4px; background:repeating-linear-gradient(to right, var(--edge) 0 2px, transparent 2px 8px)}
+.path-ports{grid-column:1 / -1; color:var(--text-tertiary); font-size:var(--fs-micro)}
+.path-row.sel .path-conn{background:repeating-linear-gradient(to right, var(--edge-active) 0 2px, transparent 2px 8px)}
+.path-row.muted .path-end{color:var(--text-tertiary)}
+.path-row.muted .path-conn{background:repeating-linear-gradient(to right, var(--border-default) 0 2px, transparent 2px 8px)}
+.path-list > .note{margin-top:var(--sp-3)}
+
+/* The phone. Every rule here wins over the rules above it, because it comes last. */
+@media (max-width:600px){
+  .head{flex-direction:column; align-items:flex-start; gap:var(--sp-1)}
+  .board-detail{display:table-row}
+  /* access.js sets the square size inline, so a phone raises it to the size of a thumb
+     with max() rather than with a second value of the property. */
+  .ac-square{width:max(var(--ac-square), 40px); height:max(var(--ac-square), 40px)}
+  .frame-link{display:inline-flex; align-items:center; min-height:44px; padding:0 var(--sp-2); margin:0 calc(var(--sp-2) * -1)}
+
+  /* The topology */
+  #view-overview .flow-wrap,
+  #view-access .flow-wrap{display:none}
+  .path-wrap{display:block}
+
+  /* A control that a thumb presses is 44 pixels high. */
+  .btn,
+  .seg button,
+  .ns-sm,
+  .pol-sections .setrow{min-height:44px}
+  .ns-sm{padding:var(--pad-btn)}
+
+  /* A frame head that holds tools puts the tools on a line of their own, at the content
+     edge. */
+  .frame-tools{margin-left:0; flex-basis:100%; padding-bottom:var(--sp-2)}
+  .frame-head .btn,
+  .frame-head .seg button{min-height:44px}
+  .frame-head:has(.frame-tools){padding-top:var(--sp-2)}
+  .seg{display:flex; flex-wrap:wrap}
+  .seg button{flex:1}
+
+  /* Activity: the time and the event share the first line. */
+  .log tr.log-row{grid-template-columns:auto minmax(0,1fr); padding:var(--sp-2) var(--sp-4)}
+  .log tr.day th{padding-left:var(--sp-4)}
+
+  /* Namespaces: the panel lists every peer and event in the page scroll. */
+  .ns-peers-list,
+  .ns-events{max-height:none}
+  .ns-event{grid-template-columns:auto minmax(0,1fr)}
+
+  /* Settings: the label sits over its value, so a path stays on one line. */
+  .kv,
+  .nsrow{grid-template-columns:1fr; gap:2px}
+  .nsrow .err{grid-column:1}
+
+  /* Access: a rule row holds the path on its first line and the port field and the
+     delete action on the second. */
+  .ac-rule{grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr); grid-auto-flow:row}
+  .ac-rule > :nth-child(n+4){grid-column:1 / -1; justify-self:start}
+  .ac-rule > .ac-portfield{grid-column:1 / 3; width:100%}
+  .ac-rule > .ac-del,
+  .ac-rule > .btn:last-child{grid-column:3; justify-self:end}
+
+  /* Policy: the document scrolls inside its box, and nested frames lose their border. */
+  .pol-code{max-height:60vh}
+  .pol-region .card{border:none; padding:0; background:transparent}
+  .pol-region .card > .label:first-child,
+  .pol-region .card > .card-head:first-child{margin:0 0 var(--sp-3); padding:var(--sp-2) 0; background:transparent}
+  .pol-btns{flex:1 1 100%}
+  .pol-btns .btn{flex:1}
+
+  /* A dialog takes the whole screen, and its actions stay at the foot of the screen. */
+  /* A dialog is a sheet at the foot of the screen, as tall as its content and never
+     taller than the screen. */
+  .ns-scrim,
+  .ac-scrim{padding:0; align-items:flex-end}
+  .ns-dialog,
+  .ac-dialog{max-width:none; max-height:100dvh; border:none; border-top:1px solid var(--border-default); border-radius:0; padding:0 var(--sp-5); display:flex; flex-direction:column}
+  .ns-dialog .ns-dialog-acts,
+  .ac-dialog .ns-dialog-acts{position:sticky; bottom:0; margin:var(--sp-4) calc(var(--sp-5) * -1) 0; padding:var(--sp-3) var(--sp-5) calc(var(--sp-3) + env(safe-area-inset-bottom)); background:var(--surface-card)}
+  .ns-dialog-acts .btn{flex:1}
+}
+
+/* A section label inside a frame is a sentence-case title, not an uppercase label. The
+   one uppercase text of the console is the column head of a table. */
+.ns-section,
+.ns-notice > .label,
+.ac-flow-cap .label,
+.ns-field > .label{
+  text-transform:none;
+  letter-spacing:0;
+  font-size:var(--fs-sm);
+  font-weight:var(--fw-semibold);
+  color:var(--text-secondary);
+}
+.ac-flow-cap .label{font-weight:var(--fw-regular)}
+
+/* Namespaces: the state cell holds one gap between the dot and the word. */
+/* The credential reason names keys and variables, so it is set as the daemon wrote it. */
+.ns-reason{font-family:var(--font-data); font-stretch:var(--stretch-mono); font-size:var(--fs-micro); color:var(--text-body); padding:var(--sp-3); background:var(--surface-inset)}
+.ns-event-text.mono{font-size:var(--fs-micro); color:var(--text-body)}
+
+/* A removal command breaks at a space only, so a line break never splits a flag or a
+   path. A wrapped line of a command indents two columns under its first line. */
+.ns-cmds > span{white-space:normal; padding-left:2ch; text-indent:-2ch}
+.ns-arg{white-space:nowrap}
+
+/* The checkbox of the add flow takes the palette and a row that a thumb presses. */
+.ns-check{min-height:44px}
+.ns-check input{
+  appearance:none;
+  width:18px;
+  height:18px;
+  flex:none;
+  margin:0;
+  border:1px solid var(--text-tertiary);
+  background:var(--surface-inset);
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+}
+.ns-check input:checked::after{content:""; width:10px; height:10px; background:var(--text-body)}
+.ns-check input:focus-visible{outline:none; box-shadow:var(--ring-focus)}
+
+/* Access: the port field states "all ports" when it is empty, so the row states it once. */
+.ac-rule:has(.ac-portfield) .ac-noports{display:none}
+
+/* Policy: the etag breaks inside its chip, and a tab takes two columns. */
+.pol-meta .chip{display:inline-block; max-width:100%; overflow-wrap:anywhere}
+.pol-doc,
+.pol-gut{tab-size:2}

@@ -441,3 +441,62 @@ export function textEquivalentMarkup(model) {
   }
   return parts.join("");
 }
+
+/**
+ * pathListMarkup returns the topology of a phone: a row of source buttons and one row per
+ * allowed path.
+ *
+ * A phone draws the picture at about half size, so its text is too small to read and its
+ * nodes are too small to press. This list states the same model in rows instead. A
+ * source button selects a node, as a node of the picture does: the paths of the selection
+ * take the accent and every other path goes quiet. A path that no rule allows has no row.
+ *
+ * model comes from buildTopology, and selected holds the identifier of the selected node,
+ * or null. options.bySource narrows the selection to the paths that start at the node,
+ * as topologySVGMarkup does.
+ */
+export function pathListMarkup(model, selected, options = {}) {
+  const bySource = options.bySource === true;
+  // A button is a node that can start a path: every tailnet, and any other node that a
+  // rule names as a source. A destination alone is no button, because selecting it would
+  // mute every row.
+  const sources = model.nodes
+    .filter((node) => node.kind === "tailnet" || model.paths.some((path) => path.from === node.id))
+    .map((node) => {
+      const pressed = node.id === selected ? "true" : "false";
+      const dot = node.kind === "tailnet" ? `<span class="dot ${esc(node.tone)}"></span>` : "";
+      return (
+        `<button type="button" class="path-src" data-node="${esc(node.id)}" aria-pressed="${pressed}">` +
+        `${dot}<span class="mono">${esc(node.id)}</span></button>`
+      );
+    })
+    .join("");
+
+  const rows = model.paths
+    .map((path) => {
+      let state = "";
+      if (selected !== null && selected !== undefined) {
+        const own = bySource ? path.from === selected : path.from === selected || path.to === selected;
+        state = own ? " sel" : " muted";
+      }
+      const ports = path.ports.length > 0 ? `<span class="path-ports mono">${esc(path.ports.join(", "))}</span>` : "";
+      return (
+        `<li class="path-row${state}"><span class="path-end mono">${esc(path.from)}</span>` +
+        `<span class="path-conn" aria-hidden="true"></span>` +
+        `<span class="path-end mono">${esc(path.to)}</span>${ports}</li>`
+      );
+    })
+    .join("");
+
+  const list = rows === ""
+    ? `<p class="note">No rule allows a path.</p>`
+    : `<ul class="path-rows" aria-label="${esc(model.summary)}">${rows}</ul>`;
+  const absence = model.absence !== "" ? `<p class="note">${esc(model.absence)}</p>` : "";
+  return (
+    `<div class="path-list">` +
+    `<div class="path-srcs" role="group" aria-label="Select a node to draw its paths alone">${sources}</div>` +
+    list +
+    absence +
+    `</div>`
+  );
+}

@@ -442,9 +442,13 @@ export function activityMarkup(model, policyEntries = [], options = {}) {
     ? `<p class="note log-cap">The view draws the newest <span class="mono">${model.rows.length}</span> rows of <span class="mono">${model.matched}</span>.</p>`
     : "";
 
+  // Only an event row fills the tailnet column: a tick row names its tailnets in the
+  // message. The table drops the column when no event row names a tailnet.
+  const named = model.rows.some((row) => row.kind === "event" && row.event.TailnetID);
   return (
     note +
-    '<table class="log"><thead><tr><th scope="col">Time</th><th scope="col">Tailnet</th><th scope="col">Event</th><th scope="col">Message</th></tr></thead>' +
+    `<table class="log${named ? "" : " no-tailnet"}">` +
+    '<thead><tr><th scope="col">Time</th><th scope="col">Tailnet</th><th scope="col">Event</th><th scope="col">Message</th></tr></thead>' +
     `<tbody>${body.join("")}</tbody></table>` +
     cap
   );
@@ -497,7 +501,7 @@ export function settingsMarkup(model) {
   }
 
   const rows = model.rows.map((row) => valueRow(row.label, row.value, row.reported)).join("");
-  parts.push(`<section class="frame"><div class="frame-head"><h2 class="frame-title">Daemon</h2></div><dl class="kv-list">${rows}</dl></section>`);
+  parts.push(`<section class="frame set-daemon"><div class="frame-head"><h2 class="frame-title">Daemon</h2></div><dl class="kv-list">${rows}</dl></section>`);
 
   // FR-console-38. The section "The console has no authentication" of docs/specs/spec.md
   // records the accepted risk and it names the four controls that reduce it.

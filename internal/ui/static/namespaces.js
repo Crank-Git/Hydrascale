@@ -20,6 +20,12 @@ export const IDENTIFIER_RULE =
 /** The age at which the console asks the daemon for the detail of a tailnet again. */
 export const DETAIL_TTL_MS = 5000;
 
+/** The count of peers that the panel lists before it offers the rest. */
+const PANEL_PEERS = 10;
+
+/** expandedPeers holds the tailnets whose panel lists every peer. */
+const expandedPeers = new Set();
+
 /** The marker that the view draws for a value that the daemon has not reported. */
 const ABSENT = "—";
 
@@ -464,17 +470,15 @@ function drawRow(row) {
 
   const stateCell = (state) => {
     const cell = el("td", "state");
-    if (state) {
-      cell.append(stateSpan(state));
-    } else {
-      cell.append(el("span", "ns-word ns-none", "usable"));
-    }
+    // A tailnet whose credential works holds no credential state, so the cell states the
+    // word of the overview board for it.
+    cell.append(stateSpan(state || { tone: "ok", word: "usable" }));
     return cell;
   };
   node.append(stateCell(row.state));
   node.append(stateCell(row.reachability));
   const policy = stateCell(row.credential);
-  policy.classList.add("opt");
+  policy.classList.add("mid");
   node.append(policy);
   node.append(el("td", row.peerCount === null ? "num ns-pending" : "num mono", row.peerCount === null ? "no count yet" : String(row.peerCount)));
 
@@ -572,16 +576,28 @@ function drawPanel(panel) {
     aside.append(card);
   }
 
-  aside.append(el("span", "label ns-section", `Peers · ${panel.peerLabel}`));
+  aside.append(el("span", "label ns-section", `Peers · ${panel.peerCount}`));
   if (panel.peers.length === 0) {
     aside.append(el("p", "note", "The daemon reports no peer. A peer arrives when the node reaches the control server."));
   } else {
+    // The panel lists the first peers and counts the rest, so it never holds a scroll box
+    // of its own inside the page.
     const peers = el("div", "ns-peers-list");
-    for (const peer of panel.peers) {
+    const shown = expandedPeers.has(panel.id) ? panel.peers.length : PANEL_PEERS;
+    for (const peer of panel.peers.slice(0, shown)) {
       const line = el("div", "ns-peer");
       line.append(el("span", "mono", peer.name));
       line.append(el("span", "mono ns-peer-addr", peer.address));
       peers.append(line);
+    }
+    if (panel.peers.length > shown) {
+      const more = el("button", "btn ns-more", `Show ${panel.peers.length - shown} more peers`);
+      more.type = "button";
+      more.addEventListener("click", () => {
+        expandedPeers.add(panel.id);
+        render();
+      });
+      peers.append(more);
     }
     aside.append(peers);
   }
@@ -594,7 +610,9 @@ function drawPanel(panel) {
     for (const event of panel.events.slice(-5).reverse()) {
       const line = el("div", "ns-event");
       line.append(el("span", "mono ns-event-kind", event.kind));
-      line.append(el("span", "ns-event-text", event.message));
+      // An action event names the action that the reconciler ran, which is a machine
+      // value. Every other event carries a sentence of the daemon.
+      line.append(el("span", event.kind === "action_ok" ? "ns-event-text mono" : "ns-event-text", event.message));
       log.append(line);
     }
     aside.append(log);
@@ -671,15 +689,25 @@ function drawRemoval() {
     box.append(el("h3", undefined, view.heading));
     box.append(el("p", "note", view.lead));
 
+    // Each argument is a span that no line break divides, so a wrapped command never
+    // splits a flag or a path. A command breaks only between two arguments.
     const cmds = el("div", "ns-cmds mono");
     for (const command of view.commands) {
-      cmds.append(el("span", undefined, command));
+      const line = el("span");
+      command.split(" ").forEach((argument, index) => {
+        if (index > 0) {
+          line.append(document.createTextNode(" "));
+        }
+        line.append(el("span", "ns-arg", argument));
+      });
+      cmds.append(line);
     }
     box.append(cmds);
 
-    box.append(el("p", "note", view.ruleSentence));
-    box.append(el("p", "note", view.logoutSentence));
-    box.append(el("p", "note", view.authorizationSentence));
+    const values = [dialog.plan.host_veth, dialog.plan.namespace, "tailscale logout"];
+    box.append(monoNote(view.ruleSentence, values));
+    box.append(monoNote(view.logoutSentence, values));
+    box.append(monoNote(view.authorizationSentence, values));
 
     const acts = el("div", "ns-acts ns-dialog-acts");
     const cancel = el("button", "btn", "Cancel");
@@ -718,6 +746,46 @@ function drawRemoval() {
   return box;
 }
 
+/**
+ * monoNote writes a sentence and sets each machine value that it names in the mono
+ * typeface. values lists the machine values, and a value that the sentence does not name
+ * changes nothing.
+ */
+function monoNote(sentence, values) {
+  const note = el("p", "note");
+  const named = values.filter((value) => value && sentence.includes(value));
+  if (named.length === 0) {
+    note.textContent = sentence;
+    return note;
+  }
+  const pattern = new RegExp(`(${named.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+  for (const part of sentence.split(pattern)) {
+    if (part === "") {
+      continue;
+    }
+    note.append(named.includes(part) ? el("span", "mono", part) : document.createTextNode(part));
+  }
+  return note;
+}
+
+/**
+ * hintNote writes the hint of a field. The character set of the identifier rule is a
+ * machine value, so it takes the mono typeface inside the sentence.
+ */
+function hintNote(hint) {
+  const note = el("span", "note");
+  const set = "a-z A-Z 0-9 . _ -";
+  const at = hint.indexOf(set);
+  if (at < 0) {
+    note.textContent = hint;
+    return note;
+  }
+  note.append(document.createTextNode(hint.slice(0, at)));
+  note.append(el("span", "mono", set));
+  note.append(document.createTextNode(hint.slice(at + set.length)));
+  return note;
+}
+
 /** drawAdd draws the add flow. FR-console-31. */
 function drawAdd() {
   const state = addFlow.state();
@@ -745,7 +813,7 @@ function drawAdd() {
     input.value = state.fields[field.name];
     input.addEventListener("input", () => addFlow.setField(field.name, input.value));
     row.append(input);
-    row.append(el("span", "note", field.hint));
+    row.append(hintNote(field.hint));
     if (state.errors[field.name]) {
       row.append(el("span", "ns-error", state.errors[field.name]));
     }
@@ -850,7 +918,7 @@ function render() {
       ["Tailnet", ""],
       ["State", ""],
       ["Reachability", ""],
-      ["Policy", "opt"],
+      ["Policy", "mid"],
       ["Peers", "num"],
       ["Address", "opt"],
       ["Namespace", "opt"],

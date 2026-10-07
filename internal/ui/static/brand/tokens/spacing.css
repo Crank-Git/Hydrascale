@@ -8,11 +8,12 @@
   --pad-row:12px 16px;
   --pad-btn:10px 16px;
   --pad-btn-sm:7px 12px;
-  --pad-input:11px 13px;
+  --pad-input:7px 12px;  /* a field matches the height of a button */
   --pad-view:28px 32px;
 
   --w-nav:212px;        /* left navigation */
   --w-side:320px;       /* contextual right panel */
+  --w-kv:140px;         /* the label column of a description list */
   --h-topbar:60px;
   --maxw-read:640px;    /* prose never wider */
   --maxw-app:1440px;

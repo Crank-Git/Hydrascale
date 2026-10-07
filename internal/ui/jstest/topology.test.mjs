@@ -18,6 +18,7 @@ import {
   sinceWords,
   textEquivalentMarkup,
   topologySVGMarkup,
+  pathListMarkup,
 } from "../static/topology.js";
 
 // statusWith builds one GET /api/status body. The Go type reconciler.TailnetState carries
@@ -449,4 +450,39 @@ test("a poll with no policy field draws no credential dot", () => {
     "homelab reaches host.",
     "corp-prod reaches internet.",
   ]);
+});
+
+test("the phone path list states one row per allowed path and no row for a denied path", () => {
+  const status = statusWith({ alpha: { reach: { state: "reachable" } }, beta: { reach: { state: "reachable" } } });
+  const access = accessWith(
+    [{ id: "alpha", peers: 1, veth: "10.99.0.2" }, { id: "beta", peers: 1, veth: "10.99.0.6" }],
+    [{ from: "alpha", to: "internet", ports: [] }, { from: "beta", to: "host", ports: ["tcp/22"] }],
+  );
+  const markup = pathListMarkup(buildTopology(status, access), null);
+  assert.equal((markup.match(/<li class="path-row">/g) || []).length, 2);
+  assert.match(markup, /tcp\/22/);
+  assert.doesNotMatch(markup, /alpha<\/span><span class="path-conn" aria-hidden="true"><\/span><span class="path-end mono">beta/);
+  // The two tailnets are sources. The host and the internet start no path here, so they
+  // take no button.
+  assert.equal((markup.match(/<button type="button" class="path-src"/g) || []).length, 2);
+});
+
+test("the phone path list draws the paths of the selection in the accent and mutes the rest", () => {
+  const status = statusWith({ alpha: {}, beta: {} });
+  const access = accessWith(
+    [{ id: "alpha", peers: 1, veth: "a" }, { id: "beta", peers: 1, veth: "b" }],
+    [{ from: "alpha", to: "internet", ports: [] }, { from: "beta", to: "internet", ports: [] }],
+  );
+  const markup = pathListMarkup(buildTopology(status, access), "alpha", { bySource: true });
+  assert.equal((markup.match(/class="path-row sel"/g) || []).length, 1);
+  assert.equal((markup.match(/class="path-row muted"/g) || []).length, 1);
+  assert.match(markup, /data-node="alpha" aria-pressed="true"/);
+});
+
+test("the phone path list escapes every value that the daemon reports", () => {
+  const hostile = '<img src=x onerror="alert(1)">';
+  const status = statusWith({ [hostile]: {} });
+  const access = accessWith([{ id: hostile, peers: 1, veth: "a" }], [{ from: hostile, to: "internet", ports: [hostile] }]);
+  const markup = pathListMarkup(buildTopology(status, access), null);
+  assert.doesNotMatch(markup, /<img/);
 });

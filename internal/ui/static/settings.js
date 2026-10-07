@@ -37,10 +37,8 @@ function element(tag, className, text) {
  * not write. The value it holds is the poll interval that the settings list states above.
  */
 function intervalCard(snapshot) {
-  const card = element("section", "frame");
-  const head = element("div", "frame-head");
-  head.append(element("h2", "frame-title", "Poll interval"));
-  card.append(head);
+  const card = element("div", "set-interval");
+  card.append(element("h3", "set-sub", "Poll interval"));
 
   const note = element("p", "note", "The console reads ");
   note.append(element("code", "mono", `GET ${STATUS_ROUTE}`));
@@ -93,7 +91,10 @@ function draw(section, snapshot) {
   // label and its value across the whole page.
   const written = element("div", "settings-grid");
   written.innerHTML = dnsMarkup(dns) + settingsMarkup(settings);
-  written.append(intervalCard(snapshot));
+  // The poll interval is a setting of the daemon frame, so the control sits in that frame
+  // and the grid holds six frames in three rows.
+  const daemon = written.querySelector(".set-daemon");
+  (daemon || written).append(intervalCard(snapshot));
   section.append(written);
 }
 

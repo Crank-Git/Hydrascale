@@ -598,7 +598,7 @@ test("the flow overview states which source is selected", () => {
 
   const resting = flowCaption(model, null);
   assert.equal(resting.id, "");
-  assert.match(resting.sentence, /Select a node/);
+  assert.match(resting.sentence, /Select a source/);
 
   const chosen = flowCaption(model, "jbones");
   assert.equal(chosen.label, "source");

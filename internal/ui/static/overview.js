@@ -19,6 +19,7 @@ import {
   buildTopology,
   errorSentences,
   lastReconcileAt,
+  pathListMarkup,
   reconcilerState,
   textEquivalentMarkup,
   topologySVGMarkup,
@@ -62,6 +63,35 @@ function clockTime(at) {
 /** plural states a count and its noun, with the noun in the right number. */
 function plural(n, noun) {
   return n === 1 ? `${n} ${noun}` : `${n} ${noun}s`;
+}
+
+/**
+ * tierClass marks a cell of a column that a narrow screen hides: "mid" for a column that
+ * a phone hides, and "opt" for a column that a tablet hides as well.
+ */
+function tierClass(cell, column) {
+  if (column.tier === "tablet") {
+    cell.classList.add("mid");
+  } else if (column.tier === "desktop") {
+    cell.classList.add("opt");
+  }
+}
+
+/** detailRow states the cells of one row that a phone hides, as a description list. */
+function detailRow(row) {
+  const line = element("tr", "board-detail");
+  const cell = element("td");
+  cell.colSpan = COLUMNS.length;
+  const list = element("dl", "kv-list");
+  for (const column of COLUMNS.filter((entry) => entry.tier !== "phone")) {
+    const pair = element("div", "kv");
+    pair.append(element("dt", undefined, column.head));
+    pair.append(element("dd", "mono", cellText(row, column.key)));
+    list.append(pair);
+  }
+  cell.append(list);
+  line.append(cell);
+  return line;
 }
 
 /** choose selects a tailnet, or clears the selection when the operator chooses it again. */
@@ -119,8 +149,9 @@ function drawVerdict(section, rows, model, status) {
   line.append(statement);
 
   // Each count is one item, so a narrow line wraps between two counts and never inside
-  // one. The time of the last tick shows on a narrow screen only, where the title block
-  // of the rail is hidden; it tells a fresh page from a stale one.
+  // one. The access mode and the time of the last tick show on a narrow screen only,
+  // where the title block of the rail is hidden; the tick tells a fresh page from a
+  // stale one.
   const reconciler = reconcilerState(status);
   const counts = element("p", "verdict-counts mono");
   const items = [
@@ -132,6 +163,8 @@ function drawVerdict(section, rows, model, status) {
   for (const item of items) {
     counts.append(element("span", "count", item));
   }
+  const access = status.access && status.access.mode ? `access ${status.access.mode}` : "no access mode yet";
+  counts.append(element("span", "count count-mode", access));
   const tick = lastReconcileAt(status.events);
   counts.append(element("span", "count count-tick", tick === null ? "no tick yet" : `tick ${clockTime(tick)}`));
   line.append(counts);
@@ -155,9 +188,7 @@ function drawBoard(section, rows, redraw) {
   for (const column of COLUMNS) {
     const cell = element("th", column.numeric ? "num" : undefined, column.head);
     cell.scope = "col";
-    if (!column.narrow) {
-      cell.classList.add("opt");
-    }
+    tierClass(cell, column);
     headRow.append(cell);
   }
   head.append(headRow);
@@ -180,9 +211,7 @@ function drawBoard(section, rows, redraw) {
       if (column.numeric) {
         cell.classList.add("num");
       }
-      if (!column.narrow) {
-        cell.classList.add("opt");
-      }
+      tierClass(cell, column);
       const state = row[column.key];
       if (typeof state === "object") {
         cell.classList.add("state");
@@ -196,6 +225,12 @@ function drawBoard(section, rows, redraw) {
     }
 
     line.addEventListener("click", () => choose(row.id, redraw));
+    body.append(line);
+    // A phone hides the columns of the tablet tier and the desktop tier, so the selected
+    // row opens one detail row that states them. A wider screen hides the detail row.
+    if (row.id === selected) {
+      body.append(detailRow(row));
+    }
     line.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -204,13 +239,16 @@ function drawBoard(section, rows, redraw) {
       }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        const next = event.key === "ArrowDown" ? line.nextElementSibling : line.previousElementSibling;
+        const step = (node) => (event.key === "ArrowDown" ? node.nextElementSibling : node.previousElementSibling);
+        let next = step(line);
+        while (next && next.classList.contains("board-detail")) {
+          next = step(next);
+        }
         if (next) {
           next.focus();
         }
       }
     });
-    body.append(line);
   }
   table.append(body);
 
@@ -248,17 +286,26 @@ function drawTopology(parent, model, redraw) {
   figure.innerHTML = topologySVGMarkup(model, selected);
   frame.append(figure);
 
-  // A phone shows the text equivalent in place of the picture, which is too small there
-  // to read. A wider screen hides it for every reader but a screen reader.
-  const text = element("div", "sr topology-text");
+  // A phone shows the path list in place of the picture, which is too small there to
+  // read or to press. A wider screen hides the list.
+  const list = element("div", "path-wrap");
+  list.innerHTML = pathListMarkup(model, selected);
+  frame.append(list);
+
+  const text = element("div", "sr");
   text.id = TEXT_EQUIVALENT_ID;
   text.innerHTML = textEquivalentMarkup(model);
   frame.append(text);
 
   frame.append(
-    element("p", "note", "Select a row or a node to draw its paths alone. A path that no rule allows has no line."),
+    element("p", "note", "Select a tailnet to draw its paths alone. A path that no rule allows has no line."),
   );
   parent.append(frame);
+
+  for (const button of list.querySelectorAll("button[data-node]")) {
+    const id = button.dataset.node;
+    button.addEventListener("click", () => choose(id, redraw));
+  }
 
   for (const group of figure.querySelectorAll("g.node")) {
     const id = group.dataset.node;
@@ -274,6 +321,10 @@ function drawTopology(parent, model, redraw) {
   const chosen = figure.querySelector(`g.node[data-node="${CSS.escape(selected || "")}"]`);
   if (chosen && focusArea === "flow") {
     chosen.focus();
+  }
+  const pressed = list.querySelector(`button[data-node="${CSS.escape(selected || "")}"]`);
+  if (pressed && focusArea === "paths") {
+    pressed.focus();
   }
 }
 
@@ -360,7 +411,7 @@ function draw(section, snapshot) {
   const active = document.activeElement;
   focusArea = null;
   if (active && section.contains(active)) {
-    focusArea = active.closest("tbody") ? "board" : active.closest(".flow-wrap") ? "flow" : null;
+    focusArea = active.closest("tbody") ? "board" : active.closest(".flow-wrap") ? "flow" : active.closest(".path-wrap") ? "paths" : null;
   }
   section.replaceChildren();
 

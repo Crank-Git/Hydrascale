@@ -40,11 +40,11 @@ function poll(tailnets) {
   return { status, model: buildTopology(status, access) };
 }
 
-test("a row with a fault sorts above every row without one, and equal rows keep their order", () => {
+test("a row with a fault sorts above every row without one, and equal rows sort by identifier", () => {
   const { status, model } = poll({
-    alpha: { peers: 3 },
-    beta: { peers: 4, reach: "unreachable" },
     gamma: { peers: 5 },
+    beta: { peers: 4, reach: "unreachable" },
+    alpha: { peers: 3 },
   });
   const rows = buildBoard(status, model);
   assert.deepEqual(rows.map((row) => row.id), ["beta", "alpha", "gamma"]);
@@ -132,14 +132,17 @@ test("the notable events leave out the routine events of a reconcile tick", () =
   }
 });
 
-test("a phone keeps the tailnet, the state, the reachability, and the peers", () => {
-  const narrow = COLUMNS.filter((column) => column.narrow).map((column) => column.key);
-  assert.deepEqual(narrow, ["id", "state", "reach", "peers"]);
+test("a phone keeps the tailnet, the state, the reachability, and the peers, and a tablet adds the paths and the policy", () => {
+  const phone = COLUMNS.filter((column) => column.tier === "phone").map((column) => column.key);
+  assert.deepEqual(phone, ["id", "state", "reach", "peers"]);
+  const tablet = COLUMNS.filter((column) => column.tier === "tablet").map((column) => column.key);
+  assert.deepEqual(tablet, ["paths", "policy"]);
 });
 
 test("app.css hides the optional columns on a phone and turns over no cell under reduced motion", async () => {
   const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
-  assert.match(style, /@media \(max-width:600px\)\{[^@]*\.board \.opt\{display:none\}/);
+  assert.match(style, /@media \(max-width:900px\)\{[^@]*\.board \.opt\{display:none\}/);
+  assert.match(style, /@media \(max-width:600px\)\{[^@]*\.board \.mid\{display:none\}/);
   assert.match(style, /@media \(prefers-reduced-motion: reduce\)\{\s*\.flap\{animation:none\}/);
 
   const motion = await readFile(new URL("../static/brand/tokens/motion.css", import.meta.url), "utf8");
