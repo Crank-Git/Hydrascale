@@ -5,7 +5,7 @@ repo: Crank-Git/Hydrascale
 status: approved
 spec_version: 2
 created: 2026-08-04
-approved: 2026-08-23
+approved: 2026-10-07
 html_generated: 2026-10-07
 branch_model: dev-and-live
 features:
@@ -37,6 +37,12 @@ features:
     file: features/12-visual-acl-editor.md
   - id: visual-policy-advanced
     file: features/13-visual-policy-advanced.md
+  - id: docs-site
+    file: features/14-docs-site.md
+  - id: readme-slim
+    file: features/15-readme-slim.md
+  - id: agent-skills-refresh
+    file: features/16-agent-skills-refresh.md
 ---
 
 # Hydrascale v1.0
@@ -124,6 +130,8 @@ the operator what is allowed.
 | text editor | noun | The policy view's region that shows the huJSON document as editable text, which `features/08-upstream-policy.md` builds. | raw editor, code editor |
 | route table | noun | The routing table that holds every route the daemon writes on the host, which the configuration key `route_table` declares. Distinct from the table 52, which tailscaled owns inside each namespace. | routing table, table |
 | routing policy rule | noun | One entry of `ip rule` that sends a route lookup to a named table at a stated priority. | ip rule, policy route, rule |
+| documentation site | noun | The MkDocs site on GitHub Pages at `https://crank-git.github.io/Hydrascale/`, built from `docs/site/`. | website, wiki, docs portal, handbook |
+| drift test | noun | The test in `cmd/hydrascale/skills_drift_test.go` that fails when a skill names a command, a flag, a key, or an event that the code does not hold. | lint, skill check |
 | result region | noun | The policy view's region that states the answer of the last validate or push, with one line per error. | result panel, status area, message box |
 
 ## Goals
@@ -187,11 +195,15 @@ version 1.0.
 | Policy document model | `features/11-policy-document-model.md` | Epic 11 | none |
 | Visual ACL editor | `features/12-visual-acl-editor.md` | Epic 12 | `mockups/06-visual-acl-editor.html` |
 | Visual policy editor — SSH and advanced constructs | `features/13-visual-policy-advanced.md` | Epic 13 | `mockups/07-advanced-policy-constructs.html` |
+| Documentation site | `features/14-docs-site.md` | Epic 14 | none |
+| A short README | `features/15-readme-slim.md` | Epic 14 | none |
+| Agent skills refresh | `features/16-agent-skills-refresh.md` | Epic 15 | none |
 
 Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11
 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1
 already covers the console fixes and the credential-state work between Epic 9 and Epic
-10, tagged `v1.1.0` and `v1.1.1`.)
+10, tagged `v1.1.0` and `v1.1.1`.) Epic 14 and Epic 15 follow version 1.5: the
+documentation site, the short README, and the agent skills for version 1.5.
 
 ## Architecture & stack
 
@@ -209,6 +221,23 @@ already covers the console fixes and the credential-state work between Epic 9 an
 | Console | `internal/ui` (new) | The static console that `go:embed` places in the binary. |
 | Upstream policy client | `internal/policy` (new) | The Tailscale and Headscale policy clients. |
 | Terminal interface | `internal/tui` | The Bubble Tea interface. |
+
+### Documentation site
+
+The documentation site is a separate artifact of the repository, not a part of the
+daemon. MkDocs builds it from `docs/site/`, and a workflow publishes it to GitHub Pages
+from `main`. `features/14-docs-site.md` states it.
+
+```mermaid
+flowchart LR
+  A[docs/site pages] --> B[scripts/docs-build.sh]
+  F[internal/ui/static/brand fonts and logo] --> B
+  B --> C[mkdocs build --strict]
+  C --> D[build/site]
+  D --> E[GitHub Pages]
+  R[README.md link table] --> E
+  S[skills] --> E
+```
 
 ### Console stack
 
@@ -646,6 +675,27 @@ that does not support `postures` shows every entry read-only and disables Push w
 key remains. A run of the tests marks each assertion `pass` or `fail`. A failed assertion
 disables Push, and the result region states that reason.
 
+### Epic 14: Documentation site
+
+Goal: the operator finds any fact on one documentation site, and the README states what
+Hydrascale does and links to the site.
+Covers: `features/14-docs-site.md`, `features/15-readme-slim.md`.
+Depends on: the release of version 1.5.
+Exit criteria: `https://crank-git.github.io/Hydrascale/` serves the site from `main`. CI
+fails a pull request whose page holds a broken link. `README.md` holds 220 lines or fewer
+and links to every section of the site. `docs/manual/`, `docs/images/`,
+`docs/UPGRADING.md`, and `docs/security-audit.md` live under `docs/site/`.
+
+### Epic 15: Agent skills refresh
+
+Goal: the coding agent of the operator states the commands of version 1.5 correctly,
+diagnoses a fault with read-only commands, and links to the documentation site.
+Covers: `features/16-agent-skills-refresh.md`.
+Depends on: Epic 14, because each skill links to a page of the documentation site.
+Exit criteria: `hydrascale skills install` writes three skills. The drift test fails on
+an unknown flag, an unknown configuration key, an unknown event, and a source line
+reference. The four contributor skills state the real CI gate.
+
 ## Milestones
 
 | Milestone | Epics | What is shippable |
@@ -657,6 +707,8 @@ disables Push, and the result region states that reason.
 | M5 — Upstream and release | 8, 9 | Upstream policy control works and version 1.0 ships. |
 | M6 — Agent skills | 10 | A coding agent routes a command to the named tailnet. This follows version 1.0. |
 | M7 — Visual policy editor | 11, 12, 13 | The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (`v1.1.0`, `v1.1.1`). |
+| M8 — Documentation site | 14, 15 | The documentation site serves every topic, the README is short, and the agent skills match version 1.5. |
+
 
 M2 is the point at which the release is worth cutting even if nothing else lands. The
 security and DNS work must not wait behind the console.
@@ -888,6 +940,7 @@ advance to `status: built`. |
 | 2026-10-05 | 1 | **Issue #410: the namespaced `tailscaled` restarted the host `systemd-resolved`.** `bpftrace` on the test host showed `tailscaled` run `systemctl is-active systemd-resolved.service` and then `systemctl restart systemd-resolved.service` after each write of its `resolv.conf`. Three restarts of the daemon within four minutes reached the start limit of `systemd-resolved`, and the host lost DNS. FR-dns-17 and FR-dns-18 hide `systemctl` from the child. |
 | 2026-10-06 | 1 | **Decision: the host forwards a listen port to each namespace (issue #404).** The reporter measured direct connections that took 10 minutes to form and dropped after 2 minutes, while the host `tailscaled` connected at once. A peer reached the namespace only through a conntrack entry that the namespace opened. The operator chose "On by default". FR-access-42 to FR-access-44 hold the result. The port follows from the veth index alone, so a teardown needs no configuration file, and the build holds no key to change it. |
 | 2026-10-07 | 1 | **Decision: the console takes the departure board as its visual world.** The operator chose the direction from an Impeccable critique and direction round. The brand keeps the lime accent, the warm dark surfaces, the logo, and the wordmark. The console replaces `Space Grotesk` and `Space Mono` with `Barlow Semi Condensed` (three static weights) and `Martian Mono` (one variable file, weight and width axes). Both come from the Fontsource npm packages version 5.3.0, Latin subset, and both carry the SIL Open Font License version 1.1. The tertiary text colour changes from `#5b544c` (2.49:1 on a card) to `#8a8277` (4.9:1), which passes WCAG AA. Every corner radius token is 0, so FR-editor-15 now names the token and not 6 pixels. The overview replaces the four statistic cards with one verdict line and one row per tailnet in fixed columns. The operator ruled that a board cell turns over once, character by character, when its value changes between two polls, and never on load, on an unchanged poll, or under `prefers-reduced-motion`. An absent policy credential is no longer a red dot on a topology node, because a credential is optional; a rejected credential stays a fault. |
+| 2026-10-07 | 1 | **Change: the documentation site, a short README, and the agent skills refresh.** The operator asked for a documentation site on GitHub Pages that takes the reference out of the 1468-line README, and for agent skills that match version 1.5. The operator chose MkDocs with the Material theme, publish from `main`, and a site that holds the operator documentation and the security audit but not `docs/DESIGN.md` or the specification. The operator also asked for a third, read-only skill for troubleshooting and a drift test that checks flags and keys. A survey on 2026-10-07 found 15 defects in the skills, which `features/16-agent-skills-refresh.md` lists. New features: `features/14-docs-site.md`, `features/15-readme-slim.md` (a delta on `features/09-docs-and-release.md`), and `features/16-agent-skills-refresh.md` (a delta on `features/10-agent-skills.md`). New epics: Epic 14 and Epic 15. New milestone: M8. The operator approved this round on 2026-10-07. |
 
 ## Issue map
 

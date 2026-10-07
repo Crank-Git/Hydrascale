@@ -171,6 +171,9 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="html/feature-policy-document-model.html">Policy document model</a></li>
 <li><a href="html/feature-visual-acl-editor.html">Visual ACL editor</a></li>
 <li><a href="html/feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
+<li><a href="html/feature-docs-site.html">Documentation site</a></li>
+<li><a href="html/feature-readme-slim.html">A short README that links to the documentation site</a></li>
+<li><a href="html/feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
 </ul></aside>
 <main>
 <p class="meta"><span class="badge">approved</span> &nbsp; created 2026-08-04 &nbsp; rendered 2026-10-07</p>
@@ -243,6 +246,8 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>text editor</td><td>noun</td><td>The policy view's region that shows the huJSON document as editable text, which <code>features/08-upstream-policy.md</code> builds.</td><td>raw editor, code editor</td></tr>
 <tr><td>route table</td><td>noun</td><td>The routing table that holds every route the daemon writes on the host, which the configuration key <code>route_table</code> declares. Distinct from the table 52, which tailscaled owns inside each namespace.</td><td>routing table, table</td></tr>
 <tr><td>routing policy rule</td><td>noun</td><td>One entry of <code>ip rule</code> that sends a route lookup to a named table at a stated priority.</td><td>ip rule, policy route, rule</td></tr>
+<tr><td>documentation site</td><td>noun</td><td>The MkDocs site on GitHub Pages at <code>https://crank-git.github.io/Hydrascale/</code>, built from <code>docs/site/</code>.</td><td>website, wiki, docs portal, handbook</td></tr>
+<tr><td>drift test</td><td>noun</td><td>The test in <code>cmd/hydrascale/skills_drift_test.go</code> that fails when a skill names a command, a flag, a key, or an event that the code does not hold.</td><td>lint, skill check</td></tr>
 <tr><td>result region</td><td>noun</td><td>The policy view's region that states the answer of the last validate or push, with one line per error.</td><td>result panel, status area, message box</td></tr>
 </table></div>
 <h2 id="goals">Goals</h2>
@@ -324,8 +329,11 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>Policy document model</td><td><code>features/11-policy-document-model.md</code></td><td>Epic 11</td><td>none</td></tr>
 <tr><td>Visual ACL editor</td><td><code>features/12-visual-acl-editor.md</code></td><td>Epic 12</td><td><code>mockups/06-visual-acl-editor.html</code></td></tr>
 <tr><td>Visual policy editor — SSH and advanced constructs</td><td><code>features/13-visual-policy-advanced.md</code></td><td>Epic 13</td><td><code>mockups/07-advanced-policy-constructs.html</code></td></tr>
+<tr><td>Documentation site</td><td><code>features/14-docs-site.md</code></td><td>Epic 14</td><td>none</td></tr>
+<tr><td>A short README</td><td><code>features/15-readme-slim.md</code></td><td>Epic 14</td><td>none</td></tr>
+<tr><td>Agent skills refresh</td><td><code>features/16-agent-skills-refresh.md</code></td><td>Epic 15</td><td>none</td></tr>
 </table></div>
-<p>Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1 already covers the console fixes and the credential-state work between Epic 9 and Epic 10, tagged <code>v1.1.0</code> and <code>v1.1.1</code>.)</p>
+<p>Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1 already covers the console fixes and the credential-state work between Epic 9 and Epic 10, tagged <code>v1.1.0</code> and <code>v1.1.1</code>.) Epic 14 and Epic 15 follow version 1.5: the documentation site, the short README, and the agent skills for version 1.5.</p>
 <h2 id="architecture-stack">Architecture &amp; stack</h2>
 <h3 id="components-after-version-1-0">Components after version 1.0</h3>
 <div class="table-wrap"><table>
@@ -341,6 +349,16 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>Upstream policy client</td><td><code>internal/policy</code> (new)</td><td>The Tailscale and Headscale policy clients.</td></tr>
 <tr><td>Terminal interface</td><td><code>internal/tui</code></td><td>The Bubble Tea interface.</td></tr>
 </table></div>
+<h3 id="documentation-site">Documentation site</h3>
+<p>The documentation site is a separate artifact of the repository, not a part of the daemon. MkDocs builds it from <code>docs/site/</code>, and a workflow publishes it to GitHub Pages from <code>main</code>. <code>features/14-docs-site.md</code> states it.</p>
+<div class="diagram"><pre class="mermaid">flowchart LR
+  A[docs/site pages] --&gt; B[scripts/docs-build.sh]
+  F[internal/ui/static/brand fonts and logo] --&gt; B
+  B --&gt; C[mkdocs build --strict]
+  C --&gt; D[build/site]
+  D --&gt; E[GitHub Pages]
+  R[README.md link table] --&gt; E
+  S[skills] --&gt; E</pre></div>
 <h3 id="console-stack">Console stack</h3>
 <p>The console is a static single-page application at <code>internal/ui/static/</code>. It contains <code>index.html</code>, <code>app.js</code>, <code>app.css</code>, and <code>tokens.css</code>. The <code>go:embed</code> directive places these files in the daemon binary. The console uses no build step, no package manager, and no framework.</p>
 <p>This choice beats a bundled framework for four reasons. The repository keeps its offline vendored build. The release keeps one artifact. Continuous integration keeps one toolchain. The console loads no code from a network. The cost is that the operator must write the topology renderer by hand in SVG, and that the React components in <code>branding/design_handoff_hydrascale_brand/component_reference/</code> become a reference rather than a dependency.</p>
@@ -560,6 +578,10 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <p>Goal: the operator edits tags, groups, and reachability rules by drawing them, on the same document the text editor edits. Covers: <code>features/12-visual-acl-editor.md</code>. Depends on: Epic 11. Exit criteria: the Policy view carries a Visual and a Text control over one staged document. The matrix draws every tag and group a rule references. A click stages an <code>acls</code> entry. Push sends the whole document through the existing validate-then-write path. A section the control server does not support states the reason and stays editable in Text.</p>
 <h3 id="epic-13-visual-policy-editor-ssh-and-advanced-constructs">Epic 13: Visual policy editor — SSH and advanced constructs</h3>
 <p>Goal: the operator edits SSH access, auto-approvers, node attributes, postures, and tests by drawing them. Covers: <code>features/13-visual-policy-advanced.md</code>. Depends on: Epic 12. Exit criteria: each of the five sections shows and edits its entries. A control server that does not support <code>postures</code> shows every entry read-only and disables Push while the key remains. A run of the tests marks each assertion <code>pass</code> or <code>fail</code>. A failed assertion disables Push, and the result region states that reason.</p>
+<h3 id="epic-14-documentation-site">Epic 14: Documentation site</h3>
+<p>Goal: the operator finds any fact on one documentation site, and the README states what Hydrascale does and links to the site. Covers: <code>features/14-docs-site.md</code>, <code>features/15-readme-slim.md</code>. Depends on: the release of version 1.5. Exit criteria: <code>https://crank-git.github.io/Hydrascale/</code> serves the site from <code>main</code>. CI fails a pull request whose page holds a broken link. <code>README.md</code> holds 220 lines or fewer and links to every section of the site. <code>docs/manual/</code>, <code>docs/images/</code>, <code>docs/UPGRADING.md</code>, and <code>docs/security-audit.md</code> live under <code>docs/site/</code>.</p>
+<h3 id="epic-15-agent-skills-refresh">Epic 15: Agent skills refresh</h3>
+<p>Goal: the coding agent of the operator states the commands of version 1.5 correctly, diagnoses a fault with read-only commands, and links to the documentation site. Covers: <code>features/16-agent-skills-refresh.md</code>. Depends on: Epic 14, because each skill links to a page of the documentation site. Exit criteria: <code>hydrascale skills install</code> writes three skills. The drift test fails on an unknown flag, an unknown configuration key, an unknown event, and a source line reference. The four contributor skills state the real CI gate.</p>
 <h2 id="milestones">Milestones</h2>
 <div class="table-wrap"><table>
 <tr><th>Milestone</th><th>Epics</th><th>What is shippable</th></tr>
@@ -570,6 +592,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>M5 — Upstream and release</td><td>8, 9</td><td>Upstream policy control works and version 1.0 ships.</td></tr>
 <tr><td>M6 — Agent skills</td><td>10</td><td>A coding agent routes a command to the named tailnet. This follows version 1.0.</td></tr>
 <tr><td>M7 — Visual policy editor</td><td>11, 12, 13</td><td>The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (<code>v1.1.0</code>, <code>v1.1.1</code>).</td></tr>
+<tr><td>M8 — Documentation site</td><td>14, 15</td><td>The documentation site serves every topic, the README is short, and the agent skills match version 1.5.</td></tr>
 </table></div>
 <p>M2 is the point at which the release is worth cutting even if nothing else lands. The security and DNS work must not wait behind the console.</p>
 <h2 id="assumptions" class="callout-h">Assumptions</h2>
@@ -795,6 +818,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>2026-10-05</td><td>1</td><td><strong>Issue #410: the namespaced <code>tailscaled</code> restarted the host <code>systemd-resolved</code>.</strong> <code>bpftrace</code> on the test host showed <code>tailscaled</code> run <code>systemctl is-active systemd-resolved.service</code> and then <code>systemctl restart systemd-resolved.service</code> after each write of its <code>resolv.conf</code>. Three restarts of the daemon within four minutes reached the start limit of <code>systemd-resolved</code>, and the host lost DNS. FR-dns-17 and FR-dns-18 hide <code>systemctl</code> from the child.</td></tr>
 <tr><td>2026-10-06</td><td>1</td><td><strong>Decision: the host forwards a listen port to each namespace (issue #404).</strong> The reporter measured direct connections that took 10 minutes to form and dropped after 2 minutes, while the host <code>tailscaled</code> connected at once. A peer reached the namespace only through a conntrack entry that the namespace opened. The operator chose "On by default". FR-access-42 to FR-access-44 hold the result. The port follows from the veth index alone, so a teardown needs no configuration file, and the build holds no key to change it.</td></tr>
 <tr><td>2026-10-07</td><td>1</td><td><strong>Decision: the console takes the departure board as its visual world.</strong> The operator chose the direction from an Impeccable critique and direction round. The brand keeps the lime accent, the warm dark surfaces, the logo, and the wordmark. The console replaces <code>Space Grotesk</code> and <code>Space Mono</code> with <code>Barlow Semi Condensed</code> (three static weights) and <code>Martian Mono</code> (one variable file, weight and width axes). Both come from the Fontsource npm packages version 5.3.0, Latin subset, and both carry the SIL Open Font License version 1.1. The tertiary text colour changes from <code>#5b544c</code> (2.49:1 on a card) to <code>#8a8277</code> (4.9:1), which passes WCAG AA. Every corner radius token is 0, so FR-editor-15 now names the token and not 6 pixels. The overview replaces the four statistic cards with one verdict line and one row per tailnet in fixed columns. The operator ruled that a board cell turns over once, character by character, when its value changes between two polls, and never on load, on an unchanged poll, or under <code>prefers-reduced-motion</code>. An absent policy credential is no longer a red dot on a topology node, because a credential is optional; a rejected credential stays a fault.</td></tr>
+<tr><td>2026-10-07</td><td>1</td><td><strong>Change: the documentation site, a short README, and the agent skills refresh.</strong> The operator asked for a documentation site on GitHub Pages that takes the reference out of the 1468-line README, and for agent skills that match version 1.5. The operator chose MkDocs with the Material theme, publish from <code>main</code>, and a site that holds the operator documentation and the security audit but not <code>docs/DESIGN.md</code> or the specification. The operator also asked for a third, read-only skill for troubleshooting and a drift test that checks flags and keys. A survey on 2026-10-07 found 15 defects in the skills, which <code>features/16-agent-skills-refresh.md</code> lists. New features: <code>features/14-docs-site.md</code>, <code>features/15-readme-slim.md</code> (a delta on <code>features/09-docs-and-release.md</code>), and <code>features/16-agent-skills-refresh.md</code> (a delta on <code>features/10-agent-skills.md</code>). New epics: Epic 14 and Epic 15. New milestone: M8. The operator approved this round on 2026-10-07.</td></tr>
 </table></div>
 <h2 id="issue-map">Issue map</h2>
 <p>Every epic of version 1.0 is on the tracker. Epics 5 to 9 were filed on 2026-08-05, after the security audit closed, so that each decomposition carries the audit findings it must fix.</p>

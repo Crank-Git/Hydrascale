@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hydrascale v1.0 — Feature: Security audit</title>
+<title>Hydrascale v1.0 — Feature: A short README that links to the documentation site</title>
 <style>
 :root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
         --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
@@ -132,7 +132,7 @@ body.rv-open .layout { padding-right:21rem; }
 @media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
 </style>
 </head>
-<body data-page="feature-security-audit" data-rvkey="hydrascale-v1">
+<body data-page="feature-readme-slim" data-rvkey="hydrascale-v1">
 <div class="layout">
 <aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
 <h2>Spec</h2><ul>
@@ -141,7 +141,7 @@ body.rv-open .layout { padding-right:21rem; }
 <h2>Features</h2><ul>
 <li><a href="feature-foundation.html">Foundation</a></li>
 <li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
-<li><a class="current" href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-audit.html">Security audit</a></li>
 <li><a href="feature-security-fixes.html">Security fixes</a></li>
 <li><a href="feature-dns-integrity.html">DNS integrity</a></li>
 <li><a href="feature-reachability-model.html">Local reachability model</a></li>
@@ -154,206 +154,161 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="feature-visual-acl-editor.html">Visual ACL editor</a></li>
 <li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
 <li><a href="feature-docs-site.html">Documentation site</a></li>
-<li><a href="feature-readme-slim.html">A short README that links to the documentation site</a></li>
+<li><a class="current" href="feature-readme-slim.html">A short README that links to the documentation site</a></li>
 <li><a href="feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
 </ul></aside>
 <main>
-<h1>Feature: Security audit</h1>
-<p class="meta">Epic 2: Security audit &nbsp; <span class="badge">built</span></p>
-<h3 id="security-audit-purpose">Purpose</h3>
-<p>The operator believes the daemon has several small authorization defects. The planning survey found four candidates. A guess is not a plan. This feature set produces a written list of findings, so that Epic 3 fixes facts.</p>
-<p>The audit reads code. It does not change code. It ends with the operator choosing which findings Epic 3 fixes.</p>
-<h3 id="security-audit-what-the-survey-already-found">What the survey already found</h3>
-<p>These four are inputs to the audit, not its output. The audit confirms each one and assigns a severity.</p>
+<h1>Feature: A short README that links to the documentation site</h1>
+<p class="meta">Epic 14: Documentation site &nbsp; <span class="badge">planned</span></p>
+<h3 id="readme-slim-purpose">Purpose</h3>
+<p>This is a delta feature. It changes the README that <code>features/09-docs-and-release.md</code> built.</p>
+<p><code>README.md</code> holds 1468 lines. After <code>features/14-docs-site.md</code>, the documentation site holds every topic. The README then needs to do three things: state what Hydrascale does, get the operator to a running daemon, and send the operator to the site for the rest.</p>
+<h3 id="readme-slim-requirements-this-feature-changes">Requirements this feature changes</h3>
+<p><code>features/09-docs-and-release.md</code> and <code>features/10-agent-skills.md</code> state where some facts live. This feature moves them to the site:</p>
 <div class="table-wrap"><table>
-<tr><th>Candidate</th><th>Evidence</th><th>Why it matters</th></tr>
-<tr><td>The host <code>FORWARD</code> chain accepts every packet from a namespace.</td><td><code>internal/namespaces/ns.go:263</code> inserts <code>iptables -I FORWARD 1 -i &lt;hostVeth&gt; -j ACCEPT</code>. There is no destination match and no output interface match.</td><td>A process in one namespace reaches another namespace and the host network. The rule sits above an operator firewall rule because it is inserted at position 1.</td></tr>
-<tr><td>Teardown is best effort.</td><td><code>internal/namespaces/ns.go:297</code> ignores the result of every delete.</td><td>A removed namespace can leave an <code>ACCEPT</code> rule and a <code>MASQUERADE</code> rule on the host.</td></tr>
-<tr><td>The overlay mount failure is silent.</td><td><code>cmd/hydrascale/nsdaemon.go:56</code> prints to standard error and continues.</td><td>The host <code>/etc/resolv.conf</code> file loses its protection and nothing reports it.</td></tr>
-<tr><td>The control API has no authentication.</td><td><code>internal/api/server.go</code> registers eight routes and none checks an identity.</td><td>Membership of <code>socket_group</code> is equivalent to root, and the documentation does not say so.</td></tr>
+<tr><th>Requirement</th><th>Was</th><th>Becomes</th></tr>
+<tr><td>FR-docs-2</td><td><code>README.md</code> describes the console, the local rules, and the upstream policy.</td><td>The README holds one paragraph and one screenshot of the console. The site describes the local rules and the upstream policy.</td></tr>
+<tr><td>FR-docs-4</td><td><code>README.md</code> states that the console has no authentication.</td><td>Unchanged. The README keeps one sentence and links to the Security section.</td></tr>
+<tr><td>FR-docs-5</td><td><code>README.md</code> states the <code>socket_group</code> warning.</td><td>The Security section of the site states it.</td></tr>
+<tr><td>FR-docs-6</td><td><code>README.md</code> documents every configuration key.</td><td>The configuration page of the site documents every key (FR-site-18).</td></tr>
+<tr><td>FR-docs-7, FR-docs-8</td><td><code>README.md</code> documents the credential setup and the Headscale requirement.</td><td>The credentials page and the Headscale page of the site state them.</td></tr>
+<tr><td>FR-docs-9</td><td>The table of contents matches the sections.</td><td>The README holds no table of contents. It is short enough to read whole.</td></tr>
+<tr><td>FR-skills-34</td><td><code>README.md</code> holds one section that states the skills commands.</td><td>Unchanged. The README keeps the section and links to the Reference section for the details.</td></tr>
 </table></div>
-<h3 id="security-audit-user-stories">User stories</h3>
+<p>When this feature merges, the PM updates the two built feature files so that they state the new location of each fact.</p>
+<h3 id="readme-slim-user-stories">User stories</h3>
 <ul>
-<li>As the operator, I want a written list of what is wrong, so that I fix the real
+<li>As an operator who finds the repository, I want to know what Hydrascale does in one
 </li>
 </ul>
-<p>defects rather than the ones I remember.</p>
+<p>screen, so that I decide whether it fits my host.</p>
 <ul>
-<li>As the operator, I want each finding to have a <code>file:line</code> reference, so that a fix is
+<li>As an operator, I want the install and the quick start in the README, so that I reach a
 </li>
 </ul>
-<p>unambiguous.</p>
+<p>running daemon without leaving GitHub.</p>
 <ul>
-<li>As the operator, I want to choose which findings get fixed in this release, so that the
+<li>As an operator, I want one link per topic, so that I reach the right page of the site.
 </li>
 </ul>
-<p>release ships.</p>
-<h3 id="security-audit-functional-requirements">Functional requirements</h3>
+<h3 id="readme-slim-functional-requirements">Functional requirements</h3>
 <ul>
-<li><strong>FR-audit-1</strong> — The audit produces <code>docs/security-audit.md</code>.
+<li><strong>FR-readme-1</strong> — <code>README.md</code> holds 220 lines or fewer.
 </li>
-<li><strong>FR-audit-2</strong> — Each finding has an identifier of the form <code>SA-&lt;n&gt;</code>.
-</li>
-<li><strong>FR-audit-3</strong> — Each finding has a severity of <code>high</code>, <code>medium</code>, or <code>low</code>.
-</li>
-<li><strong>FR-audit-4</strong> — Each finding has at least one <code>file:line</code> reference.
-</li>
-<li><strong>FR-audit-5</strong> — Each finding states the condition under which it causes harm.
-</li>
-<li><strong>FR-audit-6</strong> — Each finding states whether the audit reproduced it on the test host.
-</li>
-<li><strong>FR-audit-7</strong> — The audit covers every route that <code>internal/api/server.go</code> registers.
-</li>
-<li><strong>FR-audit-8</strong> — The audit covers every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
-</li>
-<li><strong>FR-audit-9</strong> — The audit covers every file mode and every socket mode that the daemon
+<li><strong>FR-readme-2</strong> — <code>README.md</code> holds these sections, in this order: the header, What
 </li>
 </ul>
-<p>sets.</p>
+<p>Hydrascale does, Requirements, Install, Quick start, The console, Documentation, Agent skills, License.</p>
 <ul>
-<li><strong>FR-audit-10</strong> — The audit covers every path that the daemon builds from configuration
+<li><strong>FR-readme-3</strong> — The header keeps the mark, the name, the one-line summary, and the
 </li>
 </ul>
-<p>input or from request input.</p>
+<p>badges.</p>
 <ul>
-<li><strong>FR-audit-11</strong> — The audit covers the teardown path of every resource that the daemon
+<li><strong>FR-readme-4</strong> — What Hydrascale does holds three paragraphs or fewer.
+</li>
+<li><strong>FR-readme-5</strong> — The console section holds one screenshot and one paragraph, and the
 </li>
 </ul>
-<p>creates.</p>
+<p>paragraph states that the console has no authentication.</p>
 <ul>
-<li><strong>FR-audit-12</strong> — The audit records the console threat model as a finding, so that the
+<li><strong>FR-readme-6</strong> — The Documentation section holds a table with one row per section of
 </li>
 </ul>
-<p>accepted risk is written down.</p>
+<p>the site: the section name, what it holds, and an absolute link to it.</p>
 <ul>
-<li><strong>FR-audit-13</strong> — The audit records whether an IPv6 gap exists in the firewall rules.
-</li>
-<li><strong>FR-audit-14</strong> — The audit states, for each finding, whether Epic 3 fixes it.
+<li><strong>FR-readme-7</strong> — The Agent skills section states <code>hydrascale skills install</code> and links
 </li>
 </ul>
-<h3 id="security-audit-user-flows">User flows</h3>
-<h4 id="security-audit-the-audit-runs">The audit runs</h4>
+<p>to the skills page of the site.</p>
+<ul>
+<li><strong>FR-readme-8</strong> — Every link of the README to a site page uses the absolute URL under
+</li>
+</ul>
+<p><code>https://crank-git.github.io/Hydrascale/</code>.</p>
+<ul>
+<li><strong>FR-readme-9</strong> — Every link of the README to a file of the repository names a file
+</li>
+</ul>
+<p>that exists.</p>
+<ul>
+<li><strong>FR-readme-10</strong> — <code>README.md</code> holds no fact that the site does not also state, apart
+</li>
+</ul>
+<p>from the install and the quick start.</p>
+<ul>
+<li><strong>FR-readme-11</strong> — Every screenshot in <code>README.md</code> comes from <code>docs/site/images/</code>.
+</li>
+</ul>
+<h3 id="readme-slim-user-flows">User flows</h3>
+<h4 id="readme-slim-flow-1-from-the-readme-to-the-answer">Flow 1: From the README to the answer</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Operator reads What Hydrascale does] --&gt; B{Does it fit the host?}
+  B -- no --&gt; C[Operator leaves]
+  B -- yes --&gt; D[Requirements and Install]
+  D --&gt; E[Quick start]
+  E --&gt; F[A running daemon]
+  F --&gt; G[Documentation table]
+  G --&gt; H[Site page of the topic]</pre></div>
 <ol>
-<li>The engineer lists every control API route and its handler.
+<li>The operator reads What Hydrascale does.
 </li>
-<li>The engineer reads each handler and records what it validates.
+<li>If the tool fits the host, the operator reads the requirements and installs it.
 </li>
-<li>The engineer lists every <code>os/exec</code> call and records where each argument comes from.
+<li>The quick start brings the operator to a running daemon.
 </li>
-<li>The engineer lists every <code>os.Chmod</code>, <code>os.Chown</code>, <code>os.WriteFile</code>, and <code>syscall.Umask</code>
+<li>For any other topic, the operator follows a row of the Documentation table.
 </li>
 </ol>
-<p>call and records the resulting mode.</p>
-<ol>
-<li>The engineer lists every resource that setup creates and checks that teardown removes
-</li>
-</ol>
-<p>it.</p>
-<ol>
-<li>The engineer reproduces each candidate finding on the test host where reproduction is
-</li>
-</ol>
-<p>possible.</p>
-<ol>
-<li>The engineer writes <code>docs/security-audit.md</code>.
-</li>
-<li>The operator reads the file and marks each finding as accepted or deferred.
-</li>
-</ol>
-<h4 id="security-audit-the-reachability-finding-is-reproduced">The reachability finding is reproduced</h4>
-<ol>
-<li>The engineer starts the daemon on the test host with two tailnets.
-</li>
-<li>The engineer records the veth address of each namespace from <code>ip addr</code>.
-</li>
-<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; ping -c1 &lt;veth address of b&gt;</code>.
-</li>
-<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; nc -vz &lt;a host on the host local network&gt; 22</code>.
-</li>
-<li>The engineer records the result of each command verbatim in the finding.
-</li>
-</ol>
-<h3 id="security-audit-screens-states">Screens &amp; states</h3>
-<p>This feature set has no screen.</p>
-<h3 id="security-audit-behaviour-rules">Behaviour rules</h3>
+<h3 id="readme-slim-screens-states">Screens &amp; states</h3>
+<p>One state: the README as GitHub renders it. The README holds no section that only a wide screen shows.</p>
+<h3 id="readme-slim-behaviour-rules">Behaviour rules</h3>
 <ul>
-<li>The audit reads code and runs read-only commands. It changes no source file other than
+<li>The README states no configuration key apart from those the quick start uses.
+</li>
+<li>The README states no troubleshooting step.
 </li>
 </ul>
-<p><code>docs/security-audit.md</code>.</p>
+<h3 id="readme-slim-data-touched">Data touched</h3>
+<p><code>README.md</code> only.</p>
+<h3 id="readme-slim-interfaces">Interfaces</h3>
+<p>None. The site URLs come from <code>features/14-docs-site.md</code> (FR-site-4).</p>
+<h3 id="readme-slim-edge-cases-failures">Edge cases &amp; failures</h3>
 <ul>
-<li>A finding that the audit cannot reproduce says so. It does not claim a reproduction it
+<li><strong>A site page moves.</strong> <code>scripts/docs-build.sh</code> does not check the README. A test reads
 </li>
 </ul>
-<p>did not perform.</p>
+<p>each absolute site link of the README and checks that the page exists under <code>docs/site/</code>.</p>
 <ul>
-<li>The audit quotes command output verbatim. It does not paraphrase evidence.
-</li>
-<li>The audit does not rank a finding by how easy the fix is. Severity describes harm.
+<li><strong>A section of the old README has no site page.</strong> The pull request lists each removed
 </li>
 </ul>
-<h3 id="security-audit-data-touched">Data touched</h3>
-<p>No entity changes. The audit adds one document.</p>
-<h3 id="security-audit-interfaces">Interfaces</h3>
-<p>The audit inspects these routes, which <code>internal/api/server.go:47-59</code> registers:</p>
-<div class="table-wrap"><table>
-<tr><th>Method and path</th><th>Handler</th><th>Mutating</th></tr>
-<tr><td><code>/api/status</code></td><td><code>handleStatus</code></td><td>no</td></tr>
-<tr><td><code>/api/events</code></td><td><code>handleEvents</code></td><td>no</td></tr>
-<tr><td><code>/api/reconcile</code></td><td><code>handleReconcile</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/add</code></td><td><code>handleTailnetAdd</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/remove</code></td><td><code>handleTailnetRemove</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/connect</code></td><td><code>handleTailnetConnect</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/disconnect</code></td><td><code>handleTailnetDisconnect</code></td><td>yes</td></tr>
-<tr><td><code>/api/config/dns</code></td><td><code>handleConfigDNS</code></td><td>yes</td></tr>
-<tr><td><code>/api/config</code></td><td><code>handleConfig</code></td><td>yes</td></tr>
-<tr><td><code>GET /api/tailnet/{id}/detail</code></td><td><code>handleTailnetDetail</code></td><td>no</td></tr>
-</table></div>
-<h3 id="security-audit-edge-cases-failures">Edge cases &amp; failures</h3>
-<div class="table-wrap"><table>
-<tr><th>Case</th><th>Behaviour</th></tr>
-<tr><td>A candidate finding does not reproduce.</td><td>The finding records the attempt, the command, and the output, and it lowers its severity to reflect the uncertainty.</td></tr>
-<tr><td>The audit finds a defect that is not a security defect.</td><td>The audit records it in a separate <code>Other defects</code> section. Epic 3 does not have to fix it.</td></tr>
-<tr><td>The audit finds a high-severity defect that needs a large change.</td><td>The audit records it. The operator decides whether Epic 3 fixes it or whether it becomes its own epic.</td></tr>
-</table></div>
-<h3 id="security-audit-acceptance-criteria">Acceptance criteria</h3>
+<p>section and names its site page. A section without a page blocks the merge.</p>
+<h3 id="readme-slim-acceptance-criteria">Acceptance criteria</h3>
 <ul>
-<li>[ ] <code>docs/security-audit.md</code> exists and is tracked.
+<li><code>wc -l README.md</code> prints 220 or less.
 </li>
-<li>[ ] Every finding has an identifier, a severity, and a <code>file:line</code> reference.
+<li>The sections of <code>README.md</code> match FR-readme-2 in order.
 </li>
-<li>[ ] The audit lists all ten control API routes and states what each validates.
-</li>
-<li>[ ] The audit lists every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
-</li>
-<li>[ ] The audit states, for the reachability finding, the exact commands it ran on the
+<li>Each absolute site link of the README maps to a file under <code>docs/site/</code>, and a test
 </li>
 </ul>
-<p>test host and their output.</p>
+<p>fails when one does not.</p>
 <ul>
-<li>[ ] The audit records the console threat model as a finding.
+<li>Each repository link of the README names a file that exists.
 </li>
-<li>[ ] The audit states whether an IPv6 firewall gap exists.
-</li>
-<li>[ ] The operator has marked every finding as accepted or deferred.
+<li>The pull request maps every removed README section to a site page.
 </li>
 </ul>
-<h3 id="security-audit-out-of-scope">Out of scope</h3>
+<h3 id="readme-slim-out-of-scope">Out of scope</h3>
 <ul>
-<li>Any code fix. Epic 3 fixes.
-</li>
-<li>A dependency vulnerability scan. The project has six direct dependencies and a
+<li>A new screenshot. The README reuses the screenshots of <code>docs/site/images/</code>.
 </li>
 </ul>
-<p>vendored tree; <code>govulncheck</code> belongs in Epic 3 as a continuous integration step rather than in a manual audit.</p>
-<ul>
-<li>A review of the Tailscale client itself.
-</li>
-</ul>
-<h3 id="security-audit-open-questions" class="callout-h">Open questions</h3>
+<h3 id="readme-slim-open-questions" class="callout-h">Open questions</h3>
 <p>None.</p><nav class="pager">
-<a href="feature-desktop-client-removal.html">&larr; Feature: Desktop client removal and repository hygiene</a>
-<a href="feature-security-fixes.html">Feature: Security fixes &rarr;</a>
+<a href="feature-docs-site.html">&larr; Feature: Documentation site</a>
+<a href="feature-agent-skills-refresh.html">Feature: Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test &rarr;</a>
 </nav>
 </main>
 </div>

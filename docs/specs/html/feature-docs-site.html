@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hydrascale v1.0 — Feature: Security audit</title>
+<title>Hydrascale v1.0 — Feature: Documentation site</title>
 <style>
 :root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
         --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
@@ -132,7 +132,7 @@ body.rv-open .layout { padding-right:21rem; }
 @media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
 </style>
 </head>
-<body data-page="feature-security-audit" data-rvkey="hydrascale-v1">
+<body data-page="feature-docs-site" data-rvkey="hydrascale-v1">
 <div class="layout">
 <aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
 <h2>Spec</h2><ul>
@@ -141,7 +141,7 @@ body.rv-open .layout { padding-right:21rem; }
 <h2>Features</h2><ul>
 <li><a href="feature-foundation.html">Foundation</a></li>
 <li><a href="feature-desktop-client-removal.html">Desktop client removal and repository hygiene</a></li>
-<li><a class="current" href="feature-security-audit.html">Security audit</a></li>
+<li><a href="feature-security-audit.html">Security audit</a></li>
 <li><a href="feature-security-fixes.html">Security fixes</a></li>
 <li><a href="feature-dns-integrity.html">DNS integrity</a></li>
 <li><a href="feature-reachability-model.html">Local reachability model</a></li>
@@ -153,207 +153,397 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="feature-policy-document-model.html">Policy document model</a></li>
 <li><a href="feature-visual-acl-editor.html">Visual ACL editor</a></li>
 <li><a href="feature-visual-policy-advanced.html">Visual policy editor — SSH and advanced constructs</a></li>
-<li><a href="feature-docs-site.html">Documentation site</a></li>
+<li><a class="current" href="feature-docs-site.html">Documentation site</a></li>
 <li><a href="feature-readme-slim.html">A short README that links to the documentation site</a></li>
 <li><a href="feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
 </ul></aside>
 <main>
-<h1>Feature: Security audit</h1>
-<p class="meta">Epic 2: Security audit &nbsp; <span class="badge">built</span></p>
-<h3 id="security-audit-purpose">Purpose</h3>
-<p>The operator believes the daemon has several small authorization defects. The planning survey found four candidates. A guess is not a plan. This feature set produces a written list of findings, so that Epic 3 fixes facts.</p>
-<p>The audit reads code. It does not change code. It ends with the operator choosing which findings Epic 3 fixes.</p>
-<h3 id="security-audit-what-the-survey-already-found">What the survey already found</h3>
-<p>These four are inputs to the audit, not its output. The audit confirms each one and assigns a severity.</p>
-<div class="table-wrap"><table>
-<tr><th>Candidate</th><th>Evidence</th><th>Why it matters</th></tr>
-<tr><td>The host <code>FORWARD</code> chain accepts every packet from a namespace.</td><td><code>internal/namespaces/ns.go:263</code> inserts <code>iptables -I FORWARD 1 -i &lt;hostVeth&gt; -j ACCEPT</code>. There is no destination match and no output interface match.</td><td>A process in one namespace reaches another namespace and the host network. The rule sits above an operator firewall rule because it is inserted at position 1.</td></tr>
-<tr><td>Teardown is best effort.</td><td><code>internal/namespaces/ns.go:297</code> ignores the result of every delete.</td><td>A removed namespace can leave an <code>ACCEPT</code> rule and a <code>MASQUERADE</code> rule on the host.</td></tr>
-<tr><td>The overlay mount failure is silent.</td><td><code>cmd/hydrascale/nsdaemon.go:56</code> prints to standard error and continues.</td><td>The host <code>/etc/resolv.conf</code> file loses its protection and nothing reports it.</td></tr>
-<tr><td>The control API has no authentication.</td><td><code>internal/api/server.go</code> registers eight routes and none checks an identity.</td><td>Membership of <code>socket_group</code> is equivalent to root, and the documentation does not say so.</td></tr>
-</table></div>
-<h3 id="security-audit-user-stories">User stories</h3>
+<h1>Feature: Documentation site</h1>
+<p class="meta">Epic 14: Documentation site &nbsp; <span class="badge">planned</span></p>
+<h3 id="docs-site-purpose">Purpose</h3>
+<p><code>README.md</code> holds 1468 lines. It states what Hydrascale does, how to install it, and then the whole reference: the local rules, the upstream policy, the credentials, host access, DNS, networking, the configuration keys, the command line, the control API, daemon mode, the architecture, the uninstall, and the troubleshooting. An operator who wants one fact scrolls through all of it. The repository also holds a manual under <code>docs/manual/</code>, an upgrade guide, and a security audit that the README does not reach.</p>
+<p>This feature set publishes one documentation site on GitHub Pages. The site holds the operator documentation in sections with a navigation and a search. The README keeps the introduction and links to the site. <code>features/15-readme-slim.md</code> shortens the README.</p>
+<p>The site builds with MkDocs and the Material for MkDocs theme. The theme takes the brand of the console: the lime accent on the warm dark surfaces, Barlow Semi Condensed, and Martian Mono. The site publishes from <code>main</code>, so the site always states the newest release.</p>
+<h3 id="docs-site-user-stories">User stories</h3>
 <ul>
-<li>As the operator, I want a written list of what is wrong, so that I fix the real
+<li>As an operator, I want one page per topic with a search, so that I find a configuration
 </li>
 </ul>
-<p>defects rather than the ones I remember.</p>
+<p>key without a scroll through the README.</p>
 <ul>
-<li>As the operator, I want each finding to have a <code>file:line</code> reference, so that a fix is
+<li>As an operator, I want the documentation of the release that I run, so that the site
 </li>
 </ul>
-<p>unambiguous.</p>
+<p>states no feature that my release lacks.</p>
 <ul>
-<li>As the operator, I want to choose which findings get fixed in this release, so that the
+<li>As an operator, I want the security audit on the site, so that I can judge the daemon
 </li>
 </ul>
-<p>release ships.</p>
-<h3 id="security-audit-functional-requirements">Functional requirements</h3>
+<p>before I install it.</p>
 <ul>
-<li><strong>FR-audit-1</strong> — The audit produces <code>docs/security-audit.md</code>.
-</li>
-<li><strong>FR-audit-2</strong> — Each finding has an identifier of the form <code>SA-&lt;n&gt;</code>.
-</li>
-<li><strong>FR-audit-3</strong> — Each finding has a severity of <code>high</code>, <code>medium</code>, or <code>low</code>.
-</li>
-<li><strong>FR-audit-4</strong> — Each finding has at least one <code>file:line</code> reference.
-</li>
-<li><strong>FR-audit-5</strong> — Each finding states the condition under which it causes harm.
-</li>
-<li><strong>FR-audit-6</strong> — Each finding states whether the audit reproduced it on the test host.
-</li>
-<li><strong>FR-audit-7</strong> — The audit covers every route that <code>internal/api/server.go</code> registers.
-</li>
-<li><strong>FR-audit-8</strong> — The audit covers every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
-</li>
-<li><strong>FR-audit-9</strong> — The audit covers every file mode and every socket mode that the daemon
+<li>As a contributor, I want the build to fail on a broken link, so that a moved page never
 </li>
 </ul>
-<p>sets.</p>
+<p>reaches the site with a dead link.</p>
+<h3 id="docs-site-functional-requirements">Functional requirements</h3>
+<h4 id="docs-site-source-and-build">Source and build</h4>
 <ul>
-<li><strong>FR-audit-10</strong> — The audit covers every path that the daemon builds from configuration
+<li><strong>FR-site-1</strong> — <code>mkdocs.yml</code> at the repository root declares the site.
+</li>
+<li><strong>FR-site-2</strong> — <code>mkdocs.yml</code> sets <code>docs_dir</code> to <code>docs/site</code>.
+</li>
+<li><strong>FR-site-3</strong> — <code>mkdocs.yml</code> sets <code>site_dir</code> to <code>build/site</code>, which <code>.gitignore</code> already
 </li>
 </ul>
-<p>input or from request input.</p>
+<p>ignores through the entry <code>build/</code>.</p>
 <ul>
-<li><strong>FR-audit-11</strong> — The audit covers the teardown path of every resource that the daemon
+<li><strong>FR-site-4</strong> — <code>mkdocs.yml</code> sets <code>site_url</code> to <code>https://crank-git.github.io/Hydrascale/</code>.
+</li>
+<li><strong>FR-site-5</strong> — <code>docs/site/requirements.txt</code> pins <code>mkdocs-material==9.7.7</code>.
+</li>
+<li><strong>FR-site-6</strong> — <code>scripts/docs-build.sh</code> copies the brand font files and the logo from
 </li>
 </ul>
-<p>creates.</p>
+<p><code>internal/ui/static/brand/</code> into <code>docs/site/assets/brand/</code>, then runs <code>mkdocs build --strict</code>.</p>
 <ul>
-<li><strong>FR-audit-12</strong> — The audit records the console threat model as a finding, so that the
+<li><strong>FR-site-7</strong> — <code>.gitignore</code> ignores <code>docs/site/assets/brand/</code>, so the repository
 </li>
 </ul>
-<p>accepted risk is written down.</p>
+<p>holds one copy of each font file and of the logo.</p>
 <ul>
-<li><strong>FR-audit-13</strong> — The audit records whether an IPv6 gap exists in the firewall rules.
-</li>
-<li><strong>FR-audit-14</strong> — The audit states, for each finding, whether Epic 3 fixes it.
+<li><strong>FR-site-8</strong> — <code>scripts/docs-build.sh</code> exits non-zero when <code>mkdocs build --strict</code>
 </li>
 </ul>
-<h3 id="security-audit-user-flows">User flows</h3>
-<h4 id="security-audit-the-audit-runs">The audit runs</h4>
+<p>reports a warning.</p>
+<ul>
+<li><strong>FR-site-9</strong> — The <code>CLAUDE.md</code> command list names <code>scripts/docs-build.sh</code>.
+</li>
+</ul>
+<h4 id="docs-site-navigation-and-pages">Navigation and pages</h4>
+<ul>
+<li><strong>FR-site-10</strong> — The navigation holds these sections, in this order: Home, Get started,
+</li>
+</ul>
+<p>Guides, Concepts, Reference, Operations, Architecture, Security.</p>
+<ul>
+<li><strong>FR-site-11</strong> — Home states what Hydrascale does, shows the Overview screenshot, and
+</li>
+</ul>
+<p>links to Get started.</p>
+<ul>
+<li><strong>FR-site-12</strong> — Get started holds the requirements, the install of a released binary,
+</li>
+</ul>
+<p>the build from source, and the quick start.</p>
+<ul>
+<li><strong>FR-site-13</strong> — Guides holds the console tour, the access editor, the policy editor,
+</li>
+</ul>
+<p>and the visual editor. These are the four pages of <code>docs/manual/</code>.</p>
+<ul>
+<li><strong>FR-site-14</strong> — Guides holds a credentials page, a host access page, and a Headscale
+</li>
+</ul>
+<p>page.</p>
+<ul>
+<li><strong>FR-site-15</strong> — Concepts holds a page for the local rules and their two modes, for the
+</li>
+</ul>
+<p>upstream policy, for DNS, and for networking.</p>
+<ul>
+<li><strong>FR-site-16</strong> — The networking page states IP forwarding, the veth pairs, NAT, direct
+</li>
+</ul>
+<p>connections and the listen port of each namespace, IPv6, and Docker.</p>
+<ul>
+<li><strong>FR-site-17</strong> — Reference holds a page for the configuration file, the command line,
+</li>
+</ul>
+<p>the environment variables, the control API, and the events.</p>
+<ul>
+<li><strong>FR-site-18</strong> — The configuration page states every key that <code>internal/config</code> reads.
+</li>
+<li><strong>FR-site-19</strong> — The events page states every event type that the daemon records.
+</li>
+<li><strong>FR-site-20</strong> — Operations holds a page for daemon mode, remote access, the upgrade,
+</li>
+</ul>
+<p>the uninstall, and the troubleshooting.</p>
+<ul>
+<li><strong>FR-site-21</strong> — The upgrade page holds the content of <code>docs/UPGRADING.md</code>.
+</li>
+<li><strong>FR-site-22</strong> — Architecture holds the architecture diagram and its text.
+</li>
+<li><strong>FR-site-23</strong> — Security holds a page that states that the console has no
+</li>
+</ul>
+<p>authentication, and the controls that reduce the risk.</p>
+<ul>
+<li><strong>FR-site-24</strong> — Security holds the security audit.
+</li>
+<li><strong>FR-site-25</strong> — The site holds no page for <code>docs/DESIGN.md</code> and no page for the
+</li>
+</ul>
+<p>specification.</p>
+<h4 id="docs-site-moved-files">Moved files</h4>
+<ul>
+<li><strong>FR-site-26</strong> — <code>git mv</code> moves <code>docs/manual/*.md</code> into <code>docs/site/guides/</code>.
+</li>
+<li><strong>FR-site-27</strong> — <code>git mv</code> moves <code>docs/images/</code> to <code>docs/site/images/</code>.
+</li>
+<li><strong>FR-site-28</strong> — <code>git mv</code> moves <code>docs/UPGRADING.md</code> to <code>docs/site/operations/upgrade.md</code>.
+</li>
+<li><strong>FR-site-29</strong> — <code>git mv</code> moves <code>docs/security-audit.md</code> to
+</li>
+</ul>
+<p><code>docs/site/security/audit.md</code>.</p>
+<ul>
+<li><strong>FR-site-30</strong> — Every link in the repository that names a moved file names its new
+</li>
+</ul>
+<p>path.</p>
+<h4 id="docs-site-theme">Theme</h4>
+<ul>
+<li><strong>FR-site-31</strong> — <code>mkdocs.yml</code> sets <code>theme.name</code> to <code>material</code> and <code>theme.font</code> to
+</li>
+</ul>
+<p><code>false</code>, so the site loads no font from another host.</p>
+<ul>
+<li><strong>FR-site-32</strong> — <code>docs/site/stylesheets/brand.css</code> declares an <code>@font-face</code> rule for
+</li>
+</ul>
+<p>each file of <code>docs/site/assets/brand/fonts/</code>.</p>
+<ul>
+<li><strong>FR-site-33</strong> — <code>brand.css</code> sets <code>--md-text-font</code> to Barlow Semi Condensed and
+</li>
+</ul>
+<p><code>--md-code-font</code> to Martian Mono.</p>
+<ul>
+<li><strong>FR-site-34</strong> — The site has one colour scheme, which is dark.
+</li>
+<li><strong>FR-site-35</strong> — <code>brand.css</code> sets the page background to <code>#0d0c0b</code>, the body text to
+</li>
+</ul>
+<p><code>#eceae6</code>, and the accent to <code>#c8ff2e</code>.</p>
+<ul>
+<li><strong>FR-site-36</strong> — The accent marks the current navigation entry and nothing else. A link
+</li>
+</ul>
+<p>takes the body colour and an underline, as a link of the console does.</p>
+<ul>
+<li><strong>FR-site-37</strong> — The header shows the lime mark and the wordmark <code>hydrascale</code>.
+</li>
+<li><strong>FR-site-38</strong> — A built page requests no resource from a host other than the site
+</li>
+</ul>
+<p>host. The search runs in the browser.</p>
+<h4 id="docs-site-publish">Publish</h4>
+<ul>
+<li><strong>FR-site-39</strong> — <code>.github/workflows/docs.yml</code> builds the site on a push to <code>main</code>, and
+</li>
+</ul>
+<p>on a manual run.</p>
+<ul>
+<li><strong>FR-site-40</strong> — The workflow deploys <code>build/site</code> with <code>actions/configure-pages@v6</code>,
+</li>
+</ul>
+<p><code>actions/upload-pages-artifact@v5</code>, and <code>actions/deploy-pages@v5</code>.</p>
+<ul>
+<li><strong>FR-site-41</strong> — The deploy job holds the permissions <code>pages: write</code> and
+</li>
+</ul>
+<p><code>id-token: write</code>, and it runs in the environment <code>github-pages</code>.</p>
+<ul>
+<li><strong>FR-site-42</strong> — The publishing source of the repository is GitHub Actions.
+</li>
+<li><strong>FR-site-43</strong> — <code>.github/workflows/ci.yml</code> runs <code>scripts/docs-build.sh</code> on every pull
+</li>
+</ul>
+<p>request, so a broken link fails the pull request and never reaches <code>main</code>.</p>
+<h4 id="docs-site-content-rules">Content rules</h4>
+<ul>
+<li><strong>FR-site-44</strong> — Every page follows <code>.claude/rules/ste.md</code> and the Terms table of
+</li>
+</ul>
+<p><code>docs/specs/spec.md</code>.</p>
+<ul>
+<li><strong>FR-site-45</strong> — Every screenshot on the site shows placeholder data. No screenshot
+</li>
+</ul>
+<p>shows a real tailnet name, a real peer name, or a real tailnet address.</p>
+<ul>
+<li><strong>FR-site-46</strong> — Every page that moves out of <code>README.md</code> keeps the facts of the
+</li>
+</ul>
+<p>README. A fact that the move finds wrong is corrected against the code, and the pull request names the correction.</p>
+<h3 id="docs-site-user-flows">User flows</h3>
+<h4 id="docs-site-flow-1-a-change-reaches-the-site">Flow 1: A change reaches the site</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Contributor edits a page in docs/site] --&gt; B[Pull request into dev]
+  B --&gt; C{ci.yml runs scripts/docs-build.sh}
+  C -- a warning or a broken link --&gt; D[CI fails, the pull request cannot merge]
+  D --&gt; A
+  C -- clean --&gt; E[Merge into dev]
+  E --&gt; F[Release pull request dev into main]
+  F --&gt; G[Merge into main]
+  G --&gt; H[docs.yml builds build/site]
+  H --&gt; I{deploy-pages}
+  I -- success --&gt; J[The site states the new release]
+  I -- failure --&gt; K[The site keeps the last deploy, the workflow run is red]</pre></div>
 <ol>
-<li>The engineer lists every control API route and its handler.
+<li>A contributor edits a page under <code>docs/site/</code>.
 </li>
-<li>The engineer reads each handler and records what it validates.
+<li>The contributor opens a pull request into <code>dev</code>.
 </li>
-<li>The engineer lists every <code>os/exec</code> call and records where each argument comes from.
+<li><code>ci.yml</code> runs <code>scripts/docs-build.sh</code>.
 </li>
-<li>The engineer lists every <code>os.Chmod</code>, <code>os.Chown</code>, <code>os.WriteFile</code>, and <code>syscall.Umask</code>
+<li>If the build reports a warning or a broken link, CI fails and the pull request cannot
 </li>
 </ol>
-<p>call and records the resulting mode.</p>
+<p>merge. The contributor fixes the page.</p>
 <ol>
-<li>The engineer lists every resource that setup creates and checks that teardown removes
+<li>The release pull request merges <code>dev</code> into <code>main</code>.
+</li>
+<li><code>docs.yml</code> builds the site and deploys it.
+</li>
+<li>If the deploy fails, the site keeps the last deploy and the workflow run shows the
 </li>
 </ol>
-<p>it.</p>
+<p>failure.</p>
+<h4 id="docs-site-flow-2-an-operator-finds-a-fact">Flow 2: An operator finds a fact</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Operator opens README.md] --&gt; B[Link table]
+  B --&gt; C[Site section]
+  A2[Operator opens the site] --&gt; D[Search box]
+  D --&gt; E[Search result]
+  C --&gt; F[Page]
+  E --&gt; F
+  F --&gt; G[Fact, with a link to the next page]</pre></div>
 <ol>
-<li>The engineer reproduces each candidate finding on the test host where reproduction is
+<li>The operator opens the README, or the site.
+</li>
+<li>From the README, the operator follows a row of the link table to a site section.
+</li>
+<li>On the site, the operator types into the search box and selects a result.
+</li>
+<li>The page states the fact.
 </li>
 </ol>
-<p>possible.</p>
-<ol>
-<li>The engineer writes <code>docs/security-audit.md</code>.
-</li>
-<li>The operator reads the file and marks each finding as accepted or deferred.
-</li>
-</ol>
-<h4 id="security-audit-the-reachability-finding-is-reproduced">The reachability finding is reproduced</h4>
-<ol>
-<li>The engineer starts the daemon on the test host with two tailnets.
-</li>
-<li>The engineer records the veth address of each namespace from <code>ip addr</code>.
-</li>
-<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; ping -c1 &lt;veth address of b&gt;</code>.
-</li>
-<li>The engineer runs <code>ip netns exec ns-&lt;a&gt; nc -vz &lt;a host on the host local network&gt; 22</code>.
-</li>
-<li>The engineer records the result of each command verbatim in the finding.
-</li>
-</ol>
-<h3 id="security-audit-screens-states">Screens &amp; states</h3>
-<p>This feature set has no screen.</p>
-<h3 id="security-audit-behaviour-rules">Behaviour rules</h3>
+<h3 id="docs-site-screens-states">Screens &amp; states</h3>
+<p>The site uses the page layout of Material for MkDocs: a header, a navigation column, the page, and a table of contents of the page. The brand changes the colours and the fonts, not the layout.</p>
 <ul>
-<li>The audit reads code and runs read-only commands. It changes no source file other than
+<li><strong>Header.</strong> The lime mark, the wordmark, the search box, and a link to the repository.
+</li>
+<li><strong>Navigation.</strong> The eight sections of FR-site-10. The current page is the one accent use
 </li>
 </ul>
-<p><code>docs/security-audit.md</code>.</p>
+<p>of the navigation.</p>
 <ul>
-<li>A finding that the audit cannot reproduce says so. It does not claim a reproduction it
+<li><strong>Search, empty result.</strong> The theme states that no page matches.
+</li>
+<li><strong>Phone.</strong> The theme moves the navigation into a drawer. No page scrolls sideways at
 </li>
 </ul>
-<p>did not perform.</p>
+<p>390 pixels.</p>
+<h3 id="docs-site-behaviour-rules">Behaviour rules</h3>
 <ul>
-<li>The audit quotes command output verbatim. It does not paraphrase evidence.
-</li>
-<li>The audit does not rank a finding by how easy the fix is. Severity describes harm.
+<li>The site publishes from <code>main</code> alone. A page change on <code>dev</code> reaches the site with the
 </li>
 </ul>
-<h3 id="security-audit-data-touched">Data touched</h3>
-<p>No entity changes. The audit adds one document.</p>
-<h3 id="security-audit-interfaces">Interfaces</h3>
-<p>The audit inspects these routes, which <code>internal/api/server.go:47-59</code> registers:</p>
-<div class="table-wrap"><table>
-<tr><th>Method and path</th><th>Handler</th><th>Mutating</th></tr>
-<tr><td><code>/api/status</code></td><td><code>handleStatus</code></td><td>no</td></tr>
-<tr><td><code>/api/events</code></td><td><code>handleEvents</code></td><td>no</td></tr>
-<tr><td><code>/api/reconcile</code></td><td><code>handleReconcile</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/add</code></td><td><code>handleTailnetAdd</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/remove</code></td><td><code>handleTailnetRemove</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/connect</code></td><td><code>handleTailnetConnect</code></td><td>yes</td></tr>
-<tr><td><code>/api/tailnet/disconnect</code></td><td><code>handleTailnetDisconnect</code></td><td>yes</td></tr>
-<tr><td><code>/api/config/dns</code></td><td><code>handleConfigDNS</code></td><td>yes</td></tr>
-<tr><td><code>/api/config</code></td><td><code>handleConfig</code></td><td>yes</td></tr>
-<tr><td><code>GET /api/tailnet/{id}/detail</code></td><td><code>handleTailnetDetail</code></td><td>no</td></tr>
-</table></div>
-<h3 id="security-audit-edge-cases-failures">Edge cases &amp; failures</h3>
-<div class="table-wrap"><table>
-<tr><th>Case</th><th>Behaviour</th></tr>
-<tr><td>A candidate finding does not reproduce.</td><td>The finding records the attempt, the command, and the output, and it lowers its severity to reflect the uncertainty.</td></tr>
-<tr><td>The audit finds a defect that is not a security defect.</td><td>The audit records it in a separate <code>Other defects</code> section. Epic 3 does not have to fix it.</td></tr>
-<tr><td>The audit finds a high-severity defect that needs a large change.</td><td>The audit records it. The operator decides whether Epic 3 fixes it or whether it becomes its own epic.</td></tr>
-</table></div>
-<h3 id="security-audit-acceptance-criteria">Acceptance criteria</h3>
+<p>next release.</p>
 <ul>
-<li>[ ] <code>docs/security-audit.md</code> exists and is tracked.
+<li>The site holds one version: the newest release. It holds no version selector.
 </li>
-<li>[ ] Every finding has an identifier, a severity, and a <code>file:line</code> reference.
-</li>
-<li>[ ] The audit lists all ten control API routes and states what each validates.
-</li>
-<li>[ ] The audit lists every <code>os/exec</code> call site in <code>cmd/</code> and <code>internal/</code>.
-</li>
-<li>[ ] The audit states, for the reachability finding, the exact commands it ran on the
+<li>A page states a command, a key, and a path in the mono typeface, inside backticks.
 </li>
 </ul>
-<p>test host and their output.</p>
+<h3 id="docs-site-data-touched">Data touched</h3>
+<p>No data of the daemon. The repository gains <code>mkdocs.yml</code>, <code>docs/site/</code>, <code>scripts/docs-build.sh</code>, and <code>.github/workflows/docs.yml</code>, and the moved files of FR-site-26 to FR-site-29.</p>
+<h3 id="docs-site-interfaces">Interfaces</h3>
 <ul>
-<li>[ ] The audit records the console threat model as a finding.
-</li>
-<li>[ ] The audit states whether an IPv6 firewall gap exists.
-</li>
-<li>[ ] The operator has marked every finding as accepted or deferred.
+<li><strong>MkDocs and Material for MkDocs.</strong> Package <code>mkdocs-material</code> version 9.7.7, which
 </li>
 </ul>
-<h3 id="security-audit-out-of-scope">Out of scope</h3>
+<p>requires <code>mkdocs&gt;=1.6,&lt;2</code> and Python 3.8 or later (<code>https://pypi.org/pypi/mkdocs-material/json</code>, read 2026-10-07). <code>theme.font: false</code> stops the Google Fonts request, and the custom properties <code>--md-text-font</code> and <code>--md-code-font</code> set the fonts (<code>https://squidfunk.github.io/mkdocs-material/setup/changing-the-fonts/</code>, read 2026-10-07).</p>
 <ul>
-<li>Any code fix. Epic 3 fixes.
-</li>
-<li>A dependency vulnerability scan. The project has six direct dependencies and a
+<li><strong>GitHub Pages from a custom workflow.</strong> The publishing source is GitHub Actions. The
 </li>
 </ul>
-<p>vendored tree; <code>govulncheck</code> belongs in Epic 3 as a continuous integration step rather than in a manual audit.</p>
+<p>deploy job needs <code>pages: write</code> and <code>id-token: write</code>, and the environment <code>github-pages</code> (<code>https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages</code>, read 2026-10-07). The newest releases on 2026-10-07 are <code>actions/configure-pages</code> v6.0.0, <code>actions/upload-pages-artifact</code> v5.0.0, <code>actions/deploy-pages</code> v5.0.1, and <code>actions/setup-python</code> v7.0.0. <code>.github/workflows/release.yml</code> pins each action to the newest major version for the same reason.</p>
 <ul>
-<li>A review of the Tailscale client itself.
+<li><strong>Enable Pages.</strong> The repository has no Pages site on 2026-10-07
 </li>
 </ul>
-<h3 id="security-audit-open-questions" class="callout-h">Open questions</h3>
+<p>(<code>GET /repos/Crank-Git/Hydrascale/pages</code> returns 404). The operator, or the worker with the operator's consent, creates it with <code>gh api -X POST repos/Crank-Git/Hydrascale/pages -f build_type=workflow</code>.</p>
+<h3 id="docs-site-edge-cases-failures">Edge cases &amp; failures</h3>
+<ul>
+<li><strong>A page links to a moved file.</strong> <code>mkdocs build --strict</code> fails on the dead link, and
+</li>
+</ul>
+<p>CI fails the pull request.</p>
+<ul>
+<li><strong>A brand font file changes name.</strong> <code>scripts/docs-build.sh</code> copies the directory, and
+</li>
+</ul>
+<p><code>brand.css</code> names each file. A test compares the two lists.</p>
+<ul>
+<li><strong>The deploy fails after a release.</strong> The site keeps the last deploy. The release is
+</li>
+</ul>
+<p>not blocked, because the release workflow and the docs workflow are separate.</p>
+<ul>
+<li><strong>A screenshot holds real data.</strong> The review of the pull request refuses it, per
+</li>
+</ul>
+<p>FR-site-45.</p>
+<h3 id="docs-site-acceptance-criteria">Acceptance criteria</h3>
+<ul>
+<li><code>scripts/docs-build.sh</code> exits 0 on a fresh clone, and <code>build/site/index.html</code> exists.
+</li>
+<li>A page that links to a missing file makes <code>scripts/docs-build.sh</code> exit non-zero.
+</li>
+<li><code>https://crank-git.github.io/Hydrascale/</code> serves the site after the first merge into
+</li>
+</ul>
+<p><code>main</code> that holds this feature.</p>
+<ul>
+<li>The navigation shows the eight sections of FR-site-10 in order.
+</li>
+<li>A search for <code>route_table</code> returns the configuration page.
+</li>
+<li>The configuration page names every key of <code>internal/config</code>. A test lists the keys of
+</li>
+</ul>
+<p>the configuration struct and fails when the page omits one.</p>
+<ul>
+<li><code>build/site</code> holds no reference to <code>fonts.googleapis.com</code> and no <code>&lt;script&gt;</code> or
+</li>
+</ul>
+<p><code>&lt;link&gt;</code> element whose URL names another host.</p>
+<ul>
+<li><code>docs/manual/</code>, <code>docs/images/</code>, <code>docs/UPGRADING.md</code>, and <code>docs/security-audit.md</code> no
+</li>
+</ul>
+<p>longer exist, and no file of the repository links to them.</p>
+<ul>
+<li>At 390 pixels no page scrolls sideways.
+</li>
+</ul>
+<h3 id="docs-site-out-of-scope">Out of scope</h3>
+<ul>
+<li>A version selector, and a page per older release.
+</li>
+<li>A custom domain.
+</li>
+<li>A blog, a changelog page, and translations.
+</li>
+<li>A page for <code>docs/DESIGN.md</code> or for the specification.
+</li>
+</ul>
+<h3 id="docs-site-open-questions" class="callout-h">Open questions</h3>
 <p>None.</p><nav class="pager">
-<a href="feature-desktop-client-removal.html">&larr; Feature: Desktop client removal and repository hygiene</a>
-<a href="feature-security-fixes.html">Feature: Security fixes &rarr;</a>
+<a href="feature-visual-policy-advanced.html">&larr; Feature: Visual policy editor — SSH and advanced constructs</a>
+<a href="feature-readme-slim.html">Feature: A short README that links to the documentation site &rarr;</a>
 </nav>
 </main>
 </div>
