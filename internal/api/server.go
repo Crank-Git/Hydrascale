@@ -374,7 +374,7 @@ func nameInUse(cfg *config.Config, name string) bool {
 // handleTailnetAdd serves POST /api/tailnet/add.
 // The route validates the whole body before it writes the configuration file.
 // The route writes the auth key into /etc/hydrascale/config.yaml, which the secrets file
-// of Epic 3 replaces. See SA-36 in docs/security-audit.md.
+// of Epic 3 replaces. See SA-36 in docs/site/security/audit.md.
 func (s *Server) handleTailnetAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

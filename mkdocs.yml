@@ -36,9 +36,18 @@ plugins:
 nav:
   - Home: index.md
   - Get started: get-started/index.md
-  - Guides: guides/index.md
+  - Guides:
+      - guides/index.md
+      - guides/first-run.md
+      - guides/access-editor.md
+      - guides/policy-editor.md
+      - guides/policy-visual-editor.md
   - Concepts: concepts/index.md
   - Reference: reference/index.md
-  - Operations: operations/index.md
+  - Operations:
+      - operations/index.md
+      - operations/upgrade.md
   - Architecture: architecture/index.md
-  - Security: security/index.md
+  - Security:
+      - security/index.md
+      - security/audit.md

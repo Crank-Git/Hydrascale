@@ -1,7 +1,7 @@
 # Hydrascale console E2E suite
 
 This suite drives a real browser against a running console with Playwright. It covers
-the happy paths that [`docs/manual`](../docs/manual) documents.
+the happy paths that [`docs/site/guides`](../docs/site/guides) documents.
 
 ## Setup
 
@@ -38,13 +38,13 @@ HYDRASCALE_E2E_BASE_URL=http://127.0.0.1:9443 npm run test:e2e
   and its live entry count, and opening each without an error), staging an SSH access
   rule and discarding it, adding a test and running it against the control server,
   staging a posture, and confirming that a failing test keeps Push disabled. See
-  `docs/manual/policy-visual-editor.md`.
+  `docs/site/guides/policy-visual-editor.md`.
 
 Neither `tests/policy-editor.spec.js` nor `tests/policy-visual-editor.spec.js` clicks
 Push: the sandbox's tailnets are real tailnets, and a push changes what every device in
 the tailnet reaches. The suite also adds no test for the line-number gutter's
 scroll-sync with the document text, because this review could not confirm that
-behaviour either way. See `docs/manual/policy-editor.md`.
+behaviour either way. See `docs/site/guides/policy-editor.md`.
 
 ### Skipped tests, and the review finding each names
 
