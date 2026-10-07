@@ -98,9 +98,13 @@ with a dash. It keeps the tailnet identifier as the configuration file writes it
 
 The daemon removes the host access state in three cases.
 
-If the operator sets `host_access: false` for a tailnet, the daemon removes the
-masquerade rule and the DNS DNAT rules inside the namespace. The host routes and the
-names of the peers stay until the tailnet goes away, or until the daemon stops.
+If the operator sets `host_access: false` for a tailnet, the daemon removes:
+
+- Every host route of the peers of that tailnet.
+- The masquerade rule and the DNS DNAT rules inside the namespace.
+- The entries of that tailnet in `/etc/hosts`, or its `systemd-resolved` registration.
+
+The namespace stays, and the other tailnets keep their routes and names.
 
 If the operator removes a tailnet from the configuration file, the daemon removes:
 
