@@ -39,6 +39,23 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # The documentation site builds before the Go tests, because the tests of
+      # scripts/docs_build_test.go need mkdocs on the path. GitHub Actions sets CI, so
+      # those tests fail rather than skip when mkdocs is absent.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: docs/site/requirements.txt
+
+      - name: Install the documentation site tools
+        run: pip install -r docs/site/requirements.txt
+
+      - name: Build the documentation site
+        # mkdocs build --strict fails on a warning, such as a link to a missing page,
+        # so a broken link fails the pull request (FR-site-43).
+        run: scripts/docs-build.sh
+
       - name: Test with race detector
         # The runner image ubuntu-latest provides node, and TestTheConsoleJavaScriptTestsPass
         # in internal/ui runs the console JavaScript tests of internal/ui/jstest with it.

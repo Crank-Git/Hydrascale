@@ -42,6 +42,10 @@ CLAUDE.local.md
 # internal/ui/static/brand/ (see docs/specs/features/01-desktop-client-removal.md).
 branding/
 
+# scripts/docs-build.sh copies the brand fonts and the lime mark here from
+# internal/ui/static/brand/, so the repository holds one copy of each file.
+docs/site/assets/brand/
+
 # Impeccable design tool state. The committed design authority is docs/DESIGN.md.
 /PRODUCT.md
 .impeccable/

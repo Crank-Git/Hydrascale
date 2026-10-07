@@ -1,0 +1,40 @@
+# The documentation site. docs/specs/features/14-docs-site.md specifies it.
+# scripts/docs-build.sh builds it, and docs/site/requirements.txt pins the theme.
+site_name: hydrascale
+site_url: https://crank-git.github.io/Hydrascale/
+docs_dir: docs/site
+site_dir: build/site
+
+theme:
+  name: material
+  # docs/theme/partials/header.html replaces the repository link of the theme.
+  custom_dir: docs/theme
+  # The theme loads no font from Google Fonts. docs/site/stylesheets/brand.css declares
+  # the brand fonts, which scripts/docs-build.sh copies into docs/site/assets/brand/.
+  font: false
+  logo: assets/brand/logo-lime.svg
+  favicon: assets/brand/logo-lime.svg
+  # A mapping, not a list, so the header shows no toggle for the colour scheme.
+  palette:
+    scheme: slate
+
+extra_css:
+  - stylesheets/brand.css
+
+# The site sets no repo_url, because the theme then requests the repository facts from
+# api.github.com. The header shows this URL as a plain link.
+extra:
+  repository: https://github.com/Crank-Git/Hydrascale
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Get started: get-started/index.md
+  - Guides: guides/index.md
+  - Concepts: concepts/index.md
+  - Reference: reference/index.md
+  - Operations: operations/index.md
+  - Architecture: architecture/index.md
+  - Security: security/index.md
