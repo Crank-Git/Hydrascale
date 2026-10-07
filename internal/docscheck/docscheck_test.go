@@ -43,7 +43,7 @@ func TestEventTypesReadsEachLiteralAndEachEventConstant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EventTypes: %v", err)
 	}
-	want := []string{"sample.constant", "sample.literal"}
+	want := []string{"sample.constant", "sample.literal", "sample.recorded"}
 	if !slices.Equal(got, want) {
 		t.Errorf("EventTypes returns %q, want %q", got, want)
 	}

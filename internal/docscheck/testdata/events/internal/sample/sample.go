@@ -12,8 +12,11 @@ type recorder struct{}
 
 func (recorder) emit(eventType, tailnetID, message string) {}
 
+func (recorder) RecordEvent(eventType, tailnetID, message string) {}
+
 func (r recorder) run(eventType string) {
 	r.emit("sample.literal", "", "")
 	r.emit(eventType, "", "")
 	r.emit(EventSampleConstant, "", "")
+	r.RecordEvent("sample.recorded", "", "")
 }

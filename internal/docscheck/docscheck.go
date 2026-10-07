@@ -60,11 +60,12 @@ func collectKeys(t reflect.Type, prefix string, keys *[]string) {
 // duplicate.
 // root is the repository root. EventTypes parses each Go file under root/internal and
 // skips each test file. An event type is one of these:
-//   - The string literal that is the first argument of a call to a method named emit.
+//   - The string literal that is the first argument of a call to a method named emit or
+//     RecordEvent. The control API records an event through RecordEvent.
 //   - The string literal value of a constant whose name holds "Event".
 //
 // EventTypes skips a call whose first argument is not a string literal, such as
-// emit(eventType, ...), because a caller passes a constant or a literal to that call.
+// emit(eventType, ...), because the caller passes a constant or a literal to that call.
 // EventTypes returns an error when the directory does not exist or a file does not parse.
 func EventTypes(root string) ([]string, error) {
 	seen := map[string]bool{}
@@ -89,7 +90,7 @@ func EventTypes(root string) ([]string, error) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.CallExpr:
-				if sel, ok := node.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "emit" && len(node.Args) > 0 {
+				if sel, ok := node.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "emit" || sel.Sel.Name == "RecordEvent") && len(node.Args) > 0 {
 					if value, ok := stringLiteral(node.Args[0]); ok {
 						seen[value] = true
 					}
