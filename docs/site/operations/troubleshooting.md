@@ -4,6 +4,10 @@ Each entry states a symptom, its cause, and the steps that correct it. Read the 
 first: `sudo journalctl -u hydrascale -n 50` shows the last 50 lines of the log. The
 [Events](../reference/events.md) page states each event type.
 
+A search of the log reads only the last day, with `--since "-1d"`. A search of the whole
+log can take a minute on a host that ran for months. If the event is older than one day,
+use a longer range, such as `--since "-7d"`.
+
 ## `bind: address in use` for the control socket
 
 A daemon that crashed left the socket file. Delete it and start again:
@@ -19,7 +23,7 @@ Read the log for the bind address. The daemon refuses a `console.bind_address` t
 a loopback host and a port, and it refuses a port that another process holds:
 
 ```bash
-sudo journalctl -u hydrascale | grep console
+sudo journalctl -u hydrascale --since "-1d" | grep console
 ```
 
 ## A tailnet cannot reach the internet after an upgrade to version 1.0
@@ -73,12 +77,12 @@ sudo chmod 0600 /etc/hydrascale/secrets.yaml
 Read the reason that the daemon records:
 
 ```bash
-sudo journalctl -u hydrascale | grep ipv6.state
+sudo journalctl -u hydrascale --since "-1d" | grep ipv6.state
 ```
 
 `the host holds no IPv6 default route` means the host has no IPv6 upstream.
-`the kernel holds no force_forwarding` means the kernel is older than Linux 6.17; add
-`ipv6: true` to the configuration file. See [the configuration file](../reference/configuration.md).
+`the kernel holds no force_forwarding, and the configuration file does not set ipv6: true`
+means the kernel is older than Linux 6.17. Add `ipv6: true` to the configuration file. See [the configuration file](../reference/configuration.md).
 
 ## `tailscale ping` reports `direct connection not established`
 
@@ -137,6 +141,41 @@ Look for a `DROP` rule before the jump rule of Hydrascale, and remove it or move
 daemon records the event `access.jump_displaced` when another rule moves its jump rule
 down. See [Events](../reference/events.md).
 
+## A rule of another service comes before the jump rule
+
+The daemon inserts its jump rule at position 1 of `FORWARD` and of `INPUT`. The chains
+`ts-forward`, `DOCKER-USER`, and `DOCKER-FORWARD` each take position 1 when the
+`tailscaled` of the host or Docker starts after the daemon. The daemon then records the
+event `access.jump_displaced`:
+
+```
+the jump rule of FORWARD is at position 3, below DOCKER-USER, DOCKER-FORWARD
+```
+
+The daemon moves no rule of the operator, so it does not move its jump rule back. The
+position is a fault only when a rule above the jump rule ends the path of a packet of a
+namespace. Read each chain that the message names:
+
+```bash
+sudo iptables -S FORWARD
+sudo iptables -S DOCKER-USER
+```
+
+An `ACCEPT` or a `DROP` that matches the packet ends the path before the local rules apply.
+A chain that returns each packet is not a fault.
+
+**Warning — a wrong position deletes a rule of the operator.** Read the position `<n>` of
+the jump rule from the event first. To put the jump rule back at position 1, insert a
+second jump rule and delete the old one, which is then at position `<n+1>`:
+
+```bash
+sudo iptables -I FORWARD 1 -j HYDRASCALE-FWD
+sudo iptables -D FORWARD <n+1>
+```
+
+For `INPUT`, use `INPUT` and `HYDRASCALE-OUT`. For IPv6, use `ip6tables`. The other
+service takes position 1 again when it starts again.
+
 ## The infra subnet collides with a route
 
 When `10.200.0.0/16` overlaps a route on the host, the veth setup fails or the traffic goes
@@ -183,7 +222,7 @@ Linux limit of 15 characters. Install the current release, which uses the hash n
 First read the log for `refresh_dns` after `start_daemon` on that tailnet:
 
 ```bash
-journalctl -u hydrascale | grep -E 'start_daemon|refresh_dns'
+journalctl -u hydrascale --since "-1d" | grep -E 'start_daemon|refresh_dns'
 ```
 
 When `refresh_dns` is absent or timed out, `tailscaled` never reached

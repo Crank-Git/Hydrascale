@@ -332,6 +332,24 @@ func TestSkillsInstall(t *testing.T) {
 			}
 		}
 	})
+
+	// FR-refresh-16 names the three skills, so the test names them rather than reading
+	// the embedded set, which would pass with a skill missing.
+	t.Run("writes the three skill directories that dir names", func(t *testing.T) {
+		asOperator(t)
+		t.Setenv("HOME", t.TempDir())
+		target := filepath.Join(t.TempDir(), "elsewhere")
+
+		if _, err := runSkills(t, "install", "--dir", target); err != nil {
+			t.Fatalf("skills install --dir = %v, want no error", err)
+		}
+		for _, name := range []string{"hydrascale-setup", "hydrascale-troubleshoot", "tailnet-exec"} {
+			path := filepath.Join(target, name, "SKILL.md")
+			if _, statErr := os.Stat(path); statErr != nil {
+				t.Errorf("os.Stat(%q) = %v, want no error", path, statErr)
+			}
+		}
+	})
 }
 
 func TestSkillsList(t *testing.T) {

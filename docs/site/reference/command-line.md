@@ -50,8 +50,10 @@ Each command that takes a `<tailnet-id>` also takes the `alias` of that tailnet.
 is unique, and it is the identifier of no tailnet. `hydrascale list` prints the alias, and
 `hydrascale status` shows it in the column `ALIAS`.
 
-`env` reads the configuration file to resolve an alias. On a host where only root can read
-`/etc/hydrascale`, run `sudo hydrascale env <tailnet-id>`.
+The commands `exec`, `ping`, `ssh`, `tailscale`, `wrap`, and `env` read the configuration
+file to resolve the `<tailnet-id>` argument, which is an identifier or an alias. If only
+root can read `/etc/hydrascale`, the command stops with an error that names the file. Run
+the command with `sudo` in that case, such as `sudo hydrascale env <tailnet-id>`.
 
 ## The routing forms
 

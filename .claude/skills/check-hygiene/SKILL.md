@@ -9,8 +9,9 @@ allowed-tools: Bash, Read
 This repository is public. A secret, a private note, or a compiled binary in a tracked
 file is visible to everyone and it stays in the history.
 
-Epic 1 adds `scripts/check-hygiene.sh` and continuous integration runs it. Until that
-script exists, run the checks below by hand.
+`scripts/check-hygiene.sh` holds the checks. The CI step "Repository hygiene" of
+`.github/workflows/ci.yml` runs it on each push to `dev` or `main` and on each pull request into them. Run the script
+before you push. Use the checks by hand to read one match more closely.
 
 ## Run the script
 
