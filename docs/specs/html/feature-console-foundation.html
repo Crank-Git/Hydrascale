@@ -239,7 +239,7 @@ body.rv-open .layout { padding-right:21rem; }
 <li><strong>FR-console-10</strong> — The daemon records an event for every mutating request that it
 </li>
 </ul>
-<p>serves on the console listener.</p>
+<p>serves on the console listener. <code>POST /api/policy/{id}/sections</code> parses a document and changes no state, so the daemon records no event for it.</p>
 <ul>
 <li><strong>FR-console-11</strong> — The daemon logs the console listener address at start, with the
 </li>

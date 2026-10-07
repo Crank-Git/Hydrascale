@@ -61,7 +61,8 @@ access view.
   whose host is not a loopback host. The route accepts a loopback host on any port,
   because an SSH forward gives the browser a local port that is not the console port.
 - **FR-console-10** — The daemon records an event for every mutating request that it
-  serves on the console listener.
+  serves on the console listener. `POST /api/policy/{id}/sections` parses a document and
+  changes no state, so the daemon records no event for it.
 - **FR-console-11** — The daemon logs the console listener address at start, with the
   statement that the console has no authentication.
 
