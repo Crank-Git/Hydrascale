@@ -60,12 +60,12 @@ alias too.
 
 A routing form reads the configuration file to resolve the alias. The form reads the
 file also when you name the ID. The form therefore needs read access to
-`/etc/hydrascale`, and on most hosts only root can read that directory. When the form
+`/etc/hydrascale`. When the form
 cannot read the file, it fails with an error that tells you to
 "run the command with sudo". Print the form with `sudo` for the operator.
 
-When the configuration file names no tailnet that matches, the form uses the argument as
-the ID. `ip netns exec` then reports the namespace that it cannot find.
+When no tailnet of the configuration file matches, the form uses the argument as the ID.
+If no namespace has that ID, `ip netns exec` reports the namespace that it cannot find.
 
 ## The separator `--`
 
