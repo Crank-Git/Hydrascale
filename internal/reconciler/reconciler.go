@@ -758,12 +758,20 @@ func (r *Reconciler) executeAction(action Action) error {
 	case ActionTeardownHostAccess:
 		nsName := r.ns.GetName(action.TailnetID)
 		index := namespaces.VethIndex(nsName)
+		// A step that fails does not stop the remaining steps. The operator decided on
+		// #444 that the host routes and the names go away together with the rules.
+		var errs []error
 		if err := r.teardownHostAccess(nsName, index, r.infraSubnet); err != nil {
-			return r.reportTeardown(action.TailnetID, []error{
-				fmt.Errorf("remove the host access rules of %s: %w", nsName, err)})
+			errs = append(errs, fmt.Errorf("remove the host access rules of %s: %w", nsName, err))
+		} else {
+			r.setHostAccessRules(action.TailnetID, false)
 		}
-		r.setHostAccessRules(action.TailnetID, false)
-		return nil
+		if r.ha != nil {
+			if err := r.ha.Teardown(action.TailnetID); err != nil {
+				errs = append(errs, fmt.Errorf("remove the host access state of %s: %w", action.TailnetID, err))
+			}
+		}
+		return r.reportTeardown(action.TailnetID, errs)
 	case ActionStartDaemon:
 		// Belt-and-braces: ensure the namespace's resolv.conf bind-mount
 		// override exists before tailscaled launches. ActionCreateNS already
@@ -1194,10 +1202,11 @@ func (r *Reconciler) reapStaleRules() {
 
 // removeLegacyRules removes the two FORWARD rules that version 0.9 wrote for each host veth
 // device.
-// removeLegacyRules runs only after a write in the mode enforce, because those rules are the
-// only path that accepts the traffic of a namespace until HYDRASCALE-FWD holds the rules of
-// the operator. The mode observe writes a chain that accepts nothing and drops nothing,
-// therefore a removal in that mode stops every namespace.
+// removeLegacyRules runs only after a write in the mode enforce. Version 0.9 rules were the
+// only path that accepted the traffic of a namespace until HYDRASCALE-FWD held the rules of
+// the operator. Since #239, the tail of the mode observe logs and then accepts each packet
+// that no rule allows (access.ObserveTail). Before #239, that tail returned the packet to
+// FORWARD, therefore a removal in the mode observe stopped every namespace.
 func (r *Reconciler) removeLegacyRules() {
 	if r.reaper == nil {
 		return

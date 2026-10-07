@@ -5,12 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
+	"hydrascale/internal/execx"
 	"hydrascale/internal/hostaccess"
 )
 
@@ -132,6 +134,88 @@ func TestDeleteNamespaceRemovesTheNamesOfTheTailnetFromTheHostsFile(t *testing.T
 	}
 	if strings.Contains(string(after), "corp-laptop") {
 		t.Errorf("the hosts file still holds a name of the removed tailnet:\n%s", after)
+	}
+}
+
+// hostAccessTeardownFixture returns a reconciler whose host access manager holds the
+// tailnets corp and home, and a Recorder that answers the route commands of a teardown.
+// The host route table holds one peer route on the veth device of each tailnet, so the
+// Recorder fails the test when the teardown removes a route of home.
+func hostAccessTeardownFixture(t *testing.T) (*Reconciler, *execx.Recorder, string) {
+	t.Helper()
+	hostsPath := filepath.Join(t.TempDir(), "hosts")
+	ha := hostaccess.NewManager("hosts", hostsPath, "10.200.0.0/16", 0)
+	ha.Runner = silentRunner{}
+	ha.Sync("corp", statusWithPeer("corp.ts.net", "laptop", "100.64.0.1"), "10.200.0.2", "vh001", "10.200.0.1", "ns-corp")
+	ha.Sync("home", statusWithPeer("home.ts.net", "server", "100.64.1.1"), "10.200.0.6", "vh002", "10.200.0.5", "ns-home")
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{Output: []byte(
+		"100.64.0.1 via 10.200.0.1 dev vh001\n100.64.1.1 via 10.200.0.5 dev vh002\n")},
+		"ip", "route", "show")
+	rec.Script(execx.Result{}, "ip", "-6", "route", "show")
+	rec.Script(execx.Result{}, "ip", "route", "del", "100.64.0.1")
+	ha.Runner = rec
+
+	cfgPath := writeHostAccessConfig(t, "corp", false)
+	r := New(cfgPath, newMockNS(), newMockDaemon(), newMockRouting(), time.Second, ha, "10.200.0.0/16")
+	return r, rec, hostsPath
+}
+
+// routeDeletes returns the destination of each `ip route del` command that rec recorded.
+func routeDeletes(rec *execx.Recorder) []string {
+	var dests []string
+	for _, c := range rec.Calls() {
+		if c.Name == "ip" && len(c.Args) == 3 && c.Args[0] == "route" && c.Args[1] == "del" {
+			dests = append(dests, c.Args[2])
+		}
+	}
+	return dests
+}
+
+func TestHostAccessTeardownRemovesTheHostRoutesAndNamesOfThatTailnetOnly(t *testing.T) {
+	r, rec, hostsPath := hostAccessTeardownFixture(t)
+	r.teardownHostAccess = func(nsName string, index int, infraSubnet string) error { return nil }
+
+	if err := r.executeAction(Action{Type: ActionTeardownHostAccess, TailnetID: "corp"}); err != nil {
+		t.Fatalf("executeAction: %v", err)
+	}
+
+	if got := routeDeletes(rec); !slices.Equal(got, []string{"100.64.0.1"}) {
+		t.Errorf("route removals = %v, want [100.64.0.1]", got)
+	}
+	hosts, err := os.ReadFile(hostsPath)
+	if err != nil {
+		t.Fatalf("read the hosts file: %v", err)
+	}
+	if strings.Contains(string(hosts), "corp-laptop") {
+		t.Errorf("the hosts file still holds a name of corp:\n%s", hosts)
+	}
+	if !strings.Contains(string(hosts), "home-server") {
+		t.Errorf("the hosts file lost a name of home:\n%s", hosts)
+	}
+}
+
+func TestHostAccessTeardownRemovesTheHostRoutesWhenTheRuleRemovalFails(t *testing.T) {
+	r, rec, _ := hostAccessTeardownFixture(t)
+	r.teardownHostAccess = func(nsName string, index int, infraSubnet string) error {
+		return errors.New("iptables: Permission denied")
+	}
+	rec.Script(execx.Result{Err: errors.New("RTNETLINK answers: Operation not permitted")},
+		"ip", "route", "del", "100.64.0.1")
+
+	err := r.executeAction(Action{Type: ActionTeardownHostAccess, TailnetID: "corp"})
+
+	if got := routeDeletes(rec); !slices.Equal(got, []string{"100.64.0.1"}) {
+		t.Errorf("route removals = %v, want [100.64.0.1]", got)
+	}
+	for _, want := range []string{"iptables: Permission denied", "Operation not permitted"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("executeAction error = %v, want it to name %q", err, want)
+		}
+		if !hasEvent(r, "teardown.failed", want) {
+			t.Errorf("no teardown.failed names %q: %v", want, r.Events())
+		}
 	}
 }
 
