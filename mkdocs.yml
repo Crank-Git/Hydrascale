@@ -35,14 +35,26 @@ plugins:
 
 nav:
   - Home: index.md
-  - Get started: get-started/index.md
+  - Get started:
+      - get-started/index.md
+      - get-started/requirements.md
+      - get-started/install.md
+      - get-started/quick-start.md
   - Guides:
       - guides/index.md
       - guides/first-run.md
       - guides/access-editor.md
       - guides/policy-editor.md
       - guides/policy-visual-editor.md
-  - Concepts: concepts/index.md
+      - guides/credentials.md
+      - guides/host-access.md
+      - guides/headscale.md
+  - Concepts:
+      - concepts/index.md
+      - concepts/local-rules.md
+      - concepts/upstream-policy.md
+      - concepts/dns.md
+      - concepts/networking.md
   - Reference: reference/index.md
   - Operations:
       - operations/index.md
