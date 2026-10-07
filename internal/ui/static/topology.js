@@ -107,19 +107,23 @@ export function reconcilerState(status) {
 }
 
 /**
- * credentialOf returns the upstream policy credential problem of one tailnet as a dot
- * tone and its reason, word for word, and null when the credential is usable or the poll
- * holds no policy entry for the tailnet yet.
+ * credentialOf returns the upstream policy credential fault of one tailnet as a dot tone
+ * and its reason, word for word. It returns null when the credential is usable, when the
+ * tailnet holds no credential, or when the poll holds no policy entry for the tailnet yet.
  *
  * status.policy is the field that fetchConsoleState merges from GET /api/policy. Local
  * reachability and upstream policy are two independent systems (see
  * docs/specs/features/08-upstream-policy.md), so this state never replaces reachabilityOf;
  * it is a second, additional signal on the node. See issue #287.
+ *
+ * A credential is optional, so an absent credential is not a fault and the node draws no
+ * red dot for it. The board of the overview states it in the policy column. A red dot on
+ * a node therefore always means a fault: a credential that the control server rejected.
  */
 function credentialOf(status, id) {
   const entries = (status && status.policy) || [];
   const entry = entries.find((tailnet) => tailnet.id === id);
-  if (!entry || entry.credential_state === "usable") {
+  if (!entry || entry.credential_state !== "rejected") {
     return null;
   }
   return { tone: "crit", reason: entry.reason || "" };
@@ -392,7 +396,7 @@ export function topologySVGMarkup(model, selected, options = {}) {
         ` aria-pressed="${pressed}" aria-label="${esc(label)}">`,
     );
     parts.push(
-      `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="12"></rect>`,
+      `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}"></rect>`,
     );
     parts.push(`<text class="n" x="${node.x + 18}" y="${node.y + 21}">${esc(node.id)}</text>`);
     if (node.kind === "tailnet") {

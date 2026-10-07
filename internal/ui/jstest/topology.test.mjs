@@ -383,21 +383,26 @@ test("the topology escapes every value that the daemon reports", () => {
   assert.ok(markup.includes("a&lt;b"));
 });
 
-test("a tailnet with no usable policy credential carries a second state on its node, and reachable does not change", () => {
+test("a tailnet whose credential the control server rejected carries a second state on its node, and reachable does not change", () => {
   // Issue #287. Local reachability and upstream policy are two independent systems, so
-  // the topology draws the credential problem beside reachable rather than in place of it.
+  // the topology draws the credential fault beside reachable rather than in place of it.
+  // A credential is optional, so an absent credential is not a fault and draws no dot; the
+  // board of the overview states it in the policy column.
   const status = statusWith({
     havoc: { reach: { state: "reachable" } },
     jbones: { reach: { state: "reachable" } },
+    tomb: { reach: { state: "reachable" } },
   });
   status.policy = [
-    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+    { id: "havoc", kind: "tailscale", credential_state: "rejected", reason: "the control server rejected the credential of \"havoc\"" },
     { id: "jbones", kind: "tailscale", credential_state: "usable" },
+    { id: "tomb", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"tomb\" has no Tailscale OAuth credential" },
   ];
   const access = accessWith(
     [
       { id: "havoc", peers: 1, veth: "10.99.0.2" },
       { id: "jbones", peers: 1, veth: "10.99.0.6" },
+      { id: "tomb", peers: 1, veth: "10.99.0.10" },
     ],
     [],
   );
@@ -405,12 +410,14 @@ test("a tailnet with no usable policy credential carries a second state on its n
 
   const havoc = model.nodes.find((node) => node.id === "havoc");
   const jbones = model.nodes.find((node) => node.id === "jbones");
+  const tomb = model.nodes.find((node) => node.id === "tomb");
   assert.equal(havoc.word, "reachable", "the reachability word does not change");
   assert.deepEqual(havoc.credential, {
     tone: "crit",
-    reason: "the tailnet \"havoc\" has no Tailscale OAuth credential",
+    reason: "the control server rejected the credential of \"havoc\"",
   });
   assert.equal(jbones.credential, null);
+  assert.equal(tomb.credential, null, "an absent credential is not a fault");
 });
 
 test("the topology marks the node of a missing credential with a second dot, and names the reason in the text equivalent", () => {

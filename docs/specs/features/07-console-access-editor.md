@@ -58,8 +58,8 @@ the precise editor. The rule list carries the detail that a picture cannot hold.
 - **FR-editor-13** — Hovering a square marks its row label and its column label in the
   accent colour, and it draws no other crosshair.
 - **FR-editor-14** — The matrix shows no port detail.
-- **FR-editor-15** — The matrix cell uses a 6 pixel corner radius, because a grid must
-  read as a grid.
+- **FR-editor-15** — The matrix cell uses the corner radius `--r-xs`, which the brand
+  sets to 0, because a grid must read as a grid.
 
 ### The rule list
 

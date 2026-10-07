@@ -15,8 +15,8 @@
 
   /* text — three steps */
   --tx:#eceae6;
-  --mu:#8d867d;
-  --dim:#5b544c;
+  --mu:#a39b90;
+  --dim:#8a8277;
 
   /* accent: action and selection only */
   --lime:#c8ff2e;
@@ -45,8 +45,9 @@
   --status-crit:var(--crit);
 
   /* blueprint: the dotted-edge language of the ACL views */
-  --edge:#3a352f;             /* an allowed path at rest */
+  --edge:#6a6359;             /* an allowed path at rest: 3.3:1 on the page */
   --edge-active:var(--lime);  /* the selected namespace's paths */
   --edge-deny:#332b28;
+  --steel:#45413c;            /* the one frame strip around the board */
   --scrim:color-mix(in srgb, #060605 72%, transparent);
 }

@@ -1,9 +1,11 @@
-/* The console shell: the frame, the left navigation, and the poll banner.
+/* The console shell: the frame, the left rail, the title block, and the poll banner.
    Every value comes from brand/tokens/. This file declares no colour, no spacing step,
    and no radius of its own.
 
-   The accent belongs to one thing in the shell: the current navigation entry. A view
-   adds no second accent use. See FR-console-40. */
+   The world of the console is a departure board: fixed columns of square cells, set
+   into one frame, where only the values change. The shell takes no accent. The current
+   navigation entry is a reversed number cell, so each view keeps the accent for its own
+   one thing. See FR-console-40. */
 
 *{box-sizing:border-box}
 
@@ -21,14 +23,26 @@ body{
   font-size:var(--fs-body);
   line-height:var(--lh-body);
   letter-spacing:var(--ls-body);
+  caret-color:var(--text-body);
+  scrollbar-color:var(--border-default) var(--surface-page);
   -webkit-font-smoothing:antialiased;
 }
+::selection{background:var(--surface-inset); color:var(--text-body)}
 
-/* The mono typeface carries a machine value. The sans typeface carries a sentence. */
-.mono{font-family:var(--font-data); font-size:var(--fs-data); letter-spacing:var(--ls-mono)}
-.label{
+/* The mono typeface carries a machine value. The sans typeface carries a sentence. The
+   mono is narrow, so a fixed cell holds a long identifier. */
+.mono{
   font-family:var(--font-data);
+  font-size:var(--fs-data);
+  font-stretch:var(--stretch-mono);
+  letter-spacing:var(--ls-mono);
+  font-variant-numeric:tabular-nums;
+}
+/* A column head and a field name: the one uppercase text of the console. */
+.label{
+  font-family:var(--font-body);
   font-size:var(--fs-label);
+  font-weight:var(--fw-medium);
   letter-spacing:var(--ls-label);
   text-transform:uppercase;
   color:var(--text-tertiary);
@@ -51,85 +65,91 @@ body{
   display:grid;
   grid-template-columns:var(--w-nav) 1fr;
   min-height:100vh;
-  max-width:var(--maxw-app);
-  margin:0 auto;
 }
 
-/* Navigation */
+/* The left rail */
 
 .nav{
+  position:sticky;
+  top:0;
+  height:100vh;
+  background:var(--surface-card);
   border-right:1px solid var(--border-default);
-  padding:var(--sp-5) var(--sp-3);
+  padding:var(--sp-5) var(--sp-3) var(--sp-3);
   display:flex;
   flex-direction:column;
-  gap:2px;
+  gap:var(--sp-6);
 }
-.brand{display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1) var(--sp-2) var(--sp-6)}
+.brand{display:flex; align-items:center; gap:var(--sp-2); padding:0 var(--sp-2)}
 .logo{display:block}
-.wordmark{font-size:15px; font-weight:var(--fw-semibold); letter-spacing:-.03em}
+.wordmark{font-size:var(--fs-h3); font-weight:var(--fw-semibold)}
 .wordmark i{font-style:normal; color:var(--accent)}
 
+.nav-index{display:flex; flex-direction:column; gap:1px}
 .nav-link{
   display:flex;
   align-items:center;
-  gap:var(--sp-2);
-  padding:var(--sp-2) var(--sp-3);
-  border-radius:var(--r-sm);
+  gap:var(--sp-3);
+  padding:var(--sp-1) var(--sp-2);
   color:var(--text-secondary);
+  font-size:var(--fs-body);
+  font-weight:var(--fw-medium);
   text-decoration:none;
   transition:background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
 .nav-link:hover{background:var(--surface-raised); color:var(--text-body)}
 .nav-link[aria-current]{background:var(--surface-raised); color:var(--text-body)}
-.nav-link[aria-current] .icon{background:var(--accent)}
 
-/* An icon is a stroked SVG that the brand holds. The mask keeps the one source file and
-   lets the shell colour it, which an img element cannot do. */
-.icon{
-  width:16px;
-  height:16px;
+/* The number is the key that opens the view. The current entry reverses its cell. */
+.key{
+  display:grid;
+  place-items:center;
+  width:24px;
+  height:24px;
   flex:none;
-  background:var(--text-tertiary);
-  -webkit-mask-repeat:no-repeat;
-  mask-repeat:no-repeat;
-  -webkit-mask-size:contain;
-  mask-size:contain;
+  border:1px solid var(--border-default);
+  background:var(--surface-page);
+  color:var(--text-tertiary);
+  font-size:var(--fs-micro);
 }
-.icon[data-icon="overview"]{-webkit-mask-image:url("/brand/icons/overview.svg"); mask-image:url("/brand/icons/overview.svg")}
-.icon[data-icon="namespaces"]{-webkit-mask-image:url("/brand/icons/namespaces.svg"); mask-image:url("/brand/icons/namespaces.svg")}
-.icon[data-icon="access"]{-webkit-mask-image:url("/brand/icons/access.svg"); mask-image:url("/brand/icons/access.svg")}
-.icon[data-icon="policy"]{-webkit-mask-image:url("/brand/icons/policy.svg"); mask-image:url("/brand/icons/policy.svg")}
-.icon[data-icon="activity"]{-webkit-mask-image:url("/brand/icons/activity.svg"); mask-image:url("/brand/icons/activity.svg")}
-.icon[data-icon="settings"]{-webkit-mask-image:url("/brand/icons/settings.svg"); mask-image:url("/brand/icons/settings.svg")}
+.nav-link[aria-current] .key{background:var(--text-body); border-color:var(--text-body); color:var(--surface-page)}
 
-.nav-foot{
-  margin-top:auto;
-  padding:var(--sp-3) var(--sp-2);
-  display:flex;
-  flex-direction:column;
-  gap:var(--sp-1);
-  color:var(--text-secondary);
+/* The title block names the daemon that serves this page. */
+.title-block{margin:auto 0 0; border:1px solid var(--border-default)}
+.title-block div{padding:var(--sp-2) var(--sp-3); display:flex; flex-direction:column; gap:2px}
+.title-block div + div{border-top:1px solid var(--border-default)}
+.title-block dt{
+  font-size:var(--fs-label);
+  font-weight:var(--fw-medium);
+  letter-spacing:var(--ls-label);
+  text-transform:uppercase;
+  color:var(--text-tertiary);
 }
+.title-block dd{margin:0; color:var(--text-body)}
 
 /* The view frame */
 
-.main{padding:var(--pad-view); min-width:0}
-.head{margin-bottom:var(--sp-7)}
+.main{padding:var(--sp-6) var(--sp-7) var(--sp-8); min-width:0; max-width:var(--maxw-app)}
+.head{display:flex; align-items:baseline; flex-wrap:wrap; gap:var(--sp-1) var(--sp-4); margin-bottom:var(--sp-5)}
 h1{
   font-family:var(--font-display);
   font-size:var(--fs-h1);
+  font-weight:var(--fw-semibold);
   letter-spacing:var(--ls-h1);
   line-height:var(--lh-head);
-  margin:0 0 var(--sp-2);
+  margin:0;
 }
 h2{
   font-family:var(--font-display);
   font-size:var(--fs-h2);
+  font-weight:var(--fw-semibold);
   letter-spacing:var(--ls-h2);
   line-height:var(--lh-head);
   margin:0 0 var(--sp-2);
 }
 .sub{color:var(--text-secondary); max-width:var(--maxw-read); margin:0}
+/* The overview leads with its verdict. The head stays in the page for a screen reader. */
+.main[data-view="overview"] .head{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; margin:0}
 .view[hidden]{display:none}
 
 .card{
@@ -138,6 +158,7 @@ h2{
   border-radius:var(--r-lg);
   padding:var(--pad-card-lg);
 }
+.card-head{display:flex; justify-content:space-between; gap:var(--sp-3); margin-bottom:var(--sp-4)}
 .note{color:var(--text-secondary); font-size:var(--fs-sm); margin:var(--sp-2) 0 0; max-width:var(--maxw-read)}
 .note:first-child{margin-top:0}
 
@@ -145,13 +166,14 @@ h2{
 .empty{border-style:dashed}
 .empty p{margin:var(--sp-2) 0 0; color:var(--text-secondary); max-width:var(--maxw-read)}
 
-/* A state is a coloured dot and a lowercase word. */
+/* A state is a coloured dot and a lowercase word. A dot with no tone is a quiet state,
+   such as an optional credential that the operator did not set. */
 .dot{width:var(--dot); height:var(--dot); border-radius:var(--r-pill); flex:none; display:inline-block; background:var(--text-tertiary)}
 .dot.ok{background:var(--status-ok)}
 .dot.warn{background:var(--status-warn)}
 .dot.crit{background:var(--status-crit)}
 
-/* The poll banner. It carries no accent, because the navigation owns the accent. */
+/* The poll banner. It carries no accent, because each view owns the accent. */
 .bar{
   display:flex;
   align-items:center;
@@ -166,6 +188,9 @@ h2{
 .bar-text{margin:0; color:var(--text-body); font-size:var(--fs-sm)}
 .bar .btn{margin-left:auto}
 
+/* A button is a square cell. A disabled button loses its fill and its hover, and an
+   affirmative button that is disabled loses the accent, so the accent always marks a
+   thing that the operator can do now. */
 .btn{
   font:inherit;
   font-weight:var(--fw-medium);
@@ -178,12 +203,15 @@ h2{
   transition:background var(--dur-1) var(--ease);
 }
 .btn:hover{background:var(--surface-inset)}
+.btn:disabled,
+.btn:disabled:hover{background:transparent; color:var(--text-tertiary); border-color:var(--border-default); cursor:not-allowed; filter:none}
 .btn[hidden]{display:none}
 
 .field{
   font:inherit;
   font-family:var(--font-data);
   font-size:var(--fs-data);
+  font-stretch:var(--stretch-mono);
   padding:var(--pad-input);
   border-radius:var(--r-sm);
   border:1px solid var(--border-default);
@@ -198,6 +226,8 @@ h2{
 .nav-link:focus-visible,
 .btn:focus-visible,
 .field:focus-visible,
+.board tbody tr:focus-visible,
+.frame-link:focus-visible,
 .skip:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
 /* The overview */
@@ -206,37 +236,121 @@ h2{
    equivalent here, because a dotted curve carries no meaning to a screen reader. */
 .sr{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
 
-.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:var(--sp-3); margin-bottom:var(--sp-3)}
-.stat{
-  background:var(--surface-card);
-  border:1px solid var(--border-default);
-  border-radius:var(--r-lg);
-  padding:var(--pad-card);
-}
-.stat-value{
-  font-size:var(--fs-h1);
-  letter-spacing:var(--ls-h1);
-  line-height:var(--lh-head);
-  margin-top:var(--sp-2);
-}
-/* A state is a coloured dot and a lowercase word, so it takes the sans typeface. */
-.stat-value.state{
-  font-family:var(--font-body);
-  font-size:var(--fs-h2);
-  letter-spacing:var(--ls-h2);
+/* The verdict answers the glance in one line. Its counts are the sums of the board. */
+.verdict{
   display:flex;
   align-items:center;
-  gap:var(--sp-2);
+  flex-wrap:wrap;
+  gap:var(--sp-2) var(--sp-5);
+  padding:var(--sp-3) var(--sp-4);
+  border:1px solid var(--steel);
+  border-bottom:none;
+  background:var(--surface-card);
+}
+/* The verdict is one run of text, so the dot stays with the first word on a narrow
+   line and the sentence wraps as prose. */
+.verdict-text{
+  margin:0;
+  font-size:var(--fs-h2);
+  font-weight:var(--fw-semibold);
+  line-height:var(--lh-head);
+}
+.verdict-text .dot{margin-right:var(--sp-2); vertical-align:.15em}
+/* Martian Mono has a taller x-height than the sans, so the fault id takes one size down
+   to match the sentence by eye. */
+.verdict-fault{font-size:var(--fs-h3); font-weight:var(--fw-semibold); margin-left:var(--sp-2)}
+.verdict-counts{margin:0 0 0 auto; color:var(--text-secondary); display:flex; flex-wrap:wrap; column-gap:var(--sp-2)}
+/* The separator ends the item before it, so a wrapped line never starts with one. */
+.count:not(:last-child)::after{content:"·"; margin-left:var(--sp-2); color:var(--text-tertiary)}
+.count-tick{display:none}
+.count:nth-last-child(2)::after{content:none}
+
+/* The board: one frame, fixed columns, and a hairline gutter between square cells. A
+   column never moves; only the values in it change. */
+.board-frame{border:1px solid var(--steel); background:var(--surface-page); overflow-x:auto}
+.board{width:100%; border-collapse:separate; border-spacing:1px; font-variant-numeric:tabular-nums}
+.board th,
+.board td{padding:var(--sp-2) var(--sp-3); text-align:left; white-space:nowrap; vertical-align:middle}
+.board thead th{
+  font-family:var(--font-body);
+  font-size:var(--fs-label);
+  font-weight:var(--fw-medium);
+  letter-spacing:var(--ls-label);
+  text-transform:uppercase;
+  color:var(--text-tertiary);
+  padding-top:var(--sp-2);
+  padding-bottom:var(--sp-2);
+}
+/* Each value cell carries the split of a flap across its middle: a dark line over a
+   lighter line, so it reads as two leaves meeting and not as one more gutter. It is a
+   background image, so it sits behind the characters, and the hover and the selection
+   change the face colour and keep the split. */
+.board tbody th,
+.board tbody td{
+  background-color:var(--surface-card);
+  background-image:linear-gradient(to bottom, transparent calc(50% - 1px), var(--surface-page) calc(50% - 1px), var(--surface-page) 50%, var(--surface-inset) 50%, var(--surface-inset) calc(50% + 1px), transparent calc(50% + 1px));
+  color:var(--text-body);
+  height:44px;
+}
+.board tbody td.absent{color:var(--text-tertiary)}
+.board tbody th{color:var(--text-body); font-weight:var(--fw-semibold)}
+.board .num{text-align:right}
+.board .state{display:table-cell}
+.board .state .dot{margin-right:var(--sp-2); vertical-align:middle}
+.board tbody tr{cursor:pointer}
+.board tbody tr:hover th,
+.board tbody tr:hover td{background-color:var(--surface-raised)}
+/* The selection is the one accent use of the overview: the selected row names its
+   tailnet in the accent, and the topology draws its paths in the accent. */
+.board tbody tr[aria-selected="true"] th{color:var(--accent)}
+.board tbody tr[aria-selected="true"] th,
+.board tbody tr[aria-selected="true"] td{background-color:var(--surface-raised)}
+
+/* The turnover. A changed value turns over once, one character after the next. */
+.val{display:inline-block}
+.turn{perspective:240px}
+.flap{
+  display:inline-block;
+  white-space:pre;
+  transform-origin:50% 50%;
+  animation:flap var(--dur-flip) var(--ease) both;
+  animation-delay:calc(var(--i) * var(--stagger-flip));
+}
+@keyframes flap{
+  from{transform:rotateX(-90deg); opacity:.35}
+  to{transform:none; opacity:1}
+}
+@media (prefers-reduced-motion: reduce){
+  .flap{animation:none}
 }
 
-.grid{display:grid; grid-template-columns:1fr var(--w-side); gap:var(--sp-3); align-items:start}
-.card-head{display:flex; justify-content:space-between; gap:var(--sp-3); margin-bottom:var(--sp-4)}
-.flow-wrap{min-width:0}
-svg.flow{width:100%; height:auto; display:block; overflow:visible}
+/* Below the board: the topology and the notable events. */
+.lower{display:grid; grid-template-columns:minmax(0,1fr) var(--w-side); gap:var(--sp-5); margin-top:var(--sp-5); align-items:start}
+.frame{border:1px solid var(--border-default); background:var(--surface-page); padding:0 var(--sp-4) var(--sp-4)}
+.frame-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:var(--sp-3);
+  margin:0 calc(var(--sp-4) * -1) var(--sp-4);
+  padding:var(--sp-2) var(--sp-4);
+  background:var(--surface-card);
+  border-bottom:1px solid var(--border-default);
+}
+.frame-title{font-size:var(--fs-body); margin:0}
+.frame-meta{color:var(--text-tertiary)}
+.frame-link{color:var(--text-secondary); font-size:var(--fs-sm)}
+.frame-link:hover{color:var(--text-body)}
+.frame > .note:first-child{margin-top:var(--sp-4)}
 
-.node rect{fill:var(--surface-raised); stroke:var(--border-default)}
-.node text.n{fill:var(--text-body); font-family:var(--font-data); font-size:var(--fs-data)}
-.node text.s{fill:var(--text-tertiary); font-family:var(--font-data); font-size:var(--fs-label)}
+.flow-wrap{min-width:0}
+/* The picture keeps the size it is drawn at, so its text matches the size of the board
+   text. A wider frame does not scale it up. */
+svg.flow{width:100%; max-width:660px; height:auto; display:block; overflow:visible; margin:0 auto}
+
+.node rect{fill:var(--surface-card); stroke:var(--border-default)}
+.node text.n{fill:var(--text-body); font-family:var(--font-data); font-stretch:var(--stretch-mono); font-size:var(--fs-data)}
+.node text.s{fill:var(--text-tertiary); font-family:var(--font-data); font-stretch:var(--stretch-mono); font-size:var(--fs-label)}
 .node circle.dot{fill:var(--text-tertiary)}
 .node circle.dot.ok{fill:var(--status-ok)}
 .node circle.dot.warn{fill:var(--status-warn)}
@@ -244,7 +358,7 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 .node{cursor:pointer}
 /* An SVG group is not a CSS box, therefore box-shadow draws no ring on it and the rule
    draws the ring with the outline property. The ring is not the accent: the accent of
-   this view belongs to the paths of the selected node. */
+   this view belongs to the selection. */
 .node:focus-visible{outline:2px solid var(--text-body); outline-offset:2px; border-radius:var(--r)}
 .node[aria-pressed="true"] rect{stroke:var(--accent)}
 
@@ -254,10 +368,10 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 .edge.sel{stroke:var(--edge-active)}
 .edge.muted{stroke:var(--border-soft)}
 
-.events{margin-top:var(--sp-3)}
+.events{margin-top:0}
 .ev{display:flex; gap:var(--sp-3); padding:var(--sp-3) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
 .ev:last-child{border-bottom:none}
-.ev time{color:var(--text-tertiary); flex:none; width:58px; font-size:var(--fs-micro)}
+.ev time{color:var(--text-tertiary); flex:none; width:64px; font-size:var(--fs-micro)}
 /* The event type is a machine value that the operator scans, therefore the column holds
    the whole type and truncates none. The width is a minimum: a type wider than it makes
    the column grow, and the message takes the width that remains. A fixed width drew a
@@ -265,11 +379,10 @@ svg.flow{width:100%; height:auto; display:block; overflow:visible}
 .ev-kind{color:var(--text-secondary); flex:none; min-width:112px; font-size:var(--fs-micro)}
 .ev p{margin:0; font-size:var(--fs-sm); color:var(--text-body); min-width:0}
 
-/* The Recent activity panel of the overview is 320 pixels wide, and the card takes 24
-   pixels of padding on each side. A time of 58 pixels and a type of 148 pixels leave the
-   message about 60 pixels there, and the message then wraps to one word for each line.
+/* The events panel of the overview is 320 pixels wide. A time and a type leave the
+   message too little width there, and the message then wraps to one word for each line.
    The row of that panel therefore wraps: the time and the type take the first line, and
-   the message takes the whole width of the card below them. The row keeps the baseline
+   the message takes the whole width of the panel below them. The row keeps the baseline
    alignment, because a wrapped flex container aligns the items of each line on their own.
    The activity view is wider and keeps the one-line row. See issue #236. */
 .ev-stack{flex-wrap:wrap; row-gap:var(--sp-1)}
@@ -354,15 +467,45 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .note a:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
 @media (max-width:1040px){
-  .grid{grid-template-columns:1fr}
-  .stats{grid-template-columns:repeat(2,1fr)}
+  .lower{grid-template-columns:1fr}
 }
 
+/* A narrow screen puts the rail on top as one row that scrolls sideways, and the title
+   block moves out of the way: the verdict states the state of the daemon. */
 @media (max-width:900px){
   .app{grid-template-columns:1fr}
-  .nav{border-right:none; border-bottom:1px solid var(--border-default); flex-direction:row; flex-wrap:wrap; align-items:center}
-  .brand{padding:var(--sp-1) var(--sp-2)}
-  .nav-foot{margin-top:0}
+  .nav{
+    position:static;
+    height:auto;
+    border-right:none;
+    border-bottom:1px solid var(--border-default);
+    flex-direction:row;
+    align-items:center;
+    gap:var(--sp-4);
+    padding:var(--sp-2) var(--sp-3);
+    overflow-x:auto;
+  }
+  .brand{padding:0; flex:none}
+  .nav-index{flex-direction:row; flex:none}
+  .title-block{display:none}
+  .count-tick{display:inline}
+  .count:nth-last-child(2)::after{content:"·"}
+  .main{padding:var(--sp-4) var(--sp-4) var(--sp-7)}
+}
+
+/* A phone keeps the narrow columns of the board, and it reads the topology as its text
+   equivalent, because the picture is too small to read there. */
+@media (max-width:600px){
+  .board .opt{display:none}
+  .board th,
+  .board td{padding:var(--sp-2)}
+  .verdict-counts{margin-left:0}
+  .flow-wrap{display:none}
+  .topology-text{position:static; width:auto; height:auto; overflow:visible; clip-path:none; white-space:normal; color:var(--text-body); font-size:var(--fs-sm)}
+  .topology-text > p:first-child{display:none}
+  .topology-text ul{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; background:var(--surface-page)}
+  .topology-text li{padding:var(--sp-2) var(--sp-3); background:var(--surface-card)}
+  .topology-text ul + p{margin:var(--sp-3) 0 0; color:var(--text-secondary)}
 }
 
 /* The namespace view: the list, the panel, the add flow, and the removal dialog. The
@@ -563,7 +706,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 /* The reachability matrix. The accent of this view marks the allowed path: a filled
    square, and the row label and the column label of the square under the pointer. An
    empty square is the absence of a rule, therefore no rule paints a refused path. The
-   square carries the 6 pixel radius token, because a grid must read as a grid.
+   square carries the radius token --r-xs, because a grid must read as a grid.
    FR-editor-7 to FR-editor-15. */
 .ac-matrix{margin-top:var(--sp-3)}
 /* The policy editor wraps its matrix in .ac-mtx-wrap. The square holds a fixed size and the

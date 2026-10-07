@@ -1,28 +1,32 @@
 :root{
-  --sans:'Space Grotesk', system-ui, sans-serif; /* @kind font */
-  --mono:'Space Mono', ui-monospace, Menlo, monospace; /* @kind font */
+  --sans:'Barlow Semi Condensed', 'Arial Narrow', system-ui, sans-serif; /* @kind font */
+  --mono:'Martian Mono', ui-monospace, Menlo, monospace; /* @kind font */
   --font-display:var(--sans);
   --font-body:var(--sans);
   --font-data:var(--mono);
 
-  /* display: negative tracking, always. */
-  --fs-display:44px;
-  --fs-h1:30px;
-  --fs-h2:21px;
+  /* A work area sets two sizes: the value size and the label size. Rank comes from
+     weight, case, and rule, not from a third size. */
+  --fs-display:40px;
+  --fs-h1:28px;
+  --fs-h2:20px;
   --fs-h3:17px;
-  --fs-lead:15px;
-  --fs-body:14px;
-  --fs-sm:13px;
-  --fs-data:12.5px;
-  --fs-micro:11.5px;
-  --fs-label:11px;   /* uppercase mono label */
+  --fs-lead:16px;
+  --fs-body:15px;
+  --fs-sm:14px;
+  --fs-data:13px;
+  --fs-micro:12px;
+  --fs-label:12px;   /* uppercase column head, in the sans */
 
-  --ls-display:-.04em;
-  --ls-h1:-.035em;
-  --ls-h2:-.025em;
-  --ls-body:-.01em;
-  --ls-label:.14em;  /* uppercase mono only */
+  --ls-display:-.01em;
+  --ls-h1:-.005em;
+  --ls-h2:0em;
+  --ls-body:0em;
+  --ls-label:.08em;  /* uppercase column heads only */
   --ls-mono:0em;
+
+  /* The mono is narrow, so that a fixed cell holds a long identifier, as a flap does. */
+  --stretch-mono:75%; /* @kind other */
 
   --lh-display:1.02; /* @kind other */
   --lh-head:1.12;    /* @kind other */

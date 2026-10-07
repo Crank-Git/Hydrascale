@@ -25,9 +25,13 @@ The full brand is `docs/DESIGN.md`. The tokens are
 - The sans typeface carries anything a person wrote. The mono typeface carries anything
   the machine owns: an identifier, an address, a port, a timestamp, a CIDR block.
 - Never set a value in the sans typeface. Never set a sentence in the mono typeface.
-- The only uppercase is a mono label at 11px with `.14em` tracking. Source text stays
-  lowercase.
-- Add no third typeface, no italics, and no letterspaced sans.
+- The sans typeface is Barlow Semi Condensed. The mono typeface is Martian Mono at the
+  width `--stretch-mono`.
+- The only uppercase is a column head of the board: the sans at `--fs-label` with
+  `--ls-label` tracking. Source text stays lowercase.
+- A work area sets two sizes: the value size and the label size. Rank comes from weight,
+  case, and rule.
+- Add no third typeface, no italics, and no other letterspaced text.
 
 ## Access control drawing
 
@@ -47,8 +51,12 @@ The full brand is `docs/DESIGN.md`. The tokens are
 - Open the contextual panel only when something is selected. Close it with the
   selection.
 - Empty is a legitimate state. Say what would fill it. Never show invented data.
-- Animate only what the operator triggered. No entrance animation, no skeleton
-  animation, no spring, no bounce. Honour `prefers-reduced-motion`.
+- Animate what the operator triggered. One exception: a board cell turns over once,
+  character by character, when its value changes between two polls. A poll that changes
+  nothing animates nothing, and the first draw animates nothing. The operator ruled this
+  on 2026-10-07.
+- No entrance animation, no skeleton animation, no spring, no bounce. Honour
+  `prefers-reduced-motion`: the turnover does not run under it.
 
 ## Copy
 
