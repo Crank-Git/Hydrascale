@@ -92,7 +92,7 @@ ipv6: true
 ```
 
 The event `ipv6.state` states whether the path is on, and why. Read it with
-`journalctl -u hydrascale | grep ipv6.state`. A host with no IPv6 default route reports
+`journalctl -u hydrascale --since "-1d" | grep ipv6.state`. A host with no IPv6 default route reports
 `off: the host holds no IPv6 default route`.
 
 **Warning — `force_forwarding` on the upstream device lets the host forward internet

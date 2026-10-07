@@ -4,6 +4,10 @@ Each entry states a symptom, its cause, and the steps that correct it. Read the 
 first: `sudo journalctl -u hydrascale -n 50` shows the last 50 lines of the log. The
 [Events](../reference/events.md) page states each event type.
 
+A search of the log reads only the last day, with `--since "-1d"`. A search of the whole
+log can take a minute on a host that ran for months. If the event is older than one day,
+use a longer range, such as `--since "-7d"`.
+
 ## `bind: address in use` for the control socket
 
 A daemon that crashed left the socket file. Delete it and start again:
@@ -19,7 +23,7 @@ Read the log for the bind address. The daemon refuses a `console.bind_address` t
 a loopback host and a port, and it refuses a port that another process holds:
 
 ```bash
-sudo journalctl -u hydrascale | grep console
+sudo journalctl -u hydrascale --since "-1d" | grep console
 ```
 
 ## A tailnet cannot reach the internet after an upgrade to version 1.0
@@ -73,12 +77,12 @@ sudo chmod 0600 /etc/hydrascale/secrets.yaml
 Read the reason that the daemon records:
 
 ```bash
-sudo journalctl -u hydrascale | grep ipv6.state
+sudo journalctl -u hydrascale --since "-1d" | grep ipv6.state
 ```
 
 `the host holds no IPv6 default route` means the host has no IPv6 upstream.
-`the kernel holds no force_forwarding` means the kernel is older than Linux 6.17; add
-`ipv6: true` to the configuration file. See [the configuration file](../reference/configuration.md).
+`the kernel holds no force_forwarding, and the configuration file does not set ipv6: true`
+means the kernel is older than Linux 6.17. Add `ipv6: true` to the configuration file. See [the configuration file](../reference/configuration.md).
 
 ## `tailscale ping` reports `direct connection not established`
 
@@ -218,7 +222,7 @@ Linux limit of 15 characters. Install the current release, which uses the hash n
 First read the log for `refresh_dns` after `start_daemon` on that tailnet:
 
 ```bash
-journalctl -u hydrascale | grep -E 'start_daemon|refresh_dns'
+journalctl -u hydrascale --since "-1d" | grep -E 'start_daemon|refresh_dns'
 ```
 
 When `refresh_dns` is absent or timed out, `tailscaled` never reached
