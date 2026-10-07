@@ -41,3 +41,7 @@ CLAUDE.local.md
 # Private design source. Only the assets the console uses are committed, under
 # internal/ui/static/brand/ (see docs/specs/features/01-desktop-client-removal.md).
 branding/
+
+# Impeccable design tool state. The committed design authority is docs/DESIGN.md.
+/PRODUCT.md
+.impeccable/
