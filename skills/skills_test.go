@@ -7,7 +7,7 @@ import (
 
 // The test names the skills that the set holds today. The test reads no file of the
 // working directory, because the gate runs this binary from another directory.
-var knownSkills = []string{"hydrascale-setup", "tailnet-exec"}
+var knownSkills = []string{"hydrascale-setup", "hydrascale-troubleshoot", "tailnet-exec"}
 
 func TestAll(t *testing.T) {
 	t.Run("returns one skill for each directory of the skill set", func(t *testing.T) {

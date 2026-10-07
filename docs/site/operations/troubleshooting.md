@@ -137,6 +137,41 @@ Look for a `DROP` rule before the jump rule of Hydrascale, and remove it or move
 daemon records the event `access.jump_displaced` when another rule moves its jump rule
 down. See [Events](../reference/events.md).
 
+## A rule of another service comes before the jump rule
+
+The daemon inserts its jump rule at position 1 of `FORWARD` and of `INPUT`. The chains
+`ts-forward`, `DOCKER-USER`, and `DOCKER-FORWARD` each take position 1 when the
+`tailscaled` of the host or Docker starts after the daemon. The daemon then records the
+event `access.jump_displaced`:
+
+```
+the jump rule of FORWARD is at position 3, below DOCKER-USER, DOCKER-FORWARD
+```
+
+The daemon moves no rule of the operator, so it does not move its jump rule back. The
+position is a fault only when a rule above the jump rule ends the path of a packet of a
+namespace. Read each chain that the message names:
+
+```bash
+sudo iptables -S FORWARD
+sudo iptables -S DOCKER-USER
+```
+
+An `ACCEPT` or a `DROP` that matches the packet ends the path before the local rules apply.
+A chain that returns each packet is not a fault.
+
+**Warning — a wrong position deletes a rule of the operator.** Read the position `<n>` of
+the jump rule from the event first. To put the jump rule back at position 1, insert a
+second jump rule and delete the old one, which is then at position `<n+1>`:
+
+```bash
+sudo iptables -I FORWARD 1 -j HYDRASCALE-FWD
+sudo iptables -D FORWARD <n+1>
+```
+
+For `INPUT`, use `INPUT` and `HYDRASCALE-OUT`. For IPv6, use `ip6tables`. The other
+service takes position 1 again when it starts again.
+
 ## The infra subnet collides with a route
 
 When `10.200.0.0/16` overlaps a route on the host, the veth setup fails or the traffic goes

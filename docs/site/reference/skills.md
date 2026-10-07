@@ -28,7 +28,7 @@ The command creates a missing directory at the mode `0755` and writes each file 
 
 ## The skills
 
-The binary holds two skills:
+The binary holds three skills:
 
 - **`hydrascale-setup`** reads the Hydrascale state of a host and reports it. It runs the
   five commands that change no state: `status`, `list`, `diff`, `env`, and `version`. It
@@ -37,7 +37,11 @@ The binary holds two skills:
 - **`tailnet-exec`** sends a command into the namespace of one tailnet rather than to the
   host network. It states the five routing forms: `exec`, `tailscale`, `ping`, `ssh`, and
   `wrap`. It reads the tailnet identifier from `hydrascale list`.
+- **`hydrascale-troubleshoot`** finds the cause of a fault with read-only commands. It holds
+  five diagnoses: IPv6, a direct connection, DNS, a displaced jump rule, and a rejected
+  credential. For each cause it prints the command that repairs it, and it runs none of
+  them.
 
-`skills/hydrascale-setup/SKILL.md` and `skills/tailnet-exec/SKILL.md` hold the source of the
-two skills. A test reads each file, and it fails when a skill names a `hydrascale` command
+`skills/hydrascale-setup/SKILL.md`, `skills/tailnet-exec/SKILL.md`, and
+`skills/hydrascale-troubleshoot/SKILL.md` hold the source of the three skills. A test reads each file, and it fails when a skill names a `hydrascale` command
 that the binary does not hold.
