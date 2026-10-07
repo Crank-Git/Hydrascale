@@ -95,6 +95,41 @@ set. On an earlier branch, `sudo iptables -S HYDRASCALE-FWD` prints
 `iptables: No chain/target/match by that name.` and returns 1. That result is correct for
 such a branch.
 
+The rules of version 1.5, for a change to the chains, NAT, IPv6, or the route table:
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo iptables -S HYDRASCALE-OUT; sudo iptables -S INPUT'
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo ip6tables -S HYDRASCALE-FWD; sudo ip6tables -S HYDRASCALE-OUT'
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo ip6tables -t nat -S POSTROUTING | grep MASQUERADE'
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo iptables -t nat -S PREROUTING | grep DNAT; sudo ip6tables -t nat -S PREROUTING | grep DNAT'
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'ip rule show; ip -6 rule show'
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sysctl -a -r "\.force_forwarding$"'
+```
+
+Each check reads one rule:
+
+- `HYDRASCALE-OUT` holds the rules of the traffic from a namespace to the host itself. The
+  chain `INPUT` holds one jump rule into it.
+- The two IPv6 chains exist only while the IPv6 path is on. When the path is off,
+  `ip6tables` prints `No chain/target/match by that name.` That result is correct.
+- The NAT66 rule is one `MASQUERADE` rule in the IPv6 `POSTROUTING` chain for each
+  namespace. It exists only while the IPv6 path is on.
+- The forward rule of a listen port is one `DNAT` rule for each namespace, with
+  `! -i vh+` and `--dst-type LOCAL`. It sends the UDP listen port of that namespace to the
+  namespace address.
+- The routing policy rule of the route table has the priority `32000` and the text
+  `lookup <route_table>`. It exists only when the configuration sets `route_table`.
+- The daemon sets `force_forwarding` to `1` on each upstream device and on each host veth
+  device. The value is `0` on every device when the IPv6 path is off, or when the path uses
+  `ipv6: true`.
+
+The event `ipv6.state` states whether the IPv6 path is on, and why. Read only the last day,
+because a read of the whole journal takes about a minute on the test host:
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo journalctl -u hydrascale --since "-1d" | grep ipv6.state | tail -1'
+```
+
 Reachability, for a change to the rule set. The first must fail and the second must
 succeed when a rule allows the path:
 
