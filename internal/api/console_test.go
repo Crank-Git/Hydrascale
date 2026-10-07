@@ -234,6 +234,45 @@ func TestTheConsoleOriginIsAccepted(t *testing.T) {
 	}
 }
 
+func TestALoopbackOriginOnAnotherPortIsAccepted(t *testing.T) {
+	// An SSH forward such as ssh -L 19443:127.0.0.1:9443 gives the browser a local port
+	// that is not the console port. The browser sends Origin on every module script and
+	// on every POST, so a check on the port refuses the whole console behind the forward.
+	_, origin := startTestConsole(t, newTestReconciler(writeTestConfig(t, "alpha")))
+
+	for _, value := range []string{"http://127.0.0.1:19443", "http://localhost:19443", "http://[::1]:19443"} {
+		script := consoleCall(t, http.MethodGet, origin+"/app.js", "", map[string]string{"Origin": value})
+		if script.StatusCode != http.StatusOK {
+			t.Errorf("GET /app.js with Origin: %s returns %d, want %d", value, script.StatusCode, http.StatusOK)
+		}
+
+		headers := map[string]string{ConsoleRequestHeader: "1", "Origin": value}
+		resp := consoleCall(t, http.MethodPost, origin+"/api/tailnet/remove", `{"id":"alpha"}`, headers)
+		if resp.StatusCode == http.StatusForbidden {
+			body, _ := io.ReadAll(resp.Body)
+			t.Errorf("POST with Origin: %s returns %d and the body %s, want no 403", value, resp.StatusCode, body)
+		}
+	}
+}
+
+func TestANonLoopbackOriginOnTheConsolePortReturns403(t *testing.T) {
+	// A DNS rebinding page reaches the loopback listener under its own name, and the
+	// browser sends that name in the Origin header.
+	_, origin := startTestConsole(t, newTestReconciler(writeTestConfig(t, "alpha")))
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(origin, "http://"))
+	if err != nil {
+		t.Fatalf("split the console origin %q: %v", origin, err)
+	}
+
+	for _, value := range []string{"http://rebind.example:" + port, "https://127.0.0.1:" + port} {
+		headers := map[string]string{ConsoleRequestHeader: "1", "Origin": value}
+		resp := consoleCall(t, http.MethodPost, origin+"/api/tailnet/remove", `{"id":"alpha"}`, headers)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("POST with Origin: %s returns %d, want %d", value, resp.StatusCode, http.StatusForbidden)
+		}
+	}
+}
+
 func TestEveryConsoleResponseCarriesTheContentSecurityPolicyHeader(t *testing.T) {
 	_, origin := startTestConsole(t, newTestReconciler(writeTestConfig(t, "alpha")))
 
@@ -279,6 +318,46 @@ func TestAMutatingConsoleRequestRecordsTheConsoleRequestEvent(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the reconciler holds no %s event after a mutating console request", EventConsoleRequest)
+	}
+}
+
+func TestAPolicyParseRequestRecordsNoEvent(t *testing.T) {
+	// POST /api/policy/{id}/sections parses a document and changes nothing. An event for
+	// each parse filled the event list, because the console sends one each time the
+	// operator opens the visual editor. The route still requires the console header.
+	r := newTestReconciler(writeTestConfig(t, "alpha"))
+	_, origin := startTestConsole(t, r)
+
+	consoleCall(t, http.MethodPost, origin+"/api/policy/alpha/sections", `{"document":"{}"}`, consoleHeader)
+
+	for _, event := range r.Events() {
+		if event.Type == EventConsoleRequest {
+			t.Errorf("POST /api/policy/alpha/sections records the event %s with the message %q", event.Type, event.Message)
+		}
+	}
+
+	refused := consoleCall(t, http.MethodPost, origin+"/api/policy/alpha/sections", `{"document":"{}"}`, nil)
+	if refused.StatusCode != http.StatusForbidden {
+		t.Errorf("POST /api/policy/alpha/sections without the console header returns %d, want %d", refused.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestAPolicySectionEditStillRecordsTheConsoleRequestEvent(t *testing.T) {
+	// The exception names the parse route alone. A request to the edit route, which
+	// shares the prefix of the parse route, still records its event.
+	r := newTestReconciler(writeTestConfig(t, "alpha"))
+	_, origin := startTestConsole(t, r)
+
+	consoleCall(t, http.MethodPost, origin+"/api/policy/alpha/sections/edit", `{}`, consoleHeader)
+
+	found := false
+	for _, event := range r.Events() {
+		if event.Type == EventConsoleRequest && strings.Contains(event.Message, "/api/policy/alpha/sections/edit") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("POST /api/policy/alpha/sections/edit records no console.request event")
 	}
 }
 

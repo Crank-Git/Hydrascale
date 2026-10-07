@@ -234,12 +234,12 @@ body.rv-open .layout { padding-right:21rem; }
 <li><strong>FR-console-9</strong> — A route returns HTTP 403 when the request has an <code>Origin</code> header
 </li>
 </ul>
-<p>whose value is not the console origin.</p>
+<p>whose host is not a loopback host. The route accepts a loopback host on any port, because an SSH forward gives the browser a local port that is not the console port.</p>
 <ul>
 <li><strong>FR-console-10</strong> — The daemon records an event for every mutating request that it
 </li>
 </ul>
-<p>serves on the console listener.</p>
+<p>serves on the console listener. <code>POST /api/policy/{id}/sections</code> parses a document and changes no state, so the daemon records no event for it.</p>
 <ul>
 <li><strong>FR-console-11</strong> — The daemon logs the console listener address at start, with the
 </li>
