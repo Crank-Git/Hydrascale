@@ -31,21 +31,25 @@ an upgrade note that states what changed and what an operator must do.
 ### The README
 
 - **FR-docs-1** — `README.md` shows the new mark rather than `assets/logo.png`.
-- **FR-docs-2** — `README.md` describes the console, the local rules, and the upstream
-  policy feature.
+- **FR-docs-2** — `README.md` holds one paragraph and one screenshot of the console. The
+  documentation site describes the local rules and the upstream policy. Feature
+  `15-readme-slim.md` moved this fact.
 - **FR-docs-3** — `README.md` contains no desktop client section.
 - **FR-docs-4** — `README.md` states that the console has no authentication and that it
-  binds a loopback address.
-- **FR-docs-5** — `README.md` states that `socket_group` membership gives full control of
-  the daemon.
-- **FR-docs-6** — `README.md` documents every new configuration key: `console`, `access`,
-  `secrets_file`, and `dns.allow_unprotected`.
-- **FR-docs-7** — `README.md` documents the credential setup for Tailscale and for
-  Headscale.
-- **FR-docs-8** — `README.md` states that a Headscale control server needs
+  binds a loopback address. The README links to the Security section of the site for the
+  detail.
+- **FR-docs-5** — The Security section of the site states that `socket_group` membership
+  gives full control of the daemon. Feature `15-readme-slim.md` moved this fact.
+- **FR-docs-6** — The configuration page of the site documents every configuration key,
+  which includes `console`, `access`, `secrets_file`, and `dns.allow_unprotected`. Feature
+  `15-readme-slim.md` moved this fact.
+- **FR-docs-7** — The credentials page of the site documents the credential setup for
+  Tailscale and for Headscale. Feature `15-readme-slim.md` moved this fact.
+- **FR-docs-8** — The Headscale page of the site states that a Headscale control server needs
   `policy.mode: "database"` for a policy write. `hscontrol/types/config.go:54` at tag
-  `v0.29.3` declares the value.
-- **FR-docs-9** — The table of contents matches the sections.
+  `v0.29.3` declares the value. Feature `15-readme-slim.md` moved this fact.
+- **FR-docs-9** — `README.md` holds no table of contents, because it is short enough to read
+  whole. Feature `15-readme-slim.md` removed the table.
 
 ### The design document
 

@@ -2,7 +2,7 @@
 id: readme-slim
 feature: A short README that links to the documentation site
 epic: "Epic 14: Documentation site"
-status: issued
+status: built
 issues: [433]
 mockups: []
 ---
