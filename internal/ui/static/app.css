@@ -723,12 +723,12 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .board .board-detail td{background:var(--surface-inset); background-image:none; height:auto; padding:var(--sp-2) var(--sp-3)}
 .ns-peer{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft)}
 .ns-peer:last-child{border-bottom:none}
-.ns-peer-addr{color:var(--text-tertiary); font-size:var(--fs-micro)}
+.ns-peer-addr{color:var(--text-tertiary); font-size:var(--fs-data)}
 
 .ns-events{margin-top:var(--sp-3)}
 .ns-event{display:grid; grid-template-columns:132px minmax(0,1fr); gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
 .ns-event:last-child{border-bottom:none}
-.ns-event-kind{color:var(--text-tertiary); font-size:var(--fs-micro); overflow-wrap:anywhere}
+.ns-event-kind{color:var(--text-tertiary); font-size:var(--fs-data); overflow-wrap:anywhere}
 .ns-event-text{color:var(--text-secondary); font-size:var(--fs-sm)}
 
 .ns-notice{margin-top:var(--sp-4)}
@@ -879,7 +879,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
    inside its own card. The local access editor needs no wrapper, because it draws the
    tailnets of the host and it shrinks the square on a dense host. Issue #387. */
 .ac-mtx-wrap{overflow-x:auto}
-.ac-mtx{--ac-square:34px; border-collapse:separate; border-spacing:4px; margin-top:var(--sp-3)}
+.ac-mtx{--ac-square:34px; border-collapse:separate; border-spacing:4px; margin:var(--sp-3) 0 0 -8px}
 .ac-mtx th{
   font-family:var(--font-data);
   font-size:var(--fs-label);
@@ -889,7 +889,10 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
   text-align:left;
   padding:0 4px;
 }
-.ac-mtx th.col{writing-mode:vertical-rl; transform:rotate(180deg); height:78px; vertical-align:bottom; text-align:right}
+/* A column head is a rotated label. The head is as tall as its longest label, and a label
+   ends at the squares, so a short label sits directly over its column and never floats
+   above it. The rotation turns the start of the line to the foot of the cell. */
+.ac-mtx th.col{writing-mode:vertical-rl; transform:rotate(180deg); vertical-align:top; text-align:left; padding:0 0 var(--sp-2); line-height:var(--ac-square)}
 .ac-mtx th.hot{color:var(--accent)}
 .ac-square{
   width:var(--ac-square);
@@ -1303,11 +1306,15 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 
   /* Access: a rule row holds the path on its first line and the port field and the
      delete action on the second. */
-  .ac-rule{grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr); grid-auto-flow:row}
+  .ac-rule{grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr) auto; grid-auto-flow:row}
   .ac-rule > :nth-child(n+4){grid-column:1 / -1; justify-self:start}
-  .ac-rule > .ac-portfield{grid-column:1 / 3; width:100%}
+  .ac-rule > .ac-portfield{grid-column:1 / 4; width:100%}
   .ac-rule > .ac-del,
-  .ac-rule > .btn:last-child{grid-column:3; justify-self:end}
+  .ac-rule > .btn:last-child{grid-column:4; justify-self:end}
+  /* The kind of a policy rule sits at the end of the path line, so a rule takes two lines:
+     the path, then the port field and the delete action. */
+  .ac-rule > .chip{grid-column:4; grid-row:1; justify-self:end}
+  .ac-rule > .chip ~ .chip{grid-column:1 / -1; grid-row:auto; justify-self:start}
 
   /* Policy: the document scrolls inside its box, and nested frames lose their border. */
   .pol-code{max-height:60vh}
@@ -1346,7 +1353,7 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 /* Namespaces: the state cell holds one gap between the dot and the word. */
 /* The credential reason names keys and variables, so it is set as the daemon wrote it. */
 .ns-reason{font-family:var(--font-data); font-stretch:var(--stretch-mono); font-size:var(--fs-micro); color:var(--text-body); padding:var(--sp-3); background:var(--surface-inset)}
-.ns-event-text.mono{font-size:var(--fs-micro); color:var(--text-body)}
+.ns-event-text.mono{font-size:var(--fs-data); color:var(--text-body)}
 
 /* A removal command breaks at a space only, so a line break never splits a flag or a
    path. A wrapped line of a command indents two columns under its first line. */
@@ -1374,6 +1381,20 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ac-rule:has(.ac-portfield) .ac-noports{display:none}
 
 /* Policy: the etag breaks inside its chip, and a tab takes two columns. */
-.pol-meta .chip{display:inline-block; max-width:100%; overflow-wrap:anywhere}
+/* The etag spans the width of the document, so its edges meet the edges of the editor. */
+.pol-meta .chip{display:block; width:100%; overflow-wrap:anywhere}
 .pol-doc,
 .pol-gut{tab-size:2}
+
+/* A wide screen sets the reachability matrix and the rule list side by side, because the
+   matrix is narrow and the rules beside it say what each filled square allows. */
+@media (min-width:1200px){
+  #view-access{display:grid; grid-template-columns:max-content minmax(0,1fr); gap:var(--sp-5); align-items:start}
+  #view-access > *{grid-column:1 / -1; margin-top:0}
+  #view-access > .ac-matrix{grid-column:1}
+  #view-access > .ac-rules{grid-column:2}
+  #view-access:not(:has(> .ac-rules)) > .ac-matrix{grid-column:1 / -1}
+}
+
+/* Before a selection, the tailnet list and the document frame share one height. */
+.pol-grid:has(.pol-idle){align-items:stretch}

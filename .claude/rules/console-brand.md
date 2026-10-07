@@ -13,7 +13,8 @@ The full brand is `docs/DESIGN.md`. The tokens are
 ## Colour
 
 - One accent, acid lime `#c8ff2e`. Use it for **one thing per view**: the affirmative
-  action, or the current selection, or an allowed path. Never a second accent.
+  action, or an allowed path. Never a second accent.
+- A selection takes no accent. It is an inset cell with a `--dim` outline, in every view.
 - State is separate from the accent: mint for good, amber for a warning, red for
   critical. Use each as a dot plus a lowercase word.
 - Never tint a whole card, a whole row, or a whole edge to show a state.

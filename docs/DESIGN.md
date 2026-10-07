@@ -120,7 +120,9 @@ There are three text steps.
 
 ### The accent
 
-There is one accent, acid lime. Use it for an action and for a selection.
+There is one accent, acid lime. It marks the affirmative action of a view, or an allowed
+path. A selection takes no accent: it is an inset cell with a `--dim` outline, in every
+view.
 
 | Token | Value | Use |
 |---|---|---|
@@ -416,9 +418,18 @@ dot, a sentence, and a retry button, and it takes no accent.
 
 ### A narrow screen
 
-At 900 pixels and less, the rail becomes one row at the top of the page. The row scrolls
-sideways. The title block is hidden, and the verdict line shows the time of the last
-tick in its place.
+At 900 pixels and less, the brand moves into a bar at the top of the page, and the six
+views move into a fixed index of six cells at the foot of the screen. Each cell holds the
+key number over the label and is 56 pixels high. The current view reverses its number
+cell. No view hides behind a sideways scroll.
+
+From 601 to 900 pixels, the title block is one row of the top bar. At 600 pixels and
+less, the title block is hidden, and the verdict line states the access mode and the time
+of the last tick in its place.
+
+At 600 pixels and less, every control that a thumb presses is 44 pixels high, a label
+sits over its value in a description list, and a dialog is a sheet at the foot of the
+screen, as tall as its content.
 
 ## The board
 
@@ -494,16 +505,22 @@ An absent credential is never a fault. A rejected credential is always a fault.
 A row is a control. A pointer, the Enter key, or the space bar selects the row. The arrow
 keys move between rows. A second selection of the same row clears the selection.
 
-The selection is the one accent use of the Overview view. The selected row names its
-tailnet in `--lime`, on a `--s2` face. The topology draws the paths of that tailnet in
-`--edge-active`. When no tailnet exists, no selection exists. The add action then takes
-the accent.
+The selected row is an inset row on `--s3`, with the tailnet in the body colour. The
+topology draws the paths of that tailnet in `--edge-active`, which is the accent use of
+the Overview view: an allowed path. When no tailnet exists, no selection exists. The add
+action then takes the accent.
 
 ### A narrow screen
 
-At 600 pixels and less, the board keeps the `Tailnet`, `State`, `Reachability`, and
-`Peers` columns and hides the rest. The topology shows its text equivalent in place of the
-picture.
+Each column has a tier. At 900 pixels and less, the board hides the `Probe`, `Exit node`,
+and `Host access` columns. At 600 pixels and less, it also hides the `Paths` and `Policy`
+columns, and the selected row opens a detail row that states every hidden column.
+
+At 600 pixels and less, the picture of the topology is too small to read or to press. The
+Overview and the Access view show a path list in its place: one button for each node that
+starts a path, then one row for each allowed path, with the dotted connector of the brand.
+A button selects its node, as a node of the picture does. A path that no rule allows has
+no row.
 
 ### Below the board
 
@@ -531,7 +548,8 @@ reads `--edge` at rest. The class `.edge.sel` reads `--edge-active`, which is th
 The class `.edge.muted` reads `--line-soft`.
 
 A topology node is a square box on `--s1` with a `--line` edge. Its name and its state
-line use the mono typeface. The selected node draws its edge in the accent.
+line use the mono typeface. The selected node draws its edge in the body colour, and its
+paths in the accent.
 
 Draw no node icon, no minimum map, and no force-directed physics. Ports belong in the rule
 list, where words fit. A port never appears on a curve and never appears in a matrix
