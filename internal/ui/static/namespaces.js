@@ -20,6 +20,12 @@ export const IDENTIFIER_RULE =
 /** The age at which the console asks the daemon for the detail of a tailnet again. */
 export const DETAIL_TTL_MS = 5000;
 
+/** The count of peers that the panel lists before it offers the rest. */
+const PANEL_PEERS = 10;
+
+/** expandedPeers holds the tailnets whose panel lists every peer. */
+const expandedPeers = new Set();
+
 /** The marker that the view draws for a value that the daemon has not reported. */
 const ABSENT = "—";
 
@@ -102,8 +108,12 @@ function credentialOf(status, id) {
   if (!entry || entry.credential_state === "usable") {
     return null;
   }
-  const word = entry.credential_state === "rejected" ? "credential rejected" : "no credential";
-  return { tone: "crit", word, reason: entry.reason || "" };
+  // A credential is optional, so an absent credential is a quiet state and not a fault.
+  // A credential that the control server rejected is a fault.
+  if (entry.credential_state === "rejected") {
+    return { tone: "crit", word: "credential rejected", reason: entry.reason || "" };
+  }
+  return { tone: "", word: "no credential", reason: entry.reason || "" };
 }
 
 /** addressOf returns the first tailnet address of a namespace, or the absent marker. */
@@ -444,24 +454,40 @@ async function send(route, body, done) {
   }
 }
 
-/** drawRow draws one row of the list. The row wraps when its line is too short. */
+/**
+ * drawRow draws one row of the table. Each cell is fixed, so a value holds the same
+ * column in every row. A pointer or the Enter key opens the panel of the row.
+ */
 function drawRow(row) {
-  const node = el("div", row.muted ? "ns-row ns-muted" : "ns-row");
-  node.setAttribute("role", "option");
+  const node = el("tr", row.muted ? "ns-muted" : undefined);
+  node.dataset.tailnet = row.id;
   node.setAttribute("aria-selected", row.selected ? "true" : "false");
-  node.tabIndex = 0;
+  node.tabIndex = row.muted ? -1 : 0;
 
-  node.append(el("span", "ns-id mono", row.id));
-  node.append(stateSpan(row.state));
-  node.append(stateSpan(row.reachability));
-  if (row.credential) {
-    node.append(stateSpan(row.credential));
-  }
-  node.append(el("span", "ns-peers mono", row.peers));
+  const id = el("th", "mono", row.id);
+  id.scope = "row";
+  node.append(id);
 
-  const address = el("span", "ns-addr mono");
-  address.textContent = `${row.address} · ${row.namespace}`;
+  const stateCell = (state) => {
+    const cell = el("td", "state");
+    // A tailnet whose credential works holds no credential state, so the cell states the
+    // word of the overview board for it.
+    cell.append(stateSpan(state || { tone: "ok", word: "usable" }));
+    return cell;
+  };
+  node.append(stateCell(row.state));
+  node.append(stateCell(row.reachability));
+  const policy = stateCell(row.credential);
+  policy.classList.add("mid");
+  node.append(policy);
+  node.append(el("td", row.peerCount === null ? "num ns-pending" : "num mono", row.peerCount === null ? "no count yet" : String(row.peerCount)));
+
+  const address = el("td", "opt");
+  address.append(el("span", "ns-addr mono", row.address));
   node.append(address);
+  const namespace = el("td", "opt");
+  namespace.append(el("span", "ns-addr mono", row.namespace));
+  node.append(namespace);
 
   const open = () => {
     if (row.actionsDisabled) {
@@ -475,6 +501,14 @@ function drawRow(row) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       open();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = event.key === "ArrowDown" ? node.nextElementSibling : node.previousElementSibling;
+      if (next) {
+        next.focus();
+      }
     }
   });
   return node;
@@ -482,12 +516,12 @@ function drawRow(row) {
 
 /** drawPanel draws the contextual panel. FR-console-26. */
 function drawPanel(panel) {
-  const aside = el("aside", "card ns-panel");
+  const aside = el("aside", "frame ns-panel");
   aside.setAttribute("aria-label", `The tailnet ${panel.id}`);
 
-  const head = el("div", "ns-panel-head");
-  head.append(el("h2", "mono", panel.id));
-  const close = el("button", "btn ns-close", "Close");
+  const head = el("div", "frame-head");
+  head.append(el("h2", "frame-title mono", panel.id));
+  const close = el("button", "btn ns-sm", "Close");
   close.type = "button";
   close.addEventListener("click", () => {
     selected = null;
@@ -542,16 +576,28 @@ function drawPanel(panel) {
     aside.append(card);
   }
 
-  aside.append(el("span", "label ns-section", `Peers · ${panel.peerLabel}`));
+  aside.append(el("span", "label ns-section", `Peers · ${panel.peerCount}`));
   if (panel.peers.length === 0) {
     aside.append(el("p", "note", "The daemon reports no peer. A peer arrives when the node reaches the control server."));
   } else {
+    // The panel lists the first peers and counts the rest, so it never holds a scroll box
+    // of its own inside the page.
     const peers = el("div", "ns-peers-list");
-    for (const peer of panel.peers) {
+    const shown = expandedPeers.has(panel.id) ? panel.peers.length : PANEL_PEERS;
+    for (const peer of panel.peers.slice(0, shown)) {
       const line = el("div", "ns-peer");
       line.append(el("span", "mono", peer.name));
       line.append(el("span", "mono ns-peer-addr", peer.address));
       peers.append(line);
+    }
+    if (panel.peers.length > shown) {
+      const more = el("button", "btn ns-more", `Show ${panel.peers.length - shown} more peers`);
+      more.type = "button";
+      more.addEventListener("click", () => {
+        expandedPeers.add(panel.id);
+        render();
+      });
+      peers.append(more);
     }
     aside.append(peers);
   }
@@ -564,7 +610,9 @@ function drawPanel(panel) {
     for (const event of panel.events.slice(-5).reverse()) {
       const line = el("div", "ns-event");
       line.append(el("span", "mono ns-event-kind", event.kind));
-      line.append(el("span", "ns-event-text", event.message));
+      // An action event names the action that the reconciler ran, which is a machine
+      // value. Every other event carries a sentence of the daemon.
+      line.append(el("span", event.kind === "action_ok" ? "ns-event-text mono" : "ns-event-text", event.message));
       log.append(line);
     }
     aside.append(log);
@@ -641,15 +689,25 @@ function drawRemoval() {
     box.append(el("h3", undefined, view.heading));
     box.append(el("p", "note", view.lead));
 
+    // Each argument is a span that no line break divides, so a wrapped command never
+    // splits a flag or a path. A command breaks only between two arguments.
     const cmds = el("div", "ns-cmds mono");
     for (const command of view.commands) {
-      cmds.append(el("span", undefined, command));
+      const line = el("span");
+      command.split(" ").forEach((argument, index) => {
+        if (index > 0) {
+          line.append(document.createTextNode(" "));
+        }
+        line.append(el("span", "ns-arg", argument));
+      });
+      cmds.append(line);
     }
     box.append(cmds);
 
-    box.append(el("p", "note", view.ruleSentence));
-    box.append(el("p", "note", view.logoutSentence));
-    box.append(el("p", "note", view.authorizationSentence));
+    const values = [dialog.plan.host_veth, dialog.plan.namespace, "tailscale logout"];
+    box.append(monoNote(view.ruleSentence, values));
+    box.append(monoNote(view.logoutSentence, values));
+    box.append(monoNote(view.authorizationSentence, values));
 
     const acts = el("div", "ns-acts ns-dialog-acts");
     const cancel = el("button", "btn", "Cancel");
@@ -688,6 +746,46 @@ function drawRemoval() {
   return box;
 }
 
+/**
+ * monoNote writes a sentence and sets each machine value that it names in the mono
+ * typeface. values lists the machine values, and a value that the sentence does not name
+ * changes nothing.
+ */
+function monoNote(sentence, values) {
+  const note = el("p", "note");
+  const named = values.filter((value) => value && sentence.includes(value));
+  if (named.length === 0) {
+    note.textContent = sentence;
+    return note;
+  }
+  const pattern = new RegExp(`(${named.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+  for (const part of sentence.split(pattern)) {
+    if (part === "") {
+      continue;
+    }
+    note.append(named.includes(part) ? el("span", "mono", part) : document.createTextNode(part));
+  }
+  return note;
+}
+
+/**
+ * hintNote writes the hint of a field. The character set of the identifier rule is a
+ * machine value, so it takes the mono typeface inside the sentence.
+ */
+function hintNote(hint) {
+  const note = el("span", "note");
+  const set = "a-z A-Z 0-9 . _ -";
+  const at = hint.indexOf(set);
+  if (at < 0) {
+    note.textContent = hint;
+    return note;
+  }
+  note.append(document.createTextNode(hint.slice(0, at)));
+  note.append(el("span", "mono", set));
+  note.append(document.createTextNode(hint.slice(at + set.length)));
+  return note;
+}
+
 /** drawAdd draws the add flow. FR-console-31. */
 function drawAdd() {
   const state = addFlow.state();
@@ -715,7 +813,7 @@ function drawAdd() {
     input.value = state.fields[field.name];
     input.addEventListener("input", () => addFlow.setField(field.name, input.value));
     row.append(input);
-    row.append(el("span", "note", field.hint));
+    row.append(hintNote(field.hint));
     if (state.errors[field.name]) {
       row.append(el("span", "ns-error", state.errors[field.name]));
     }
@@ -774,20 +872,32 @@ function render() {
   if (!section || !snapshot) {
     return;
   }
+  // A redraw replaces every element, so the view reads which row held the focus first and
+  // gives the focus back to that row after.
+  const focusedRow = document.activeElement && document.activeElement.closest
+    ? document.activeElement.closest("#view-namespaces tbody tr")
+    : null;
+  const focusID = focusedRow ? focusedRow.dataset.tailnet : null;
   section.replaceChildren();
 
   if (snapshot.loading) {
-    const card = el("div", "card");
-    card.append(el("span", "label", "Loading"));
-    card.append(el("p", "note", "The first poll has not returned."));
-    section.append(card);
+    const frame = el("div", "frame");
+    frame.append(el("p", "note", "The first poll has not returned."));
+    section.append(frame);
     return;
   }
 
   const values = detailValues();
   const rows = buildRows(snapshot.status, values, { selected, removing: Array.from(removing) });
 
-  const head = el("div", "ns-head");
+  const grid = el("div", "ns-grid");
+  const frame = el("section", "frame ns-list");
+  frame.setAttribute("aria-labelledby", "tailnets-heading");
+  const head = el("div", "frame-head");
+  const heading = el("h2", "frame-title", "Tailnets");
+  heading.id = "tailnets-heading";
+  head.append(heading);
+  head.append(el("span", "frame-meta mono ns-count", rows.length === 1 ? "1 tailnet" : `${rows.length} tailnets`));
   const add = el("button", "btn primary", "Add tailnet");
   add.type = "button";
   add.addEventListener("click", () => {
@@ -796,28 +906,53 @@ function render() {
     render();
   });
   head.append(add);
-  section.append(head);
+  frame.append(head);
 
   if (rows.length === 0) {
-    const card = el("div", "card empty");
-    card.append(el("span", "label", "Empty"));
-    card.append(el("p", undefined, "No tailnet is configured. Add one, and this view lists it with its state, its peer count, and its address."));
-    section.append(card);
+    frame.append(el("p", "note", "No tailnet is configured. Add one, and this view lists it with its state, its peer count, and its address."));
   } else {
-    const grid = el("div", "ns-grid");
-    const list = el("div", "ns-list");
-    list.setAttribute("role", "listbox");
-    list.setAttribute("aria-label", "The tailnets of this host");
+    const table = el("table", "board ns-board");
+    table.append(el("caption", "sr", "One row per tailnet. Select a row to open its panel."));
+    const headRow = el("tr");
+    for (const [label, className] of [
+      ["Tailnet", ""],
+      ["State", ""],
+      ["Reachability", ""],
+      ["Policy", "mid"],
+      ["Peers", "num"],
+      ["Address", "opt"],
+      ["Namespace", "opt"],
+    ]) {
+      const cell = el("th", className || undefined, label);
+      cell.scope = "col";
+      headRow.append(cell);
+    }
+    const thead = el("thead");
+    thead.append(headRow);
+    table.append(thead);
+    const body = el("tbody");
     for (const row of rows) {
-      list.append(drawRow(row));
+      body.append(drawRow(row));
     }
-    grid.append(list);
+    table.append(body);
+    const wrap = el("div", "board-frame");
+    wrap.append(table);
+    frame.append(wrap);
+  }
+  grid.append(frame);
 
-    const panel = buildPanel(snapshot.status, values, events.value, selected);
-    if (panel) {
-      grid.append(drawPanel(panel));
+  const panel = buildPanel(snapshot.status, values, events.value, selected);
+  if (panel) {
+    grid.classList.add("ns-open");
+    grid.append(drawPanel(panel));
+  }
+  section.append(grid);
+
+  if (focusID) {
+    const again = section.querySelector(`tbody tr[data-tailnet="${CSS.escape(focusID)}"]`);
+    if (again) {
+      again.focus();
     }
-    section.append(grid);
   }
 
   if (toast) {

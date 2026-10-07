@@ -58,9 +58,11 @@ access view.
 - **FR-console-8** — Every mutating route requires the request header
   `X-Hydrascale-Console: 1`, and it returns HTTP 403 without it.
 - **FR-console-9** — A route returns HTTP 403 when the request has an `Origin` header
-  whose value is not the console origin.
+  whose host is not a loopback host. The route accepts a loopback host on any port,
+  because an SSH forward gives the browser a local port that is not the console port.
 - **FR-console-10** — The daemon records an event for every mutating request that it
-  serves on the console listener.
+  serves on the console listener. `POST /api/policy/{id}/sections` parses a document and
+  changes no state, so the daemon records no event for it.
 - **FR-console-11** — The daemon logs the console listener address at start, with the
   statement that the console has no authentication.
 
@@ -138,7 +140,7 @@ access view.
 - **FR-console-42** — The console renders every machine value in the mono typeface.
 - **FR-console-43** — The console honours `prefers-reduced-motion`.
 - **FR-console-44** — The console contains no emoji.
-- **FR-console-45** — The console loads `Space Grotesk` and `Space Mono` from
+- **FR-console-45** — The console loads `Barlow Semi Condensed` and `Martian Mono` from
   `internal/ui/static/brand/fonts/`.
 - **FR-console-46** — `internal/ui/static/brand/tokens/fonts.css` holds one `@font-face`
   rule per font file, and each rule names a path under the console origin.
@@ -322,8 +324,8 @@ The console is served at `/`. Every JSON route stays under `/api/`.
 - [ ] The console JavaScript tests run under `go test ./internal/ui/...`.
 - [ ] The browser network log shows a request for each font file, and every request goes
       to the console origin.
-- [ ] The heading of the overview renders in `Space Grotesk`, and a machine value renders
-      in `Space Mono`.
+- [ ] The heading of the overview renders in `Barlow Semi Condensed`, and a machine value
+      renders in `Martian Mono`.
 - [ ] `internal/ui/static/brand/fonts/OFL.txt` is present.
 - [ ] `internal/ui/static/brand/tokens/fonts.css` holds no `TODO` marker.
 

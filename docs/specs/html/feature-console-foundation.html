@@ -234,12 +234,12 @@ body.rv-open .layout { padding-right:21rem; }
 <li><strong>FR-console-9</strong> — A route returns HTTP 403 when the request has an <code>Origin</code> header
 </li>
 </ul>
-<p>whose value is not the console origin.</p>
+<p>whose host is not a loopback host. The route accepts a loopback host on any port, because an SSH forward gives the browser a local port that is not the console port.</p>
 <ul>
 <li><strong>FR-console-10</strong> — The daemon records an event for every mutating request that it
 </li>
 </ul>
-<p>serves on the console listener.</p>
+<p>serves on the console listener. <code>POST /api/policy/{id}/sections</code> parses a document and changes no state, so the daemon records no event for it.</p>
 <ul>
 <li><strong>FR-console-11</strong> — The daemon logs the console listener address at start, with the
 </li>
@@ -390,7 +390,7 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 <li><strong>FR-console-44</strong> — The console contains no emoji.
 </li>
-<li><strong>FR-console-45</strong> — The console loads <code>Space Grotesk</code> and <code>Space Mono</code> from
+<li><strong>FR-console-45</strong> — The console loads <code>Barlow Semi Condensed</code> and <code>Martian Mono</code> from
 </li>
 </ul>
 <p><code>internal/ui/static/brand/fonts/</code>.</p>
@@ -614,10 +614,10 @@ body.rv-open .layout { padding-right:21rem; }
 </ul>
 <p>to the console origin.</p>
 <ul>
-<li>[ ] The heading of the overview renders in <code>Space Grotesk</code>, and a machine value renders
+<li>[ ] The heading of the overview renders in <code>Barlow Semi Condensed</code>, and a machine value
 </li>
 </ul>
-<p>in <code>Space Mono</code>.</p>
+<p>renders in <code>Martian Mono</code>.</p>
 <ul>
 <li>[ ] <code>internal/ui/static/brand/fonts/OFL.txt</code> is present.
 </li>

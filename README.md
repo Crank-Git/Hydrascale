@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/console-overview.png" alt="The Overview view of the console. Four cards state the tailnet count, the peer count, the reconciler state, and the time of the last tick. A topology draws a dotted curve from each tailnet to the internet node, and the recent activity list holds one row per event." width="900">
+  <img src="docs/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events that are not routine reconcile ticks." width="900">
 </p>
 
-<p align="center"><i>The Overview view. The topology draws one dotted curve per allowed path, and the activity list states the time, the type, and the message of each event. The tailnet names are placeholders.</i></p>
+<p align="center"><i>The Overview view. The first line answers whether every tailnet is healthy, and a tailnet with a fault sorts to the top of the board. The tailnet names, the addresses, and the events are placeholders.</i></p>
 
 Hydrascale lets one Linux host join several Tailscale tailnets at the same time. It is for
 the operator who administers a host that must reach a work tailnet, a home tailnet, and a
@@ -190,10 +190,10 @@ application inside the binary, so it makes no request to another host and it nee
 step. It holds six views: Overview, Namespaces, Access, Policy, Activity, and Settings.
 
 <p align="center">
-  <img src="docs/images/console-namespaces.png" alt="The Namespaces view of the console. One row per tailnet states the health, the reachability, the peer count, the address, and the namespace name." width="900">
+  <img src="docs/images/console-namespaces.png" alt="The Namespaces view of the console. A table holds one row per tailnet with its state, reachability, policy credential, peer count, address, and namespace. The panel of the selected tailnet lists its fields, its peers, its recent events, and the Disconnect and Remove actions." width="900">
 </p>
 
-<p align="center"><i>The Namespaces view. One row per tailnet. The names and the addresses are placeholders.</i></p>
+<p align="center"><i>The Namespaces view, with the panel of one tailnet open. The names and the addresses are placeholders.</i></p>
 
 The daemon serves the console when the configuration file holds no `console` key, so a
 version 0.9 file needs no edit. The default address is `127.0.0.1:9443`:
@@ -230,7 +230,8 @@ Four controls reduce the risk:
    writes the reason to the log, and `hydrascale apply` refuses the same value.
 2. Every mutating route requires the header `X-Hydrascale-Console: 1`. A browser sets no
    custom header on a cross-origin form post.
-3. The daemon answers HTTP 403 when the `Origin` header names another origin.
+3. The daemon answers HTTP 403 when the `Origin` header names a host that is not a
+   loopback host.
 4. The daemon records one event for every mutating request, and the Activity view shows it.
 
 Control 2 and control 3 stop a hostile web page. Neither control stops a local account.
@@ -312,7 +313,7 @@ The Access view of the console shows the rule set, stages an edit, and applies i
 reconciler writes the changed rule set on the next tick.
 
 <p align="center">
-  <img src="docs/images/console-access.png" alt="The Access view of the console. A dotted curve joins each tailnet to the internet node, a reachability matrix marks the two allowed paths, and the rule list holds one row per rule." width="900">
+  <img src="docs/images/console-access.png" alt="The Access view of the console. A dotted curve joins each tailnet to the internet node or the host node. A reachability matrix marks the four allowed paths, and the rule list beside it holds one row per rule with its port field." width="900">
 </p>
 
 <p align="center"><i>The Access view. A filled square and a drawn curve each mark an allowed path. A denied path has neither.</i></p>
@@ -324,10 +325,10 @@ The Policy view of the console reads that document, validates it, and writes it 
 is the upstream half of reachability; the local rules are the half that this host enforces.
 
 <p align="center">
-  <img src="docs/images/console-policy.png" alt="The Policy view of the console. Each tailnet card reports no credential, and the panel asks the operator to select a tailnet." width="900">
+  <img src="docs/images/console-policy.png" alt="The Policy view of the console. The tailnet list states the credential state of each tailnet. The policy document of the selected tailnet shows in the Text editor, with line numbers, the etag, and the Validate, Discard, and Push actions." width="900">
 </p>
 
-<p align="center"><i>The Policy view before a credential is set. Each card states the exact keys that a policy read needs.</i></p>
+<p align="center"><i>The Policy view, with the document of one tailnet open in the Text editor. A tailnet with no credential states the exact keys that a policy read needs when you select it.</i></p>
 
 The daemon takes the control server kind from the control URL of the tailnet. A tailnet
 that declares no `control_url` is a Tailscale tailnet. Every other tailnet is a Headscale
@@ -369,12 +370,12 @@ stages an edit to one section at a time. Text stays the way to read or change a 
 that Visual does not yet build.
 
 <p align="center">
-  <img src="docs/manual/screenshots/visual-acl-editor/03-visual-tab-rules.png" alt="The section nav of the Visual editor, with ten sections and their entry counts, and the Rules section open below it." width="900">
+  <img src="docs/images/console-policy-visual-rules.png" alt="The section grid of the Visual editor, with ten sections and their entry counts, and the Rules section open below it with the reachability matrix and the rule list." width="900">
 </p>
 
-<p align="center"><i>The section nav. Rules opens by default, next to a reachability matrix.</i></p>
+<p align="center"><i>The section grid. Rules opens by default, with a reachability matrix above the rule list.</i></p>
 
-The section nav lists ten sections, each with a count of the entries it holds:
+The section grid lists ten sections, each with a count of the entries it holds:
 
 - **Groups**, **Hosts**, **Tag owners**, and **IP sets** hold the named sets that a
   rule refers to.
@@ -392,13 +393,13 @@ The section nav lists ten sections, each with a count of the entries it holds:
   its result as a state dot and a word.
 
 <p align="center">
-  <img src="docs/manual/screenshots/ssh-autoapprovers-nodeattrs/08-ssh-staged-2rows.png" alt="The SSH access section, with two rules staged and Discard and Push both enabled." width="900">
+  <img src="docs/images/console-policy-visual-ssh.png" alt="The SSH access section, with two rules after Add, and Validate and Discard enabled." width="900">
 </p>
 
-<p align="center"><i>The SSH access section. A staged rule enables Discard and Push, the same as a Text edit.</i></p>
+<p align="center"><i>The SSH access section. A staged rule enables Validate and Discard, the same as a Text edit. Push is available after a validate passes.</i></p>
 
 <p align="center">
-  <img src="docs/manual/screenshots/postures-tests/08-tests-pass.png" alt="The Tests section, with one staged test marked pass after Run." width="900">
+  <img src="docs/images/console-policy-visual-tests.png" alt="The Tests section, with one test marked pass after Run." width="900">
 </p>
 
 <p align="center"><i>The Tests section, after Run. A test marks pass or names the reason the control server gives.</i></p>
@@ -685,7 +686,7 @@ daemon records the event `dns.unprotected`, and the Overview view of the console
 namespace as unprotected.
 
 <p align="center">
-  <img src="docs/images/console-settings.png" alt="The Settings view of the console. The Resolver card states the mode, the bind address, and the upstreams. The Namespace protection card reports each namespace as protected." width="900">
+  <img src="docs/images/console-settings.png" alt="The Settings view of the console. Six frames in two columns state the resolver, the split DNS domains, the protection state of each namespace, the host file checksum, the paths and the poll interval of the daemon, and the console warning." width="900">
 </p>
 
 <p align="center"><i>The Settings view, which holds the resolver state and the protection state of each namespace.</i></p>
@@ -990,6 +991,9 @@ machine:
 ```bash
 ssh -L 9443:127.0.0.1:9443 user@linux-host
 ```
+
+The local port can be any free port. The daemon accepts an `Origin` header that names a
+loopback host on any port.
 
 The console has no authentication, so the SSH forward is the only control on that path.
 

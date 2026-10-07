@@ -51,7 +51,8 @@ Four controls reduce the risk:
 
 1. The listener binds a loopback address only. The daemon refuses any other address.
 2. Every mutating route requires the header `X-Hydrascale-Console: 1`.
-3. The daemon answers HTTP 403 when the `Origin` header names another origin.
+3. The daemon answers HTTP 403 when the `Origin` header names a host that is not a
+   loopback host.
 4. The daemon records one event for every mutating request, and the Activity view shows it.
 
 Control 2 and control 3 stop a hostile web page. Neither control stops a local account.

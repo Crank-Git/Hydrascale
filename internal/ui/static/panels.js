@@ -140,8 +140,8 @@ export function dnsMarkup(model) {
 
   if (!model.ready) {
     parts.push(
-      '<section class="card empty"><span class="label">Empty</span>' +
-        "<p>The daemon reports no DNS state yet. This view shows the resolver mode, the bind address, the upstream servers, and the protected state of every namespace.</p></section>",
+      '<section class="frame empty">' +
+        "<p class=\"note\">The daemon reports no DNS state yet. This view shows the resolver mode, the bind address, the upstream servers, and the protected state of every namespace.</p></section>",
     );
     return parts.join("");
   }
@@ -176,7 +176,7 @@ export function dnsMarkup(model) {
     resolver.push(listRow("upstreams", model.upstreams));
   }
   parts.push(
-    `<section class="card"><h2>Resolver</h2><dl class="kv-list">${resolver.join("")}</dl>` +
+    `<section class="frame"><div class="frame-head"><h2 class="frame-title">Resolver</h2></div><dl class="kv-list">${resolver.join("")}</dl>` +
       (model.upstreams.length === 0
         ? '<p class="note">The forwarder reports no upstream. An upstream arrives when the daemon reads the host file, or when a tailnet reports a MagicDNS server.</p>'
         : "") +
@@ -203,7 +203,7 @@ export function dnsMarkup(model) {
     )
     .join("");
   parts.push(
-    '<section class="card"><h2>Split DNS</h2>' +
+    '<section class="frame"><div class="frame-head"><h2 class="frame-title">Split DNS</h2></div>' +
       '<p class="note">The control server of a tailnet routes each split domain to the resolver of that tailnet.</p>' +
       (splitRows === "" && splitAlerts === ""
         ? '<p class="note">No tailnet reports a split DNS domain.</p>'
@@ -222,7 +222,7 @@ export function dnsMarkup(model) {
     )
     .join("");
   parts.push(
-    '<section class="card"><h2>Namespace protection</h2>' +
+    '<section class="frame"><div class="frame-head"><h2 class="frame-title">Namespace protection</h2></div>' +
       '<p class="note">Each row states whether the private /etc overlay is mounted in that namespace. A namespace with the mount cannot write the host file.</p>' +
       (model.allowUnprotected
         ? '<p class="note">The configuration key dns.allow_unprotected is true, so a namespace starts without the mount and it holds no error state.</p>'
@@ -240,7 +240,7 @@ export function dnsMarkup(model) {
     valueRow("last change", `${at.date} ${at.time}`.trim(), model.changedAt !== ""),
   ];
   parts.push(
-    `<section class="card"><h2>Host file</h2><dl class="kv-list">${hostFile.join("")}</dl>` +
+    `<section class="frame"><div class="frame-head"><h2 class="frame-title">Host file</h2></div><dl class="kv-list">${hostFile.join("")}</dl>` +
       (model.changed
         ? ""
         : '<p class="note">The checksum matches the value that the daemon read at the start.</p>') +
@@ -255,108 +255,202 @@ export function dnsMarkup(model) {
 // ---------------------------------------------------------------------------
 
 /**
- * activityRows returns every event of the log, newest first.
- *
- * events is the field events of GET /api/events. The daemon appends one entry per event,
- * so the newest entry is the last one. FR-console-36.
- */
-export function activityRows(events) {
-  return (events || [])
-    .slice()
-    .reverse()
-    .map((event) => {
-      const at = timeParts(event.Time);
-      return {
-        date: at.date,
-        time: at.time,
-        kind: event.Type || "",
-        tailnet: event.TailnetID || "",
-        message: event.Message || "",
-      };
-    });
-}
-
-/**
- * policyCredentialNote returns the markup of one note line naming every tailnet that
- * holds no usable policy credential, and an empty string when every declared tailnet
- * holds one or the poll reports no policy entry yet.
+ * policyCredentialNote returns the markup of one alert naming every tailnet whose policy
+ * credential the control server rejected, and an empty string when no tailnet holds a
+ * rejected credential or the poll reports no policy entry yet.
  *
  * entries is the field policy of the merged poll body, from GET /api/policy. Local
  * reachability and upstream policy are two independent systems (see
  * docs/specs/features/08-upstream-policy.md), so this note names a policy fact and it
  * writes no event into the log. See issue #287.
+ *
+ * A credential is optional, so an absent credential is not a fault and draws no alert.
+ * The board of the overview and the policy view state it.
  */
 function policyCredentialNote(entries) {
   const ids = (entries || [])
-    .filter((entry) => entry.credential_state !== "usable")
+    .filter((entry) => entry.credential_state === "rejected")
     .map((entry) => entry.id);
   if (ids.length === 0) {
     return "";
   }
   const sentence = ids.length === 1
-    ? `The tailnet ${ids[0]} needs a policy credential. Open the Policy tab for the reason.`
-    : `These tailnets need a policy credential: ${ids.join(", ")}. Open the Policy tab for the reason.`;
-  return alert("crit", [sentence]);
+    ? `The control server rejected the policy credential of ${ids[0]}.`
+    : `The control server rejected the policy credential of these tailnets: ${ids.join(", ")}.`;
+  const body = `<p>${esc(sentence)} <a href="#/policy">The policy view</a> states the reason.</p>`;
+  return `<div class="alert crit"><span class="dot crit"></span><div>${body}</div></div>`;
 }
 
 /**
- * ACTIVITY_ROW_LIMIT is the count of event rows that the activity view draws.
+ * ACTIVITY_ROW_LIMIT is the count of rows that the activity view draws.
  *
  * The daemon keeps the newest 1000 events in memory. The view drew every one of them. A
  * capture of the page reached 44681 pixels, which is 30 viewports. See issue #355.
- *
- * The view draws a count of the log. It holds no control that draws the rest. Such a
- * control needs state that survives the poll, because activity.js draws the whole section
- * again on every tick.
  */
 export const ACTIVITY_ROW_LIMIT = 100;
 
+/** ROUTINE_EVENTS names the event types that every reconcile tick records. */
+export const ROUTINE_EVENTS = new Set(["reconcile_start", "reconcile_apply", "reconcile_complete", "action_ok"]);
+
 /**
- * activityMarkup returns the whole activity view as markup.
- * rows comes from activityRows. A time, a kind, and a tailnet identifier are machine
- * values, and a message is the sentence that the daemon wrote. policyEntries is the field
- * policy of the merged poll body, and it adds one note line above the event list when a
- * declared tailnet holds no usable credential.
+ * activityModel returns the rows that the activity view draws, newest first.
  *
- * The view draws the newest ACTIVITY_ROW_LIMIT rows. When the log holds more, the view
- * states the count of the log. See issue #355.
+ * events is the field events of GET /api/events, oldest first. options.ticks shows the
+ * reconcile ticks, and options.tailnet keeps the rows of one tailnet, or every row when it
+ * is the empty string.
+ *
+ * A reconcile tick records four kinds of routine event, and an incident hides between
+ * them. The model therefore folds each tick into one row: the time of its start, the
+ * message of its end, and the actions it applied. A row of the kind "event" is any other
+ * event, which the view always shows.
  */
-export function activityMarkup(rows, policyEntries = []) {
+export function activityModel(events, options = {}) {
+  const ticks = options.ticks === true;
+  const tailnet = options.tailnet || "";
+  const rows = [];
+  let open = null;
+
+  for (const event of events || []) {
+    if (!event) {
+      continue;
+    }
+    const type = event.Type || "";
+    if (!ROUTINE_EVENTS.has(type)) {
+      rows.push({ kind: "event", event });
+      continue;
+    }
+    if (type === "reconcile_start") {
+      open = { kind: "tick", time: event.Time, message: "", actions: [], done: false };
+      rows.push(open);
+      continue;
+    }
+    if (open === null) {
+      continue;
+    }
+    if (type === "action_ok") {
+      open.actions.push({ tailnet: event.TailnetID || "", action: event.Message || "" });
+    } else if (type === "reconcile_complete") {
+      open.message = event.Message || "";
+      open.done = true;
+      open = null;
+    }
+  }
+
+  const all = rows.reverse();
+  const notable = all.filter((row) => row.kind === "event").length;
+  const kept = all
+    .filter((row) => ticks || row.kind === "event")
+    .map((row) => {
+      if (row.kind === "event" || tailnet === "") {
+        return row;
+      }
+      return { ...row, actions: row.actions.filter((entry) => entry.tailnet === tailnet) };
+    })
+    .filter((row) => {
+      if (tailnet === "") {
+        return true;
+      }
+      return row.kind === "event" ? row.event.TailnetID === tailnet : row.actions.length > 0;
+    });
+
+  const tailnets = [...new Set((events || []).map((event) => event && event.TailnetID).filter(Boolean))].sort();
+  return {
+    rows: kept.slice(0, ACTIVITY_ROW_LIMIT),
+    matched: kept.length,
+    scanned: (events || []).length,
+    notable,
+    tailnets,
+  };
+}
+
+/** tickSummary states the actions of one tick, grouped by tailnet. */
+function tickSummary(actions) {
+  const byTailnet = new Map();
+  for (const entry of actions) {
+    const key = entry.tailnet || "host";
+    if (!byTailnet.has(key)) {
+      byTailnet.set(key, []);
+    }
+    byTailnet.get(key).push(entry.action);
+  }
+  // The tailnets sort by name, so one tailnet holds one place in every row.
+  return [...byTailnet.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, list]) => `${id}: ${list.join(", ")}`)
+    .join(" · ");
+}
+
+/**
+ * activityMarkup returns the event table of the activity view.
+ *
+ * model comes from activityModel. A time, a kind, and a tailnet identifier are machine
+ * values, and a message is the sentence that the daemon wrote. policyEntries is the field
+ * policy of the merged poll body, and it adds one alert above the table when the control
+ * server rejected the credential of a tailnet. The table states one date for each day.
+ */
+export function activityMarkup(model, policyEntries = [], options = {}) {
   const note = policyCredentialNote(policyEntries);
 
-  if (rows.length === 0) {
+  if (model.scanned === 0) {
     return (
       note +
-      '<section class="card empty"><span class="label">Empty</span>' +
-      "<p>The daemon reports no event. An event arrives when the reconciler creates a namespace, connects a tailnet, or writes the access rules.</p></section>"
+      '<div class="frame empty"><p class="note">The daemon reports no event. An event arrives when the reconciler creates a namespace, connects a tailnet, or writes the access rules.</p></div>'
     );
   }
 
-  const drawn = rows.slice(0, ACTIVITY_ROW_LIMIT);
-  const cap = drawn.length < rows.length
-    ? `<p class="note">The view draws the newest ${drawn.length} events of ${rows.length}.</p>`
+  if (model.rows.length === 0) {
+    const scope = options.tailnet ? ` for ${esc(options.tailnet)}` : "";
+    return (
+      note +
+      `<p class="note log-empty">No event other than a routine reconcile tick${scope} in the newest <span class="mono">${model.scanned}</span> events. Select Every event to show the ticks.</p>`
+    );
+  }
+
+  const body = [];
+  let day = null;
+  for (const row of model.rows) {
+    const at = timeParts(row.kind === "tick" ? row.time : row.event.Time);
+    if (at.date !== day) {
+      day = at.date;
+      body.push(`<tr class="day"><th colspan="4" scope="colgroup" class="mono">${esc(at.date || "no date")}</th></tr>`);
+    }
+    if (row.kind === "tick") {
+      const summary = tickSummary(row.actions);
+      body.push(
+        '<tr class="log-row tick">' +
+          `<td class="mono t">${esc(at.time)}</td>` +
+          '<td class="mono n"></td>' +
+          '<td class="mono k">reconcile tick</td>' +
+          `<td class="m">${esc(row.done ? row.message : "in progress")}` +
+          (summary !== "" ? `<span class="mono d">${esc(summary)}</span>` : "") +
+          "</td></tr>",
+      );
+      continue;
+    }
+    const event = row.event;
+    body.push(
+      '<tr class="log-row">' +
+        `<td class="mono t"><time datetime="${esc(event.Time)}">${esc(at.time)}</time></td>` +
+        `<td class="mono n">${esc(event.TailnetID || "")}</td>` +
+        `<td class="mono k">${esc(event.Type || "")}</td>` +
+        `<td class="m">${esc(event.Message || "")}</td>` +
+        "</tr>",
+    );
+  }
+
+  const cap = model.matched > model.rows.length
+    ? `<p class="note log-cap">The view draws the newest <span class="mono">${model.rows.length}</span> rows of <span class="mono">${model.matched}</span>.</p>`
     : "";
 
-  const list = drawn
-    .map(
-      (row) =>
-        '<div class="ev">' +
-        `<time class="mono" datetime="${esc(row.date)}">${esc(row.time)}</time>` +
-        `<span class="ev-date mono">${esc(row.date)}</span>` +
-        `<span class="ev-kind mono">${esc(row.kind)}</span>` +
-        (row.tailnet !== "" ? `<span class="ev-net mono">${esc(row.tailnet)}</span>` : '<span class="ev-net"></span>') +
-        `<p>${esc(row.message)}</p>` +
-        "</div>",
-    )
-    .join("");
-
+  // Only an event row fills the tailnet column: a tick row names its tailnets in the
+  // message. The table drops the column when no event row names a tailnet.
+  const named = model.rows.some((row) => row.kind === "event" && row.event.TailnetID);
   return (
     note +
-    '<section class="card"><span class="label">Events</span>' +
-    cap +
-    `<div class="events">${list}</div>` +
-    '<p class="note">The daemon holds the newest events in memory. It records one event for every mutating request on the console listener.</p>' +
-    "</section>"
+    `<table class="log${named ? "" : " no-tailnet"}">` +
+    '<thead><tr><th scope="col">Time</th><th scope="col">Tailnet</th><th scope="col">Event</th><th scope="col">Message</th></tr></thead>' +
+    `<tbody>${body.join("")}</tbody></table>` +
+    cap
   );
 }
 
@@ -401,18 +495,18 @@ export function settingsMarkup(model) {
 
   if (!model.ready) {
     parts.push(
-      '<section class="card empty"><span class="label">Empty</span>' +
-        "<p>The daemon reports no path yet. This view shows the configuration path, the socket path, the console address, the poll interval, and the version when the poll succeeds.</p></section>",
+      '<section class="frame empty">' +
+        "<p class=\"note\">The daemon reports no path yet. This view shows the configuration path, the socket path, the console address, the poll interval, and the version when the poll succeeds.</p></section>",
     );
   }
 
   const rows = model.rows.map((row) => valueRow(row.label, row.value, row.reported)).join("");
-  parts.push(`<section class="card"><h2>Daemon</h2><dl class="kv-list">${rows}</dl></section>`);
+  parts.push(`<section class="frame set-daemon"><div class="frame-head"><h2 class="frame-title">Daemon</h2></div><dl class="kv-list">${rows}</dl></section>`);
 
   // FR-console-38. The section "The console has no authentication" of docs/specs/spec.md
   // records the accepted risk and it names the four controls that reduce it.
   parts.push(
-    '<section class="card"><h2>Console</h2>' +
+    '<section class="frame"><div class="frame-head"><h2 class="frame-title">Console</h2></div>' +
       alert("warn", [
         "The console has no authentication. Any local account on this host reaches this address and drives the daemon, which runs as root.",
         "The daemon binds a loopback address only. Reach the console of another host through an SSH tunnel rather than through a wider bind address.",

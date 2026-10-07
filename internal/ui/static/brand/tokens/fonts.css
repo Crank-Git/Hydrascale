@@ -2,39 +2,49 @@
    another host. Each src reads a path of this origin, and go:embed puts every file in the
    daemon binary. brand/fonts/OFL.txt holds the licence of both families.
 
-   Space Grotesk 2.000 comes from github.com/floriankarsten/space-grotesk at tag 2.0.0,
-   commit 7220f5d04813fe83babe76d4fd23e02275021280, file
-   fonts/woff2/SpaceGrotesk[wght].woff2.
-   Space Mono 1.003 comes from github.com/googlefonts/spacemono at commit
-   329858c2c4dbd3476f972a4ae00624b018cf4b81, files fonts/webfonts/SpaceMono-Regular.woff2
-   and fonts/webfonts/SpaceMono-Bold.woff2. Both families carry the SIL Open Font License
-   version 1.1. The `## Changelog` section of docs/specs/spec.md records the same.
+   Barlow Semi Condensed comes from the npm package @fontsource/barlow-semi-condensed
+   version 5.3.0, files files/barlow-semi-condensed-latin-{400,500,600}-normal.woff2. The
+   family comes from github.com/jpt/barlow.
+   Martian Mono comes from the npm package @fontsource-variable/martian-mono version
+   5.3.0, file files/martian-mono-latin-standard-normal.woff2. The family comes from
+   github.com/evilmartians/mono. Both families carry the SIL Open Font License version
+   1.1. Each file holds the Latin subset only.
 
-   The Space Grotesk file is a variable font: one file carries every weight from 300 to
-   700, so the console loads 48 KiB rather than four static files. Space Mono publishes no
-   variable font, so the console loads the two weights it uses. The console sets no
-   italic, which .claude/rules/console-brand.md requires, so no italic file ships. */
-
-@font-face{
-  font-family:'Space Grotesk';
-  src:url('/brand/fonts/SpaceGrotesk[wght].woff2') format('woff2-variations');
-  font-weight:300 700;
-  font-style:normal;
-  font-display:swap;
-}
+   The Martian Mono file is a variable font with two axes: weight from 100 to 800, and
+   width from 75% to 112.5%. The console sets every machine value at a narrow width, so
+   that a fixed cell holds a long identifier. Barlow Semi Condensed publishes no variable
+   font, so the console loads the three weights it uses. The console sets no italic, so no
+   italic file ships. */
 
 @font-face{
-  font-family:'Space Mono';
-  src:url('/brand/fonts/SpaceMono-Regular.woff2') format('woff2');
+  font-family:'Barlow Semi Condensed';
+  src:url('/brand/fonts/BarlowSemiCondensed-Regular.woff2') format('woff2');
   font-weight:400;
   font-style:normal;
   font-display:swap;
 }
 
 @font-face{
-  font-family:'Space Mono';
-  src:url('/brand/fonts/SpaceMono-Bold.woff2') format('woff2');
-  font-weight:700;
+  font-family:'Barlow Semi Condensed';
+  src:url('/brand/fonts/BarlowSemiCondensed-Medium.woff2') format('woff2');
+  font-weight:500;
+  font-style:normal;
+  font-display:swap;
+}
+
+@font-face{
+  font-family:'Barlow Semi Condensed';
+  src:url('/brand/fonts/BarlowSemiCondensed-SemiBold.woff2') format('woff2');
+  font-weight:600;
+  font-style:normal;
+  font-display:swap;
+}
+
+@font-face{
+  font-family:'Martian Mono';
+  src:url('/brand/fonts/MartianMono[wdth,wght].woff2') format('woff2-variations');
+  font-weight:100 800;
+  font-stretch:75% 112.5%;
   font-style:normal;
   font-display:swap;
 }

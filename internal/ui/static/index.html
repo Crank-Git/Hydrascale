@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Hydrascale</title>
 <!-- Every stylesheet loads from the console origin. The console makes no request to
      another host. brand/tokens/fonts.css names the two self-hosted font files, so this
@@ -30,17 +30,23 @@
       <span class="wordmark">hydra<i>scale</i></span>
     </div>
 
-    <a class="nav-link" href="#/overview" data-view="overview"><span class="icon" data-icon="overview" aria-hidden="true"></span>Overview</a>
-    <a class="nav-link" href="#/namespaces" data-view="namespaces"><span class="icon" data-icon="namespaces" aria-hidden="true"></span>Namespaces</a>
-    <a class="nav-link" href="#/access" data-view="access"><span class="icon" data-icon="access" aria-hidden="true"></span>Access</a>
-    <a class="nav-link" href="#/policy" data-view="policy"><span class="icon" data-icon="policy" aria-hidden="true"></span>Policy</a>
-    <a class="nav-link" href="#/activity" data-view="activity"><span class="icon" data-icon="activity" aria-hidden="true"></span>Activity</a>
-    <a class="nav-link" href="#/settings" data-view="settings"><span class="icon" data-icon="settings" aria-hidden="true"></span>Settings</a>
-
-    <div class="nav-foot">
-      <span class="label">Daemon</span>
-      <span class="mono" id="daemon-version">no version yet</span>
+    <!-- The number of an entry is the key that opens the view. app.js binds the keys. -->
+    <div class="nav-index">
+      <a class="nav-link" href="#/overview" data-view="overview"><span class="key mono" aria-hidden="true">1</span>Overview</a>
+      <a class="nav-link" href="#/namespaces" data-view="namespaces"><span class="key mono" aria-hidden="true">2</span>Namespaces</a>
+      <a class="nav-link" href="#/access" data-view="access"><span class="key mono" aria-hidden="true">3</span>Access</a>
+      <a class="nav-link" href="#/policy" data-view="policy"><span class="key mono" aria-hidden="true">4</span>Policy</a>
+      <a class="nav-link" href="#/activity" data-view="activity"><span class="key mono" aria-hidden="true">5</span>Activity</a>
+      <a class="nav-link" href="#/settings" data-view="settings"><span class="key mono" aria-hidden="true">6</span>Settings</a>
     </div>
+
+    <!-- The title block names the daemon that serves this page. app.js writes each value
+         from the last poll, and it writes no value that no poll returned. -->
+    <dl class="title-block">
+      <div><dt>Daemon</dt><dd><span class="mono" id="daemon-version">no version yet</span></dd></div>
+      <div><dt>Access</dt><dd><span class="mono" id="title-access">no mode yet</span></dd></div>
+      <div><dt>Last tick</dt><dd><span class="mono" id="title-tick">no tick yet</span></dd></div>
+    </dl>
   </nav>
 
   <main class="main" id="main">

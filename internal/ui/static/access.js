@@ -20,7 +20,7 @@
 // argument, so internal/ui/jstest asserts it under Node with no browser and no network.
 
 import { ACCESS_ROUTE, refreshConsole, registerView, requestJSON } from "./app.js";
-import { buildTopology, textEquivalentMarkup, topologySVGMarkup } from "./topology.js";
+import { buildTopology, pathListMarkup, textEquivalentMarkup, topologySVGMarkup } from "./topology.js";
 
 /** The identifier of the element that holds the text equivalent of the flow overview.
  *  It differs from the identifier of the overview topology, because the console keeps the
@@ -794,7 +794,7 @@ export function flowCaption(model, selected) {
     return {
       label: "every source",
       id: "",
-      sentence: "Select a node to draw the paths that start at it. A path that no rule allows has no line.",
+      sentence: "Select a source to draw the paths that start at it. A path that no rule allows has no line.",
     };
   }
   const owned = model.paths.filter((path) => path.from === selected).length;
@@ -1088,6 +1088,19 @@ function drawFlow(status, nodes) {
     picture.setAttribute("aria-describedby", FLOW_TEXT_ID);
   }
   card.append(figure);
+
+  // A phone shows the path list in place of the picture, which is too small there to read
+  // or to press. A wider screen hides the list.
+  const list = el("div", "path-wrap");
+  list.innerHTML = pathListMarkup(model, source, { bySource: true });
+  card.append(list);
+  for (const button of list.querySelectorAll("button[data-node]")) {
+    const id = button.dataset.node;
+    button.addEventListener("click", () => {
+      source = flowSelection(model, source, id);
+      redraw();
+    });
+  }
 
   const text = el("div", "sr");
   text.id = FLOW_TEXT_ID;

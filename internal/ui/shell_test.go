@@ -223,7 +223,7 @@ func TestTheConsoleDeclaresAFaceForEveryFontFile(t *testing.T) {
 	}
 	// typography.css names these two families, and a face that names a third family
 	// reaches no element.
-	for _, family := range []string{"'Space Grotesk'", "'Space Mono'"} {
+	for _, family := range []string{"'Barlow Semi Condensed'", "'Martian Mono'"} {
 		if !strings.Contains(faces, "font-family:"+family) {
 			t.Errorf("fonts.css declares no face for the family %s", family)
 		}

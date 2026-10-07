@@ -261,7 +261,10 @@ export function policyRows(body, selectedId) {
     let tone = "ok";
     let word = "read and write";
     if (!tailnet.credential_present) {
-      tone = "crit";
+      // A credential is optional: the tailnet runs and reaches its peers without one, and
+      // only this view needs it. An absent credential is therefore a quiet state, and a
+      // red dot in this console always means a fault.
+      tone = "";
       word = "no credential";
     } else if (tailnet.credential_state === "rejected") {
       // The tailnet holds a credential that the control server takes for no request. The
@@ -285,22 +288,25 @@ export function policyRows(body, selectedId) {
   });
 }
 
-/** policyListMarkup returns the list of tailnets. Every row reaches focus by keyboard. */
+/**
+ * policyListMarkup returns the list of tailnets. Every row reaches focus by keyboard.
+ *
+ * A row states the identifier, the control server kind, and the credential state. The
+ * reason of the daemon is a paragraph, so the editor region of the selected tailnet
+ * states it and the list keeps one line for each tailnet.
+ */
 export function policyListMarkup(rows) {
-  const lines = rows.map((row) => {
-    const reason = row.reason ? `<p class="pol-reason mono">${esc(row.reason)}</p>` : "";
-    return (
-      `<div class="pol-row" role="option" data-id="${esc(row.id)}" aria-selected="${row.selected ? "true" : "false"}" tabindex="0">` +
-      `<div class="pol-line">` +
-      `<span class="pol-id mono">${esc(row.id)}</span>` +
-      `<span class="pol-state"><span class="dot ${esc(row.tone)}"></span><span class="pol-word">${esc(row.word)}</span></span>` +
-      `</div>` +
-      `<span class="pol-kind mono">${esc(row.kind)}</span>` +
-      reason +
-      `</div>`
-    );
-  });
-  return `<div class="pol-list" role="listbox" aria-label="Tailnets">${lines.join("")}</div>`;
+  const lines = rows.map((row) =>
+    `<div class="pol-row" role="option" data-id="${esc(row.id)}" aria-selected="${row.selected ? "true" : "false"}" tabindex="0">` +
+    `<span class="pol-id mono">${esc(row.id)}</span>` +
+    `<span class="pol-kind mono">${esc(row.kind)}</span>` +
+    `<span class="pol-state"><span class="dot ${esc(row.tone)}"></span><span class="pol-word">${esc(row.word)}</span></span>` +
+    `</div>`,
+  );
+  return (
+    `<section class="frame pol-listframe"><div class="frame-head"><h2 class="frame-title">Tailnets</h2></div>` +
+    `<div class="pol-list" role="listbox" aria-label="Tailnets">${lines.join("")}</div></section>`
+  );
 }
 
 /**
@@ -373,6 +379,9 @@ export function editorModel(state, id) {
     detail: held.error,
     sentence: "",
     sections: held.sections,
+    // The reason of a credential that the control server rejected. The list keeps one
+    // line for each tailnet, so the editor region of the selection states the reason.
+    rejection: row && row.word === "credential rejected" ? row.reason : "",
   };
 
   if (row && row.word === "no credential") {
@@ -657,7 +666,12 @@ export function visualMarkup(sections, nav = "", pendingRemoval = null, baseSect
     ["postures", "Postures", count(sections.postures)],
     ["tests", "Tests", count(sections.tests) + count(sections.sshTests)],
   ];
-  const items = rows.map(([key, label, n]) => namedSetNavRowMarkup(key, label, n, nav)).join("");
+  // The ten sections sit in one grid of cells, so the counts read as one table and the
+  // section that the operator opens sits directly below them.
+  const items =
+    `<div class="pol-sections" role="group" aria-label="Sections">` +
+    rows.map(([key, label, n]) => namedSetNavRowMarkup(key, label, n, nav)).join("") +
+    `</div>`;
   const opaque = sections.opaque_keys && sections.opaque_keys.length
     ? `<p class="note">Use Text to read or change ${esc(sections.opaque_keys.join(", "))}.</p>`
     : "";
@@ -2171,13 +2185,16 @@ export function editorMarkup(model, toggle = null) {
   const warning = `<p class="note pol-warning">${esc(EVERY_DEVICE_STATEMENT)}</p>`;
 
   if (model.state !== "document") {
-    const label = model.id ? `<span class="pol-name mono">${esc(model.id)}</span>` : "";
+    const title = model.id
+      ? `<h2 class="frame-title"><span class="mono">${esc(model.id)}</span> · policy document</h2>`
+      : `<h2 class="frame-title">Policy document</h2>`;
     const sentence = model.state === "unselected"
       ? "Select a tailnet to read the policy document that its control server holds."
       : model.sentence;
     return (
-      `<div class="card pol-region">${warning}${label}` +
+      `<div class="frame pol-region pol-idle"><div class="frame-head">${title}</div>${warning}` +
       noteMarkup(sentence) +
+      detailMarkup(model.rejection) +
       detailMarkup(model.detail) +
       `</div>`
     );
@@ -2204,8 +2221,9 @@ export function editorMarkup(model, toggle = null) {
       `<textarea class="pol-doc mono"${readOnly} rows="${model.lines}" spellcheck="false" wrap="off" aria-label="The policy document of ${esc(model.id)}">${esc(model.text)}</textarea>` +
       `</div></div>`;
   return (
-    `<div class="pol-region">${warning}` +
+    `<div class="frame pol-region"><div class="frame-head"><h2 class="frame-title"><span class="mono">${esc(model.id)}</span> · policy document</h2></div>${warning}` +
     noteMarkup(model.sentence) +
+    detailMarkup(model.rejection) +
     (toggle ? toggleMarkup(toggle) : "") +
     body +
     (etag ? `<div class="pol-meta">${etag}</div>` : "") +

@@ -10,7 +10,7 @@ import test from "node:test";
 import {
   ACTIVITY_ROW_LIMIT,
   activityMarkup,
-  activityRows,
+  activityModel,
   dnsMarkup,
   dnsModel,
   settingsMarkup,
@@ -208,7 +208,7 @@ test("the DNS view draws the split DNS card with one row per domain owner", () =
     }),
   );
   const markup = dnsMarkup(model);
-  assert.match(markup, /<h2>Split DNS<\/h2>/);
+  assert.match(markup, /<h2 class="frame-title">Split DNS<\/h2>/);
   assert.match(markup, /<span class="id mono">alpha<\/span>/);
   assert.match(markup, /<span class="id mono">beta<\/span>/);
   assert.match(markup, /acme\.example\.com/);
@@ -288,26 +288,32 @@ function events() {
   ];
 }
 
-test("the activity view lists every event newest first", () => {
+// tick returns the routine events of one reconcile tick, as the daemon appends them.
+function tick(time, actions) {
+  const list = [{ Time: time, Type: "reconcile_start", TailnetID: "", Message: "" }];
+  list.push({ Time: time, Type: "reconcile_apply", TailnetID: "", Message: `${actions.length} actions` });
+  for (const [tailnet, action] of actions) {
+    list.push({ Time: time, Type: "action_ok", TailnetID: tailnet, Message: action });
+  }
+  list.push({ Time: time, Type: "reconcile_complete", TailnetID: "", Message: `applied ${actions.length} actions` });
+  return list;
+}
+
+function rowCount(markup) {
+  return (markup.match(/<tr class="log-row/g) || []).length;
+}
+
+test("the activity view lists every notable event newest first", () => {
   // FR-console-36.
-  const rows = activityRows(events());
+  const model = activityModel(events());
   assert.deepEqual(
-    rows.map((row) => row.kind),
+    model.rows.map((row) => row.event.Type),
     ["console.request", "policy.pushed", "dns.unprotected", "access.applied"],
   );
 });
 
-test("the activity view states the time, the kind, the tailnet, and the message", () => {
-  const rows = activityRows(events());
-  assert.deepEqual(rows[1], {
-    date: "2026-08-05",
-    time: "13:12:03",
-    kind: "policy.pushed",
-    tailnet: "jbones",
-    message: "the control server accepted the policy document",
-  });
-
-  const markup = activityMarkup(rows);
+test("the activity view states the time, the tailnet, the kind, and the message", () => {
+  const markup = activityMarkup(activityModel(events()));
   assert.match(markup, /13:12:03/);
   assert.match(markup, /2026-08-05/);
   assert.match(markup, /policy\.pushed/);
@@ -315,67 +321,100 @@ test("the activity view states the time, the kind, the tailnet, and the message"
   assert.match(markup, /the control server accepted the policy document/);
 });
 
-test("the activity view shows the four event kinds of version 1.0", () => {
-  const markup = activityMarkup(activityRows(events()));
-  for (const kind of ["access.applied", "dns.unprotected", "policy.pushed", "console.request"]) {
-    assert.match(markup, new RegExp(kind.replace(".", "\\.")));
-  }
+test("the activity view states each date once, as a header of its day", () => {
+  const log = [
+    { Time: "2026-08-04T23:59:00Z", Type: "access.applied", TailnetID: "", Message: "a" },
+    { Time: "2026-08-05T00:01:00Z", Type: "access.applied", TailnetID: "", Message: "b" },
+    { Time: "2026-08-05T00:02:00Z", Type: "access.applied", TailnetID: "", Message: "c" },
+  ];
+  const markup = activityMarkup(activityModel(log));
+  assert.equal((markup.match(/class="day"/g) || []).length, 2);
+  assert.equal((markup.match(/>2026-08-05</g) || []).length, 1);
+});
+
+test("the activity view hides the reconcile ticks by default and folds each tick into one row", () => {
+  // A tick records four kinds of routine event, and an incident hides between them.
+  const log = [
+    ...tick("2026-08-05T13:00:00Z", [["alpha", "sync_routes"], ["beta", "sync_routes"]]),
+    { Time: "2026-08-05T13:00:05Z", Type: "access.jump_displaced", TailnetID: "", Message: "the jump rule of INPUT is at position 2" },
+    ...tick("2026-08-05T13:00:10Z", [["alpha", "sync_host_access"]]),
+  ];
+
+  const quiet = activityModel(log);
+  assert.equal(quiet.notable, 1);
+  assert.deepEqual(quiet.rows.map((row) => row.kind), ["event"]);
+
+  const every = activityModel(log, { ticks: true });
+  assert.deepEqual(every.rows.map((row) => row.kind), ["tick", "event", "tick"]);
+  assert.equal(every.rows[0].message, "applied 1 actions");
+  assert.deepEqual(every.rows[2].actions, [
+    { tailnet: "alpha", action: "sync_routes" },
+    { tailnet: "beta", action: "sync_routes" },
+  ]);
+
+  const markup = activityMarkup(every);
+  assert.equal(rowCount(markup), 3);
+  assert.match(markup, /reconcile tick/);
+  assert.match(markup, /alpha: sync_routes · beta: sync_routes/);
+  assert.doesNotMatch(markup, /reconcile_start/);
+});
+
+test("the tailnet filter keeps the events and the tick actions of one tailnet", () => {
+  const log = [
+    ...tick("2026-08-05T13:00:00Z", [["alpha", "sync_routes"], ["beta", "sync_routes"]]),
+    { Time: "2026-08-05T13:00:05Z", Type: "policy.pushed", TailnetID: "beta", Message: "pushed" },
+    { Time: "2026-08-05T13:00:06Z", Type: "policy.pushed", TailnetID: "alpha", Message: "pushed" },
+  ];
+  const model = activityModel(log, { ticks: true, tailnet: "beta" });
+  assert.deepEqual(model.tailnets, ["alpha", "beta"]);
+  assert.deepEqual(model.rows.map((row) => row.kind), ["event", "tick"]);
+  assert.equal(model.rows[0].event.TailnetID, "beta");
+  assert.deepEqual(model.rows[1].actions, [{ tailnet: "beta", action: "sync_routes" }]);
+});
+
+test("the activity view states the routine log when no event is notable", () => {
+  const markup = activityMarkup(activityModel(tick("2026-08-05T13:00:00Z", [["alpha", "sync_routes"]])));
+  assert.match(markup, /No event other than a routine reconcile tick/);
+  assert.match(markup, /Select Every event to show the ticks\./);
 });
 
 test("the activity view keeps a time that no parser reads", () => {
   // The console shows no invented data, so a time that the console cannot read reaches
   // the operator as the daemon wrote it.
-  const rows = activityRows([{ Time: "not a time", Type: "access.applied", Message: "m" }]);
-  assert.equal(rows[0].date, "");
-  assert.equal(rows[0].time, "not a time");
+  const markup = activityMarkup(activityModel([{ Time: "not a time", Type: "access.applied", Message: "m" }]));
+  assert.match(markup, />not a time</);
 });
 
 test("the activity view states an empty state when the daemon reports no event", () => {
-  assert.match(activityMarkup(activityRows([])), /The daemon reports no event\./);
-  assert.match(activityMarkup(activityRows(null)), /The daemon reports no event\./);
+  assert.match(activityMarkup(activityModel([])), /The daemon reports no event\./);
+  assert.match(activityMarkup(activityModel(null)), /The daemon reports no event\./);
 });
 
 test("the activity view escapes every value that the daemon reports", () => {
   const hostile = '<img src=x onerror="alert(1)">';
-  const rows = activityRows([
-    { Time: hostile, Type: hostile, TailnetID: hostile, Message: hostile },
-  ]);
-  const markup = activityMarkup(rows);
+  const markup = activityMarkup(activityModel([{ Time: hostile, Type: hostile, TailnetID: hostile, Message: hostile }]));
   assert.doesNotMatch(markup, /<img/);
   assert.doesNotMatch(markup, /onerror="/);
   assert.match(markup, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
-test("the activity view names a tailnet with no usable policy credential above the event list", () => {
+test("the activity view names a tailnet whose credential the control server rejected above the table", () => {
   // Issue #287. The activity log stays a record of real daemon events, so the credential
-  // problem is a note above the list, not a synthetic event row.
-  const markup = activityMarkup(activityRows(events()), [
-    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "the tailnet \"havoc\" has no Tailscale OAuth credential" },
+  // fault is an alert above the table, not a synthetic event row.
+  const markup = activityMarkup(activityModel(events()), [
+    { id: "havoc", kind: "tailscale", credential_state: "rejected", reason: "rejected" },
   ]);
-  assert.match(markup, /needs a policy credential/);
-  assert.match(markup, /havoc/);
-  assert.match(markup, /Open the Policy tab/);
-  assert.ok(
-    markup.indexOf("needs a policy credential") < markup.indexOf('<div class="events">'),
-    "the note sits above the event list",
-  );
-  // The note names a policy fact, not a daemon event.
-  assert.ok(
-    !activityRows(events()).some((row) => row.message.includes("policy credential")),
-    "the credential note is not a synthetic event row",
-  );
+  assert.match(markup, /rejected the policy credential of havoc/);
+  assert.match(markup, /href="#\/policy"/);
+  assert.ok(markup.indexOf("rejected the policy credential") < markup.indexOf('<table class="log"'));
 });
 
-test("the activity view shows no credential note when every tailnet holds a usable credential", () => {
-  const markup = activityMarkup(activityRows(events()), [
+test("the activity view draws no alert for an absent credential, which is optional", () => {
+  const markup = activityMarkup(activityModel(events()), [
+    { id: "havoc", kind: "tailscale", credential_state: "absent", reason: "no credential" },
     { id: "jbones", kind: "tailscale", credential_state: "usable" },
   ]);
-  assert.doesNotMatch(markup, /needs a policy credential/);
-});
-
-test("the activity view shows no credential note when the poll holds no policy entry yet", () => {
-  const markup = activityMarkup(activityRows(events()));
-  assert.doesNotMatch(markup, /needs a policy credential/);
+  assert.doesNotMatch(markup, /class="alert/);
 });
 
 // longLog returns count events, oldest first, as the daemon reports them. The message of
@@ -383,54 +422,32 @@ test("the activity view shows no credential note when the poll holds no policy e
 function longLog(count) {
   const log = [];
   for (let i = 0; i < count; i += 1) {
-    log.push({
-      Time: "2026-08-05T13:00:00Z",
-      Type: "access.applied",
-      TailnetID: "jbones",
-      Message: `event ${i}`,
-    });
+    log.push({ Time: "2026-08-05T13:00:00Z", Type: "access.applied", TailnetID: "jbones", Message: `event ${i}` });
   }
   return log;
 }
 
-function rowCount(markup) {
-  return (markup.match(/<div class="ev">/g) || []).length;
-}
-
-test("the activity view draws no more rows than the row limit", () => {
+test("the activity view draws no more rows than the row limit, and keeps the newest", () => {
   // Issue #355. The daemon holds 1000 events, and every one reached the page as a row.
-  const markup = activityMarkup(activityRows(longLog(ACTIVITY_ROW_LIMIT + 150)));
-  assert.equal(rowCount(markup), ACTIVITY_ROW_LIMIT);
-});
-
-test("the activity view keeps the newest events when the log passes the row limit", () => {
   const total = ACTIVITY_ROW_LIMIT + 150;
-  const markup = activityMarkup(activityRows(longLog(total)));
+  const markup = activityMarkup(activityModel(longLog(total)));
+  assert.equal(rowCount(markup), ACTIVITY_ROW_LIMIT);
   assert.match(markup, new RegExp(`event ${total - 1}<`));
   assert.match(markup, new RegExp(`event ${total - ACTIVITY_ROW_LIMIT}<`));
   assert.doesNotMatch(markup, new RegExp(`event ${total - ACTIVITY_ROW_LIMIT - 1}<`));
-  assert.doesNotMatch(markup, />event 0</);
+  assert.match(markup, new RegExp(`The view draws the newest <span class="mono">${ACTIVITY_ROW_LIMIT}</span> rows of <span class="mono">${total}</span>\\.`));
 });
 
-test("the activity view states the count of the events that it draws and the count of the log", () => {
-  const total = ACTIVITY_ROW_LIMIT + 150;
-  const markup = activityMarkup(activityRows(longLog(total)));
-  assert.match(
-    markup,
-    new RegExp(`The view draws the newest ${ACTIVITY_ROW_LIMIT} events of ${total}\\.`),
-  );
-});
-
-test("the activity view draws every event when the log holds no more than the row limit", () => {
-  const markup = activityMarkup(activityRows(longLog(ACTIVITY_ROW_LIMIT)));
+test("the activity view draws every row when the log holds no more than the row limit", () => {
+  const markup = activityMarkup(activityModel(longLog(ACTIVITY_ROW_LIMIT)));
   assert.equal(rowCount(markup), ACTIVITY_ROW_LIMIT);
   assert.doesNotMatch(markup, /The view draws the newest/);
 });
 
-test("the activity view escapes the tailnet identifiers of the credential note", () => {
+test("the activity view escapes the tailnet identifiers of the credential alert", () => {
   const hostile = '<img src=x onerror="alert(1)">';
-  const markup = activityMarkup(activityRows([]), [
-    { id: hostile, kind: "tailscale", credential_state: "absent", reason: hostile },
+  const markup = activityMarkup(activityModel([]), [
+    { id: hostile, kind: "tailscale", credential_state: "rejected", reason: hostile },
   ]);
   assert.doesNotMatch(markup, /<img/);
 });

@@ -423,11 +423,11 @@ test("the matrix holds no port value", () => {
   assert.doesNotMatch(text, /tcp|udp/);
 });
 
-test("the square carries a 6 pixel corner radius", async () => {
+test("the square carries the square corner of the brand", async () => {
   // FR-editor-15. The radius token of the brand carries the value, and the square reads
   // the token, therefore the grid reads as a grid.
   const radius = await readFile(new URL("../static/brand/tokens/radius.css", import.meta.url), "utf8");
-  assert.match(radius, /--r-xs:6px;/);
+  assert.match(radius, /--r-xs:0px;/);
 
   const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
   assert.match(style, /\.ac-square\{[^}]*border-radius:var\(--r-xs\)/);
@@ -598,7 +598,7 @@ test("the flow overview states which source is selected", () => {
 
   const resting = flowCaption(model, null);
   assert.equal(resting.id, "");
-  assert.match(resting.sentence, /Select a node/);
+  assert.match(resting.sentence, /Select a source/);
 
   const chosen = flowCaption(model, "jbones");
   assert.equal(chosen.label, "source");
