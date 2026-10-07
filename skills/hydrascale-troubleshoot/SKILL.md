@@ -154,9 +154,9 @@ absent therefore means one of these causes:
   It prints `active` when the daemon runs.
 - A write failed. The event `access.write_failed` names the command.
 
-If both rules are present, read the output of `netcheck`. `UDP: false` means that the
-namespace sends or receives no UDP. A firewall in front of the host, such as the firewall
-of a cloud provider, must allow inbound UDP on the port.
+If both rules are present, read the output of `netcheck`. `UDP: false` means that no UDP
+answer reached the namespace. A firewall in front of the host, such as the firewall of a
+cloud provider, must allow inbound UDP on the port.
 
 ### Repair
 
@@ -268,7 +268,8 @@ services also take position 1 when their service starts after the daemon:
 The daemon reads the position on each tick. It records the event `access.jump_displaced`
 when the position changes. The message has one of two forms:
 
-- `the jump rule of FORWARD is at position <n>, below <chains>`.
+- `the jump rule of FORWARD is at position <n>, below <targets>`. Each target is a chain
+  or a target such as `ACCEPT`.
 - `FORWARD held no jump rule of the daemon, therefore the daemon wrote it at position 1`.
 
 The daemon moves no rule of the operator, so it does not move the jump rule back.
@@ -344,8 +345,10 @@ Print this repair for the operator:
 sudo "$EDITOR" /etc/hydrascale/secrets.yaml
 ```
 
-The operator writes the new credential into the file, or through the console. The daemon reads the credential at each request, so it needs no restart. The state
-`rejected` stays until the next request that the control server accepts.
+The operator writes the new credential into the file, or through the console. The daemon
+reads the credential at each request, so it needs no restart. A refusal of the control
+server stays in the state `rejected` until the control server accepts a request, or until
+the console writes a new credential.
 
 The page https://crank-git.github.io/Hydrascale/guides/credentials/ states each credential
 and its scopes.
