@@ -43,8 +43,14 @@ The daemon writes each event to the log in the form `[<type>] <tailnet>: <messag
 tailnet part is absent when the event concerns the whole host. Read one event type:
 
 ```sh
-journalctl -u hydrascale | grep 'ipv6.state' | tail -n 5
+journalctl -u hydrascale --since "-1d" | grep 'ipv6.state' | tail -n 5
 ```
+
+Always pass `--since`. On a host with a large journal, a read of the whole journal of the
+unit can take a minute or more, and `--since "-1d"` takes seconds. The daemon records
+`ipv6.state` once after it starts, and again when the state changes. If a read of one day
+holds no such line, ask the operator, then run
+`systemctl show -p ActiveEnterTimestamp hydrascale`. Pass that start time to `--since`.
 
 If `journalctl` prints no line of Hydrascale, the account can be outside the group that
 reads the journal. Ask the operator before you run the same command with `sudo`.
@@ -65,7 +71,7 @@ The symptom: a namespace reaches no IPv6 address, or `netcheck` in a namespace r
 ### Check
 
 ```sh
-journalctl -u hydrascale | grep 'ipv6.state' | tail -n 1
+journalctl -u hydrascale --since "-1d" | grep 'ipv6.state' | tail -n 1
 ip -6 route show default
 sysctl -n net.ipv6.conf.all.force_forwarding
 sudo ip6tables -t nat -S POSTROUTING
@@ -181,7 +187,7 @@ wrong tailnet, or the resolver configuration of the host changed.
 
 ```sh
 sudo hydrascale status
-journalctl -u hydrascale | grep -E 'dns\.unprotected|dns\.split_domain_conflict' | tail -n 5
+journalctl -u hydrascale --since "-1d" | grep -E 'dns\.unprotected|dns\.split_domain_conflict' | tail -n 5
 pgrep -a tailscaled
 sudo findmnt --task <pid> /etc
 resolvectl status
@@ -249,7 +255,7 @@ open, after Docker or the `tailscaled` of the host starts.
 ### Check
 
 ```sh
-journalctl -u hydrascale | grep 'access.jump_displaced' | tail -n 4
+journalctl -u hydrascale --since "-1d" | grep 'access.jump_displaced' | tail -n 4
 sudo iptables -S FORWARD
 sudo iptables -S INPUT
 sudo ip6tables -S FORWARD
