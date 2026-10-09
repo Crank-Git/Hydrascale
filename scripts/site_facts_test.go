@@ -69,3 +69,24 @@ func TestTheCommandLinePageNamesEachCommandThatResolvesAnAlias(t *testing.T) {
 		}
 	}
 }
+
+func TestTheHostAccessGuideAndTheTroubleshootingPageStateThePublishedPort(t *testing.T) {
+	// FR-publish-19 and FR-publish-20: each page names the key and the local rule that a
+	// published port needs, because the configuration load refuses the key without the rule.
+	pages := map[string][]string{
+		"guides/host-access.md":         {"## Published ports", "`tailnets[].publish`", "to: host"},
+		"operations/troubleshooting.md": {"`tailnets[].publish`", "to: host", "iptables -t nat -S PREROUTING"},
+	}
+	for page, phrases := range pages {
+		file := filepath.Join("..", "docs", "site", page)
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for _, phrase := range phrases {
+			if !strings.Contains(string(data), phrase) {
+				t.Errorf("%s does not state %q", file, phrase)
+			}
+		}
+	}
+}

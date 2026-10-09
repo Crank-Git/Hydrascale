@@ -40,6 +40,9 @@ tailnets:
     exit_node: "node1.example.com"
     host_access: true
     # control_url: "https://headscale.example.com"
+    # The ports of the host that the peers of this tailnet reach (default: empty).
+    # Each entry needs a local rule from: corp-prod, to: host that covers it.
+    # publish: ["tcp/22"]
 
 access:
   mode: enforce
@@ -109,7 +112,7 @@ Each item of `tailnets` declares one tailnet.
 | `tailnets[].auth_key` | empty | An auth key for an unattended setup. The environment variable `HYDRASCALE_AUTHKEY_<ID>` overrides it. See [Environment variables](environment.md). |
 | `tailnets[].host_access` | the global `host_access` | Host access for this tailnet. The value overrides the global key. |
 | `tailnets[].control_url` | the global `control_url` | The control server URL of this tailnet. The same rule for the scheme applies. |
-| `tailnets[].publish` | empty | The ports of the host that the peers of this tailnet reach. An entry is `tcp/<n>` or `udp/<n>`. The tailnet needs host access, and a local rule `from: <tailnet>, to: host` must cover each entry. |
+| `tailnets[].publish` | empty | The ports of the host that the peers of this tailnet reach through the Tailscale address of the tailnet. An entry is `tcp/<n>` or `udp/<n>`, where `<n>` is from 1 to 65535. A range is not an entry, and the list holds no duplicate. The tailnet needs host access. A local rule `from: <tailnet>, to: host` must cover each entry: a rule with an empty port list covers every entry, and a port or a range of the rule covers an entry of the same protocol. The configuration load refuses the file when one of these conditions fails. See [Published ports](../guides/host-access.md#published-ports). |
 
 When `resolver.resolve_aliases` is `true`, an alias is also a DNS label. The alias then
 holds no underscore, and two aliases that differ by case alone are a conflict.

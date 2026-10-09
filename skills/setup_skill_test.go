@@ -146,7 +146,7 @@ func TestTheSetupSkillStatesTheConfigurationKeys(t *testing.T) {
 	t.Run("states the keys that an operator sets most and links the configuration page", func(t *testing.T) {
 		assertContains(t, setupSkill(t),
 			"`tailnets[].alias`", "`resolver.resolve_aliases`", "`route_table`",
-			"`ipv6`", "`host_dns.mode`", "`socket_group`",
+			"`ipv6`", "`host_dns.mode`", "`socket_group`", "`tailnets[].publish`",
 			"https://crank-git.github.io/Hydrascale/reference/configuration/",
 		)
 	})
