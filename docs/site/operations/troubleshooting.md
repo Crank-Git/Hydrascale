@@ -211,6 +211,64 @@ one route per peer. When the rule is absent, read the log for `hostaccess`. When
 rule of the operator already holds the priority 32000, the daemon adds none and it states
 the table that the rule looks up.
 
+## A peer gets `connection refused` on a port of the host
+
+The Tailscale address of a tailnet lives inside its namespace, where no service listens.
+The kernel of the namespace therefore refuses a connection to a port that the tailnet does
+not publish. Read the published port rules on `tailscale0` inside the namespace:
+
+```bash
+sudo ip netns exec ns-<id> iptables -t nat -S PREROUTING | grep tailscale0
+```
+
+Each published port shows one DNAT rule in this form:
+
+```
+-A PREROUTING -i tailscale0 -p tcp -m tcp --dport 22 -j DNAT --to-destination <host veth address>:22
+```
+
+If no rule names the port, the tailnet does not publish it. Add the entry to the key
+`tailnets[].publish`, and add a local rule `from: <id>, to: host` that covers it:
+
+```yaml
+tailnets:
+  - id: <id>
+    host_access: true
+    publish: ["tcp/22"]
+
+access:
+  rules:
+    - from: <id>
+      to: host
+      ports: ["tcp/22"]
+```
+
+Then run `sudo hydrascale apply`. The rule appears within one reconciliation tick. The
+configuration load refuses a published port on a tailnet without host access, and a
+published port that no local rule covers. The message names the tailnet, the entry, and
+the rule that the file needs.
+
+If the rule is present and the connection times out, `HYDRASCALE-OUT` drops it on the
+host. That chain then holds no rule from the tailnet to the host that covers the port.
+Read the chain, and read the log for the message of a refused configuration load:
+
+```bash
+sudo iptables -S HYDRASCALE-OUT
+sudo journalctl -u hydrascale --since "-1d" | grep publish
+```
+
+If the rule is present and the connection is still refused, the service of the host
+listens on no address that the veth pair reaches. Read the listen address of the service:
+
+```bash
+sudo ss -tlnp | grep ':22 '
+```
+
+A service that listens on `127.0.0.1` alone stays unreachable. Make it listen on the host
+side veth address, or on every address. The console at `127.0.0.1:9443` stays
+unreachable from a peer by design. Use an SSH tunnel to reach it. See
+[The console has no authentication](../security/console.md).
+
 ## `name not a valid ifname`
 
 An older version used the whole tailnet identifier as the interface name, which passes the

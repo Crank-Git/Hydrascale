@@ -1,12 +1,12 @@
 ---
 name: hydrascale-troubleshoot
-description: Find the cause of a Hydrascale fault with read-only commands, and print the command that repairs it. Use when a tailnet has no IPv6, makes no direct connection, resolves no name, loses traffic after Docker or tailscaled starts, or cannot read or write its policy.
+description: Find the cause of a Hydrascale fault with read-only commands, and print the command that repairs it. Use when a tailnet has no IPv6, makes no direct connection, resolves no name, loses traffic after Docker or tailscaled starts, cannot read or write its policy, or when a peer gets connection refused on a port of the host.
 allowed-tools: Read, Bash(hydrascale version:*), Bash(hydrascale status:*), Bash(sudo hydrascale status:*), Bash(sudo hydrascale diff:*), Bash(sudo hydrascale list:*), Bash(journalctl -u hydrascale:*), Bash(sudo iptables -S:*), Bash(sudo ip6tables -S:*), Bash(sudo iptables -t nat -S:*), Bash(sudo ip6tables -t nat -S:*), Bash(ip -6 route show:*), Bash(sysctl -n:*), Bash(pgrep -a tailscaled:*), Bash(resolvectl status:*), Bash(sudo findmnt --task:*)
 ---
 
 # Troubleshoot Hydrascale
 
-This skill finds the cause of a fault on a host that runs Hydrascale. It holds five
+This skill finds the cause of a fault on a host that runs Hydrascale. It holds six
 diagnoses. Each diagnosis holds a read-only check, the cause that the output proves, and
 the command that repairs the cause.
 
@@ -359,6 +359,84 @@ the console writes a new credential.
 
 The page https://crank-git.github.io/Hydrascale/guides/credentials/ states each credential
 and its scopes.
+
+## Diagnosis: A refused connection to a port of the host
+
+The symptom: a peer gets `connection refused` on a port of the host, or the connection
+times out. A ping of the same address answers.
+
+### Check
+
+```sh
+sudo hydrascale status
+sudo iptables -S HYDRASCALE-OUT
+journalctl -u hydrascale --since "-1d" | grep publish | tail -n 5
+```
+
+Ask the operator, then read the published port rules inside the namespace of the tailnet:
+
+```sh
+sudo ip netns exec ns-<tailnet-id> iptables -t nat -S PREROUTING | grep tailscale0
+```
+
+`allowed-tools` names no `ip netns exec` rule, because that prefix also allows every
+command inside the namespace.
+
+### Cause
+
+The Tailscale address of a tailnet lives inside its namespace, where no service listens.
+The kernel of the namespace refuses a connection to a port that the tailnet does not
+publish. The key `tailnets[].publish` names the ports that the peers of the tailnet reach.
+For each entry, the daemon writes one DNAT rule on `tailscale0` in this form:
+
+```
+-A PREROUTING -i tailscale0 -p tcp -m tcp --dport 22 -j DNAT --to-destination <host veth address>:22
+```
+
+| The result | Cause |
+|---|---|
+| No DNAT rule names the port, and the peer gets `connection refused`. | The tailnet does not publish the port. |
+| The DNAT rule is present, and the connection times out. | `HYDRASCALE-OUT` holds no rule from the tailnet to the host that covers the port, so it drops the connection. The configuration load refuses a published port that no local rule covers. The log then holds the message of the refused load. |
+| The DNAT rule is present, and the peer gets `connection refused`. | The service of the host listens on no address that the veth pair reaches. |
+
+A service that listens on `127.0.0.1` alone stays unreachable from a peer. The console at
+`127.0.0.1:9443` is such a service by design. Report this, and change nothing.
+
+### Repair
+
+If the tailnet does not publish the port, print this repair for the operator:
+
+```sh
+sudo "$EDITOR" /etc/hydrascale/config.yaml
+sudo hydrascale apply
+```
+
+In the file, the tailnet gains the entry, and the `access` block gains the local rule that
+covers it:
+
+```yaml
+tailnets:
+  - id: <tailnet-id>
+    host_access: true
+    publish: ["tcp/22"]
+
+access:
+  rules:
+    - from: <tailnet-id>
+      to: host
+      ports: ["tcp/22"]
+```
+
+The tailnet needs host access. A local rule with an empty port list covers every entry.
+
+If the service listens on `127.0.0.1` alone, tell the operator to make it listen on the host
+side veth address, or on every address. No command of Hydrascale repairs it.
+
+The page
+https://crank-git.github.io/Hydrascale/operations/troubleshooting/#a-peer-gets-connection-refused-on-a-port-of-the-host
+states this diagnosis. The page
+https://crank-git.github.io/Hydrascale/guides/host-access/#published-ports states the
+published port.
 
 ## No fault found
 
