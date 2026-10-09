@@ -136,8 +136,9 @@ func TestTeardownHostAccessReturnsEveryFailedStepTogether(t *testing.T) {
 	if got := strings.Count(err.Error(), "\n") + 1; got != 3 {
 		t.Errorf("TeardownHostAccess returned %d errors, want 3: %v", got, err)
 	}
-	if len(rec.Calls()) != 4 {
-		t.Errorf("TeardownHostAccess ran %d commands, want 4", len(rec.Calls()))
+	// The forwarding write, the two chain reads, and the three deletes.
+	if len(rec.Calls()) != 6 {
+		t.Errorf("TeardownHostAccess ran %d commands, want 6", len(rec.Calls()))
 	}
 }
 
@@ -177,6 +178,11 @@ func hostAccessFixture(t *testing.T, nsName, infraSubnet string, index int) (*ex
 	// scripts `want` with `absent` states that a rule is already gone, and that result
 	// carries no meaning for a sysctl write.
 	rec.Script(execx.Result{}, "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=0")
+	// The teardown reads the chain to find the published port rules. A chain read is not a
+	// rule delete, so it stays out of `want` for the same reason.
+	for _, command := range []string{"iptables", "ip6tables"} {
+		rec.Script(execx.Result{Output: []byte("-P PREROUTING ACCEPT\n")}, "ip", "netns", "exec", nsName, command, "-t", "nat", "-S", "PREROUTING")
+	}
 	return rec, &RealManager{Runner: rec}, want
 }
 
@@ -189,12 +195,21 @@ func TestTeardownRemovesEveryRuleThatSetupAdded(t *testing.T) {
 	// for the index that Create passes to SetupVeth.
 	index := VethIndex(nsName)
 
+	_, _, hostIP, _, err := VethIPs(infraSubnet, index)
+	if err != nil {
+		t.Fatalf("VethIPs: %v", err)
+	}
+	published := []string{"PREROUTING", "-i", "tailscale0", "-p", "tcp", "-m", "tcp", "--dport", "22", "-j", "DNAT", "--to-destination", hostIP + ":22"}
+	nat := []string{"netns", "exec", nsName, "iptables", "-t", "nat"}
+
 	rec, m, _ := setupVethFixture(t, nsName, infraSubnet, index)
 	scriptHostAccessSetup(t, rec, nsName, infraSubnet, index)
+	rec.Script(absent, "ip", append(slices.Clone(nat), append([]string{"-C"}, published...)...)...)
+	rec.Script(execx.Result{}, "ip", append(slices.Clone(nat), append([]string{"-A"}, published...)...)...)
 	if err := m.SetupVeth(nsName, index, infraSubnet); err != nil {
 		t.Fatalf("SetupVeth: %v", err)
 	}
-	if err := m.SetupHostAccess(nsName, index, infraSubnet); err != nil {
+	if err := m.SetupHostAccess(nsName, index, infraSubnet, []string{"tcp/22"}, false); err != nil {
 		t.Fatalf("SetupHostAccess: %v", err)
 	}
 	added := ruleSpecs(t, rec.Calls(), "add")
@@ -203,6 +218,8 @@ func TestTeardownRemovesEveryRuleThatSetupAdded(t *testing.T) {
 	for _, c := range deletes {
 		rec2.Script(execx.Result{}, c.Name, c.Args...)
 	}
+	rec2.Script(execx.Result{Output: []byte("-A " + strings.Join(published, " ") + "\n")}, "ip", append(slices.Clone(nat), "-S", "PREROUTING")...)
+	rec2.Script(execx.Result{}, "ip", append(slices.Clone(nat), append([]string{"-D"}, published...)...)...)
 	scriptVethTeardown(t, rec2, nsName, infraSubnet)
 	if err := m2.TeardownHostAccess(nsName, index, infraSubnet); err != nil {
 		t.Fatalf("TeardownHostAccess: %v", err)
@@ -236,6 +253,7 @@ func scriptHostAccessSetup(t *testing.T, rec *execx.Recorder, nsName, infraSubne
 	}
 
 	rec.Script(execx.Result{}, "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=1")
+	rec.Script(execx.Result{Output: []byte("-P PREROUTING ACCEPT\n")}, "ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-S", "PREROUTING")
 
 	for _, op := range []string{"-C", "-A"} {
 		res := execx.Result{}
@@ -496,7 +514,7 @@ func TestSetupHostAccessEnablesForwardingInsideTheNamespace(t *testing.T) {
 	scriptHostAccessSetup(t, rec, nsName, infraSubnet, index)
 
 	m := &RealManager{Runner: rec}
-	if err := m.SetupHostAccess(nsName, index, infraSubnet); err != nil {
+	if err := m.SetupHostAccess(nsName, index, infraSubnet, nil, false); err != nil {
 		t.Fatalf("SetupHostAccess: %v", err)
 	}
 
@@ -516,7 +534,7 @@ func TestSetupHostAccessReturnsTheErrorWhenTheForwardingWriteFails(t *testing.T)
 	rec.Script(broken, "ip", "netns", "exec", nsName, "sysctl", "-w", "net.ipv4.ip_forward=1")
 
 	m := &RealManager{Runner: rec}
-	if err := m.SetupHostAccess(nsName, index, infraSubnet); err == nil {
+	if err := m.SetupHostAccess(nsName, index, infraSubnet, nil, false); err == nil {
 		t.Fatal("SetupHostAccess returned no error for a failed forwarding write")
 	}
 }

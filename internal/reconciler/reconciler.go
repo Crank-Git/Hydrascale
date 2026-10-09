@@ -136,6 +136,10 @@ type Reconciler struct {
 	// teardownHostAccess removes the namespace-side host access rules. A test replaces it.
 	teardownHostAccess func(nsName string, index int, infraSubnet string) error
 
+	// setupHostAccess writes the namespace-side host access rules and the published port
+	// rules. A test replaces it.
+	setupHostAccess func(nsName string, index int, infraSubnet string, publish []string, ipv6 bool) error
+
 	// reaper removes each host rule that names a veth device that is gone. New sets it
 	// when the namespace manager carries that ability.
 	reaper StaleRuleReaper
@@ -361,6 +365,7 @@ func New(configPath string, ns namespaces.Manager, dm daemon.Manager, rt routing
 		hostAccessRules:    make(map[string]bool),
 		reachability:       make(map[string]reach.Result),
 		teardownHostAccess: namespaces.TeardownHostAccess,
+		setupHostAccess:    namespaces.SetupHostAccess,
 		hostFile:           dns.NewHostFileMonitor(dns.DefaultHostResolvConf),
 	}
 	if reaper, ok := ns.(StaleRuleReaper); ok {
@@ -700,6 +705,37 @@ func (r *Reconciler) reportTeardown(tailnetID string, errs []error) error {
 	return err
 }
 
+// writeHostAccess writes the namespace-side host access rules of one tailnet, with its
+// published ports.
+// writeHostAccess records access.write_failed and returns nil when only a published port
+// rule failed, because the other host access rules hold and the tick continues. It returns
+// every other error of the setup.
+func (r *Reconciler) writeHostAccess(tailnetID, nsName string, index int, publish []string) error {
+	err := r.setupHostAccess(nsName, index, r.infraSubnet, publish, r.ipv6On())
+	if errors.Is(err, namespaces.ErrPublishedPorts) {
+		r.emit("access.write_failed", tailnetID, err.Error())
+		return nil
+	}
+	return err
+}
+
+// ipv6On reports whether the last tick opened the IPv6 path of the namespaces.
+func (r *Reconciler) ipv6On() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.HasPrefix(r.ipv6State, "on: ")
+}
+
+// publishOf returns the publish list of the tailnet tailnetID in cfg.
+func publishOf(cfg *config.Config, tailnetID string) []string {
+	for _, tn := range cfg.Tailnets {
+		if tn.ID == tailnetID {
+			return tn.Publish
+		}
+	}
+	return nil
+}
+
 func (r *Reconciler) executeAction(action Action) error {
 	switch action.Type {
 	case ActionCreateNS:
@@ -717,7 +753,7 @@ func (r *Reconciler) executeAction(action Action) error {
 		// Set up host access iptables if enabled for this tailnet
 		if cfg, err := config.LoadConfig(r.configPath); err == nil && cfg.TailnetHostAccess(action.TailnetID) {
 			index := namespaces.VethIndex(nsName)
-			if err := namespaces.SetupHostAccess(nsName, index, r.infraSubnet); err != nil {
+			if err := r.writeHostAccess(action.TailnetID, nsName, index, publishOf(cfg, action.TailnetID)); err != nil {
 				log.Printf("host-access: setup failed for %s: %v", nsName, err)
 			} else {
 				r.setHostAccessRules(action.TailnetID, true)
@@ -815,8 +851,16 @@ func (r *Reconciler) executeAction(action Action) error {
 		}
 		nsName := r.ns.GetName(action.TailnetID)
 		index := namespaces.VethIndex(nsName)
+		// The alias and the publish list of a tailnet live in the configuration file, which
+		// the operator changes while the daemon runs, therefore the reconciler reads it each
+		// cycle. The read comes before the setup, because a setup with no publish list
+		// deletes every published port rule.
+		cfg, cfgErr := config.LoadConfig(r.configPath)
+		if cfgErr != nil {
+			return fmt.Errorf("host-access: failed to read the configuration: %w", cfgErr)
+		}
 		// Ensure namespace-side iptables are set up (idempotent — safe every cycle)
-		if err := namespaces.SetupHostAccess(nsName, index, r.infraSubnet); err != nil {
+		if err := r.writeHostAccess(action.TailnetID, nsName, index, publishOf(cfg, action.TailnetID)); err != nil {
 			return fmt.Errorf("host-access: setup failed for %s: %w", nsName, err)
 		}
 		r.setHostAccessRules(action.TailnetID, true)
@@ -832,12 +876,6 @@ func (r *Reconciler) executeAction(action Action) error {
 			return fmt.Errorf("host-access: failed to get veth IPs: %w", err)
 		}
 		vethHost, _ := namespaces.VethNames(nsName)
-		// The alias of a tailnet lives in the configuration file, which the operator
-		// changes while the daemon runs, therefore the reconciler reads it each cycle.
-		cfg, cfgErr := config.LoadConfig(r.configPath)
-		if cfgErr != nil {
-			return fmt.Errorf("host-access: failed to read the alias of each tailnet: %w", cfgErr)
-		}
 		aliases := make(map[string]string, len(cfg.Tailnets))
 		for _, tn := range cfg.Tailnets {
 			if tn.Alias != "" {

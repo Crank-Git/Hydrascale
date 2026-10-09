@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hydrascale/internal/access"
 	"hydrascale/internal/execx"
 )
 
@@ -434,24 +435,38 @@ func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
 // SetupHostAccess adds namespace-side iptables rules for host access:
 // - Masquerade on tailscale0 so host traffic is forwarded to peers
 // - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
+// - DNAT on tailscale0 for each published port, see syncPublishedPorts
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
 // All rules are idempotent (check before insert).
-func SetupHostAccess(nsName string, index int, infraSubnet string) error {
-	return NewRealManager().SetupHostAccess(nsName, index, infraSubnet)
+func SetupHostAccess(nsName string, index int, infraSubnet string, publish []string, ipv6 bool) error {
+	return NewRealManager().SetupHostAccess(nsName, index, infraSubnet, publish, ipv6)
 }
+
+// ErrPublishedPorts marks an error of SetupHostAccess that a published port rule caused.
+// The other host access rules hold when a published port rule fails, so the caller records
+// the error and continues.
+var ErrPublishedPorts = errors.New("published ports")
 
 // SetupHostAccess adds namespace-side iptables rules for host access:
 // - net.ipv4.ip_forward=1 so the namespace forwards the packets of the host
 // - Masquerade on tailscale0 so host traffic is forwarded to peers
 // - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
+// - DNAT on tailscale0 for each published port, see syncPublishedPorts
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
 // All rules are idempotent (check before insert).
 //
+// publish holds the tailnets[].publish entries of the tailnet. ipv6 is true when the
+// namespace holds the IPv6 path of FR-access-29. SetupHostAccess writes the IPv6 published
+// port rules only then.
+//
 // The caller reaches this function only for a tailnet whose host_access is true, therefore
 // a tailnet that the operator keeps isolated holds net.ipv4.ip_forward=0.
-func (m *RealManager) SetupHostAccess(nsName string, index int, infraSubnet string) error {
+//
+// SetupHostAccess returns an error when the forwarding write fails. It returns an error
+// that wraps ErrPublishedPorts when a published port rule fails.
+func (m *RealManager) SetupHostAccess(nsName string, index int, infraSubnet string, publish []string, ipv6 bool) error {
 	_, nsVeth := VethNames(nsName)
-	_, nsIPRange, _, _, err := VethIPs(infraSubnet, index)
+	_, nsIPRange, hostIP, _, err := VethIPs(infraSubnet, index)
 	if err != nil {
 		return err
 	}
@@ -486,12 +501,127 @@ func (m *RealManager) SetupHostAccess(nsName string, index int, infraSubnet stri
 		}
 	}
 
+	families := []natFamily{{command: "iptables", host: hostIP}}
+	if ipv6 {
+		_, _, hostIPv6, _ := VethIPv6(index)
+		families = append(families, natFamily{command: "ip6tables", host: "[" + hostIPv6 + "]"})
+	}
+	publishErr := m.syncPublishedPorts(nsName, publish, families)
+
 	if err := WriteNamespaceResolvConf(nsName); err != nil {
 		log.Printf("host-access: failed to write resolv.conf for %s: %v", nsName, err)
 	}
 
+	if publishErr != nil {
+		return fmt.Errorf("%w in %s: %w", ErrPublishedPorts, nsName, publishErr)
+	}
 	log.Printf("Set up host access rules for namespace %s", nsName)
 	return nil
+}
+
+// natFamily holds the command of one address family and the host side veth address in
+// the form that --to-destination takes. An IPv6 address carries brackets, because a colon
+// and the port follow it.
+type natFamily struct {
+	command string
+	host    string
+}
+
+// syncPublishedPorts makes the DNAT rules on tailscale0 inside the namespace equal the
+// publish list, in each address family of families.
+// syncPublishedPorts adds each missing rule with -C and then -A, and it deletes each DNAT
+// rule on tailscale0 that the list does not name. It runs every step and returns the
+// failures together, so a failure in one family keeps the rules of the other family.
+func (m *RealManager) syncPublishedPorts(nsName string, publish []string, families []natFamily) error {
+	var errs []error
+	var ports []access.PublishedPort
+	for _, entry := range publish {
+		p, err := access.ParsePublishPort(entry)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("publish entry %q: %w", entry, err))
+			continue
+		}
+		ports = append(ports, p)
+	}
+
+	for _, f := range families {
+		present, err := m.publishedRules(nsName, f.command)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		want := make(map[string]bool, len(ports))
+		for _, p := range ports {
+			rule := publishedRule(p, f.host)
+			want[strings.Join(rule, " ")] = true
+			if _, err := m.run("ip", nsNatArgs(nsName, f.command, "-C", rule)...); err == nil {
+				continue
+			}
+			args := nsNatArgs(nsName, f.command, "-A", rule)
+			if out, err := m.run("ip", args...); err != nil {
+				errs = append(errs, fmt.Errorf("ip %s: %v (%s)", strings.Join(args, " "), err, out))
+			}
+		}
+		for _, rule := range present {
+			if want[strings.Join(rule, " ")] {
+				continue
+			}
+			if err := m.deleteRule("ip", nsNatArgs(nsName, f.command, "-D", rule)...); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// publishedRule returns the rule of one published port, from the chain name on, in the
+// form that `iptables -S` prints. That form holds the -m match, so a rule that the chain
+// holds compares equal to the rule that the list names.
+// host is the destination address in the form of natFamily.host.
+func publishedRule(p access.PublishedPort, host string) []string {
+	port := strconv.Itoa(p.Number)
+	return []string{"PREROUTING", "-i", "tailscale0", "-p", p.Protocol, "-m", p.Protocol, "--dport", port,
+		"-j", "DNAT", "--to-destination", host + ":" + port}
+}
+
+// nsNatArgs returns the arguments of `ip` for one command on the nat table inside the
+// namespace. op is the operation letter, and rule starts with the chain name.
+func nsNatArgs(nsName, command, op string, rule []string) []string {
+	return append([]string{"netns", "exec", nsName, command, "-t", "nat", op}, rule...)
+}
+
+// publishedRules returns each DNAT rule on tailscale0 in the nat PREROUTING chain of the
+// namespace, from the chain name on.
+// The DNS DNAT rules match the veth device, so the result holds none of them. command is
+// iptables or ip6tables. publishedRules returns an error when the chain read fails.
+func (m *RealManager) publishedRules(nsName, command string) ([][]string, error) {
+	args := []string{"netns", "exec", nsName, command, "-t", "nat", "-S", "PREROUTING"}
+	out, err := m.run("ip", args...)
+	if err != nil {
+		return nil, fmt.Errorf("ip %s: %v (%s)", strings.Join(args, " "), err, out)
+	}
+
+	var rules [][]string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "-A" || fields[1] != "PREROUTING" {
+			continue
+		}
+		if hasPair(fields, "-i", "tailscale0") && hasPair(fields, "-j", "DNAT") {
+			rules = append(rules, fields[1:])
+		}
+	}
+	return rules, nil
+}
+
+// hasPair reports whether fields holds the option flag and value next to each other.
+func hasPair(fields []string, flag, value string) bool {
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == flag && fields[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 // WriteNamespaceResolvConf creates /etc/netns/<nsName>/resolv.conf so that
@@ -566,7 +696,8 @@ func resolveHostUpstreams() []string {
 	return []string{"1.1.1.1"}
 }
 
-// TeardownHostAccess removes the three namespace-side host access iptables rules.
+// TeardownHostAccess removes the three namespace-side host access iptables rules, and each
+// published port rule in both address families.
 // TeardownHostAccess returns the failed deletes together, and it treats a rule that is
 // already absent as success.
 //
@@ -576,7 +707,8 @@ func TeardownHostAccess(nsName string, index int, infraSubnet string) error {
 	return NewRealManager().TeardownHostAccess(nsName, index, infraSubnet)
 }
 
-// TeardownHostAccess removes the three namespace-side host access iptables rules.
+// TeardownHostAccess removes the three namespace-side host access iptables rules, and each
+// published port rule in both address families.
 // TeardownHostAccess returns the failed deletes together, and it treats a rule that is
 // already absent as success.
 func (m *RealManager) TeardownHostAccess(nsName string, index int, infraSubnet string) error {
@@ -594,12 +726,25 @@ func (m *RealManager) TeardownHostAccess(nsName string, index int, infraSubnet s
 		forwarding = fmt.Errorf("host-access: disable forwarding in %s: %v (%s)", nsName, err, out)
 	}
 
-	return errors.Join(
+	errs := []error{
 		forwarding,
 		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", nsIPRange, "-o", "tailscale0", "-j", "MASQUERADE"),
 		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
 		m.deleteRule("ip", "netns", "exec", nsName, "iptables", "-t", "nat", "-D", "PREROUTING", "-i", nsVeth, "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "100.100.100.100:53"),
-	)
+	}
+	// The teardown reads both families, whatever the IPv6 state is now, because an IPv6
+	// rule that an earlier sync wrote stays when the IPv6 path goes off.
+	for _, command := range []string{"iptables", "ip6tables"} {
+		rules, err := m.publishedRules(nsName, command)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("host-access: %w", err))
+			continue
+		}
+		for _, rule := range rules {
+			errs = append(errs, m.deleteRule("ip", nsNatArgs(nsName, command, "-D", rule)...))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // hostVethPattern matches a host-side veth device name that VethNames returns.
