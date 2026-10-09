@@ -33,6 +33,11 @@ function statusOf(tailnets) {
       ExitNode: tailnet.exitNode || "",
       HostAccess: tailnet.hostAccess === undefined ? null : tailnet.hostAccess,
     };
+    // config.Tailnet.Publish carries the tag json:"publish,omitempty", so an empty list
+    // writes no key.
+    if (tailnet.publish && tailnet.publish.length > 0) {
+      desired[tailnet.id].publish = tailnet.publish;
+    }
     actual[tailnet.id] = {
       ID: tailnet.id,
       NsName: `ns-${tailnet.id}`,
@@ -222,6 +227,39 @@ test("the panel states the peers, the magicdns name, the control server and the 
   // The panel shows the events of this tailnet only.
   assert.equal(panel.events.length, 1);
   assert.equal(panel.events[0].kind, "namespace.created");
+});
+
+test("the panel lists two published ports in the published field, separated by one space", async () => {
+  const status = statusOf([{ id: "test", publish: ["tcp/22", "tcp/8888"] }]);
+  const panel = buildPanel(status, {}, [], "test");
+  const value = (label) => panel.fields.find((field) => field.label === label).value;
+
+  assert.equal(value("published"), "tcp/22 tcp/8888");
+
+  // FR-publish-16: drawPanel draws every field value in the mono typeface.
+  const source = await readFile(new URL("../static/namespaces.js", import.meta.url), "utf8");
+  assert.match(source, /el\("dd", "mono", field\.value\)/);
+
+  // FR-publish-17: the panel offers no control that changes the list.
+  assert.deepEqual(Object.keys(panel.actions).sort(), ["connect", "disconnect", "remove"]);
+});
+
+test("the panel shows the absent marker in the published field of a tailnet that publishes no port", () => {
+  for (const publish of [undefined, []]) {
+    const panel = buildPanel(statusOf([{ id: "test", publish }]), {}, [], "test");
+    const field = panel.fields.find((entry) => entry.label === "published");
+    assert.ok(field, "the panel holds no published field");
+    assert.equal(field.value, "—");
+  }
+});
+
+test("the published field sits after the host access field and before the exit node field", () => {
+  const panel = buildPanel(statusOf([{ id: "test", publish: ["tcp/22"] }]), {}, [], "test");
+  const labels = panel.fields.map((field) => field.label);
+  const index = labels.indexOf("published");
+  assert.notEqual(index, -1);
+  assert.equal(labels[index - 1], "host access");
+  assert.equal(labels[index + 1], "exit node");
 });
 
 test("the panel states the credential problem beside the health and it keeps the reason out of the control server row", () => {
