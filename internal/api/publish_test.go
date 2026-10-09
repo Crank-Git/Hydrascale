@@ -68,6 +68,34 @@ func TestPutAccessRefusesARuleSetThatUncoversAPublishedPort(t *testing.T) {
 	}
 }
 
+func TestPutAccessAcceptsARuleSetThatStillCoversAPublishedPort(t *testing.T) {
+	cfgPath := writePublishConfig(t)
+	_, client, cleanup := startTestServer(t, newTestReconciler(cfgPath))
+	defer cleanup()
+
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	body := `{"mode":"enforce","rules":[{"from":"alpha","to":"host","ports":["tcp/22","tcp/443"]}]}`
+	code, payload := callAccess(t, client, http.MethodPut, "/api/access", body)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", code, http.StatusOK, payload)
+	}
+
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if bytes.Equal(before, after) {
+		t.Fatalf("the route did not change the configuration file:\n%s", after)
+	}
+	if !strings.Contains(string(after), "tcp/443") {
+		t.Errorf("the configuration file holds no tcp/443 entry:\n%s", after)
+	}
+}
+
 func TestTheStatusResponseCarriesThePublishListOfEachTailnet(t *testing.T) {
 	cfgPath := writePublishConfig(t)
 	_, client, cleanup := startTestServer(t, newTestReconciler(cfgPath))
