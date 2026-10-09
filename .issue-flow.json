@@ -1,12 +1,14 @@
 {
-  "pluginVersion": "0.16.0",
+  "pluginVersion": "0.17.0",
   "concurrency": 2,
   "batchSize": 4,
   "runLength": {
-    "mode": "backlog"
+    "mode": "batches",
+    "count": 1,
+    "note": "Session of 2026-10-09: Epic 16 (#462) only."
   },
   "prGranularity": "batch",
-  "prAuthority": "autonomous",
+  "prAuthority": "batch-review",
   "planReview": false,
   "reviewWipLimit": 2,
   "branchModel": "dev-and-live",
@@ -48,5 +50,6 @@
     "owner": "Crank-Git",
     "repo": "Hydrascale",
     "interface": "cli"
-  }
+  },
+  "prAuthorityNote": "Sub-merges into the integration branch are the PM's. The batch PR into dev merges only after the operator says go in the session, after the test host verification."
 }
