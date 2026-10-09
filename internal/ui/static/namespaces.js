@@ -173,6 +173,16 @@ function hostAccessWord(desired) {
 }
 
 /**
+ * publishedWord states the published ports of a tailnet, separated by one space.
+ * FR-publish-16. The key is publish in lower case, because config.Tailnet.Publish carries
+ * the tag json:"publish,omitempty". An empty list writes no key, so both give the marker.
+ */
+function publishedWord(desired) {
+  const entries = desired.publish || [];
+  return entries.length > 0 ? entries.join(" ") : ABSENT;
+}
+
+/**
  * buildPanel returns the contextual panel of one tailnet, and null when no tailnet is
  * selected. FR-console-27 states that the panel closes when the selection clears.
  *
@@ -199,6 +209,7 @@ export function buildPanel(status, details, events, id) {
       { label: "magicdns", value: (detail && detail.magic_dns_name) || ABSENT },
       { label: "control server", value: desired.ControlURL || ABSENT },
       { label: "host access", value: hostAccessWord(desired) },
+      { label: "published", value: publishedWord(desired) },
       { label: "exit node", value: desired.ExitNode || ABSENT },
     ],
     peerCount: peers.length,
