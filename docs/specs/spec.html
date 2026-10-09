@@ -869,6 +869,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>Epic 13: Visual policy editor — SSH and advanced constructs</td><td>#320</td><td>#321 #322 #323 #324 #325</td><td><code>features/13-visual-policy-advanced.md</code></td></tr>
 <tr><td>Epic 14: Documentation site</td><td>#426</td><td>#428 #429 #430 #431 #432 #433</td><td><code>features/14-docs-site.md</code>, <code>features/15-readme-slim.md</code></td></tr>
 <tr><td>Epic 15: Agent skills refresh</td><td>#427</td><td>#434 #435 #436 #437 #438</td><td><code>features/16-agent-skills-refresh.md</code></td></tr>
+<tr><td>Epic 16: Published ports</td><td>#462</td><td>#463 #464 #465 #466</td><td><code>features/17-published-ports.md</code></td></tr>
 </table></div>
 <p>Epics 11 to 13 were filed on 2026-08-23, after the <code>/spec-update</code> round that added version 1.1 was approved.</p>
 <p>Epics 14 and 15 were filed on 2026-10-07, after the <code>/spec-update</code> round that added the documentation site and the skills refresh was approved.</p>
@@ -913,6 +914,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>docs-site</td><td>FR-site-1 to 46</td><td>#428 #429 #430 #431 #432</td></tr>
 <tr><td>readme-slim</td><td>FR-readme-1 to 11</td><td>#433</td></tr>
 <tr><td>agent-skills-refresh</td><td>FR-refresh-1 to 35</td><td>#434 #435 #436 #437 #438</td></tr>
+<tr><td>published-ports</td><td>FR-publish-1 to 21</td><td>#463 #464 #465 #466</td></tr>
 </table></div>
 <p>Every one of the 244 requirements in these ten features is cited by at least one issue. Every one of the 49 requirements across <code>policy-document-model</code>, <code>visual-acl-editor</code>, and <code>visual-policy-advanced</code> is cited by exactly one issue.</p>
 <p><strong>FR-access-2 is covered and reversed.</strong> The requirement states that the daemon appends the jump rule into <code>FORWARD</code>. The operator decided on 2026-08-05 that the daemon keeps the insert at position 1. Issue #139 edits the requirement text, corrects <code>CLAUDE.md</code>, and adds the detection that the decision needs.</p>

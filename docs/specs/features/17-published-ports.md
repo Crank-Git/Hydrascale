@@ -2,8 +2,8 @@
 id: published-ports
 feature: Published ports — a peer reaches a service of the host
 epic: "Epic 16: Published ports"
-status: planned
-issues: []
+status: issued
+issues: [463, 464, 465, 466]
 mockups: []
 ---
 
