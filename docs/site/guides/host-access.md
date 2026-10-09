@@ -101,9 +101,9 @@ peer to a service of the host. The Tailscale address of a tailnet lives inside i
 namespace, where no service listens. A peer that opens a connection to that address
 therefore gets `connection refused`.
 
-A **published port** carries such a connection to the host. The key `tailnets[].publish` names the ports of the
-host that the peers of one tailnet reach. Each entry has the form `tcp/<n>` or `udp/<n>`.
-The key defaults to an empty list, which publishes no port.
+A **published port** carries such a connection to the host. The key `tailnets[].publish`
+names the ports of the host that the peers of one tailnet reach. Each entry has the form
+`tcp/<n>` or `udp/<n>`. The key defaults to an empty list, which publishes no port.
 
 This example publishes `tcp/22` to the tailnet `corp-prod`, so a peer opens an SSH session
 to the host:
@@ -135,10 +135,10 @@ them:
 For each entry, the daemon writes one DNAT rule in the `nat PREROUTING` chain inside the
 namespace for IPv4. When the namespace holds the IPv6 path, the daemon writes the same
 rule for IPv6. The rule matches the device `tailscale0`, and it sends the connection to
-the host side veth address with the same port. The local rule then
-accepts the connection on the host in `HYDRASCALE-OUT`.
+the host side veth address with the same port. The local rule then accepts the
+connection on the host in `HYDRASCALE-OUT`.
 
-These rules apply to a published port:
+These facts apply to a published port:
 
 - **The service listens on the veth address.** The connection reaches the host side veth
   address, not `127.0.0.1`. A service that listens on `127.0.0.1` alone stays unreachable.
