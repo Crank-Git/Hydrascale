@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hydrascale v1.0 — Feature: Upstream policy control</title>
+<title>Hydrascale v1.0 — Feature: Published ports — a peer reaches a service of the host</title>
 <style>
 :root { --bg:#ffffff; --fg:#1a1a24; --muted:#5a5a68; --line:#e3e3ea; --accent:#3452c8;
         --card:#f6f6f9; --warn-bg:#fff7e8; --warn-line:#e8b34a; }
@@ -132,7 +132,7 @@ body.rv-open .layout { padding-right:21rem; }
 @media (max-width: 1200px) { body.rv-open .layout { padding-right:0; } }
 </style>
 </head>
-<body data-page="feature-upstream-policy" data-rvkey="hydrascale-v1">
+<body data-page="feature-published-ports" data-rvkey="hydrascale-v1">
 <div class="layout">
 <aside class="site"><a class="brand" href="../spec.html">Hydrascale v1.0</a>
 <h2>Spec</h2><ul>
@@ -147,7 +147,7 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="feature-reachability-model.html">Local reachability model</a></li>
 <li><a href="feature-console-foundation.html">Console foundation</a></li>
 <li><a href="feature-console-access-editor.html">Console access editor</a></li>
-<li><a class="current" href="feature-upstream-policy.html">Upstream policy control</a></li>
+<li><a href="feature-upstream-policy.html">Upstream policy control</a></li>
 <li><a href="feature-docs-and-release.html">Documentation, terminal interface restyle, and the release</a></li>
 <li><a href="feature-agent-skills.html">Agent skills for the operator, and the two command defects they expose</a></li>
 <li><a href="feature-policy-document-model.html">Policy document model</a></li>
@@ -156,436 +156,335 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="feature-docs-site.html">Documentation site</a></li>
 <li><a href="feature-readme-slim.html">A short README that links to the documentation site</a></li>
 <li><a href="feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
-<li><a href="feature-published-ports.html">Published ports — a peer reaches a service of the host</a></li>
+<li><a class="current" href="feature-published-ports.html">Published ports — a peer reaches a service of the host</a></li>
 </ul></aside>
 <main>
-<h1>Feature: Upstream policy control</h1>
-<p class="meta">Epic 8: Upstream policy control &nbsp; <span class="badge">issued</span></p>
-<h3 id="upstream-policy-purpose">Purpose</h3>
-<p>A local rule controls what the host forwards. It does not control what a control server tells a peer. Those are two different access-control systems and an operator needs both.</p>
-<p>This feature set reads the policy of each tailnet from its control server, shows it, lets the operator change it, and writes it back. It supports Tailscale and Headscale. It writes the policy document. It does not manage devices, users, tags, or keys.</p>
-<p>The two control servers differ. Tailscale supports read, validate, preview, and write through its public API. Headscale supports read and validate always, and write only when the control server runs its database policy mode. The console states the difference rather than hiding it.</p>
-<h3 id="upstream-policy-verified-against">Verified against</h3>
-<div class="table-wrap"><table>
-<tr><th>Interface</th><th>Source</th><th>Retrieved</th></tr>
-<tr><td>Tailscale API v2 policy endpoints</td><td>The Tailscale OpenAPI schema at <code>https://api.tailscale.com/api/v2?outputOpenapiSchema=true</code>, <code>openapi: 3.1.0</code>, server <code>https://api.tailscale.com/api/v2</code></td><td>2026-08-04</td></tr>
-<tr><td>Headscale policy endpoints</td><td><code>https://github.com/juanfont/headscale/blob/v0.29.3/proto/headscale/v1/headscale.proto</code> lines 194-213, and <code>gen/openapiv2/headscale/v1/headscale.swagger.json</code> at the same tag</td><td>2026-08-04</td></tr>
-<tr><td>Headscale policy modes</td><td><code>https://github.com/juanfont/headscale/blob/v0.29.3/docs/ref/policy.md</code> and <code>hscontrol/types/config.go:54</code> at tag <code>v0.29.3</code></td><td>2026-08-05</td></tr>
-</table></div>
-<h3 id="upstream-policy-user-stories">User stories</h3>
+<h1>Feature: Published ports — a peer reaches a service of the host</h1>
+<p class="meta">Epic 16: Published ports &nbsp; <span class="badge">planned</span></p>
+<h3 id="published-ports-purpose">Purpose</h3>
+<p>This is a delta feature. It changes the host access that <code>features/00-foundation.md</code> describes and the namespace rules that <code>features/05-reachability-model.md</code> governs.</p>
+<p>The Tailscale address of a managed tailnet lives inside its namespace. A peer that opens a connection to that address reaches <code>tailscale0</code> inside the namespace, where no service listens, so the kernel of the namespace answers with a reset. Issue #459 measured this: a peer pinged the namespace and got an answer, and the same peer got "connection refused" on port 22, 8888, and every other port. Host access carries the traffic of the host to the peers. It carries no connection from a peer to a service of the host.</p>
+<p>A <strong>published port</strong> closes that gap. The operator names a port of the host in the configuration file. The daemon then writes one DNAT rule inside the namespace, which sends an inbound connection for that port from <code>tailscale0</code> to the host side veth address. The local rule <code>from: &lt;tailnet&gt;, to: host</code> gates the connection on the host, as it gates every packet that the namespace sends to the host. The test host measured the path on 2026-10-09: with the DNAT rule alone the connection timed out in <code>HYDRASCALE-OUT</code>, and with the local rule a peer on another machine opened an SSH session to <code>sshd</code> on the host.</p>
+<h3 id="published-ports-decisions">Decisions</h3>
+<p>The operator decided these points on 2026-10-09:</p>
 <ul>
-<li>As the operator, I want to read the policy of a tailnet without opening the Tailscale
+<li>The local rule gates the published port, and the configuration load refuses a
 </li>
 </ul>
-<p>admin console, so that I manage the host from one place.</p>
+<p>published port that no rule covers. A published port that the rule set denies is a contradiction in the file, and the daemon rejects a bad value rather than records it.</p>
 <ul>
-<li>As the operator, I want to check a policy change before I push it, so that I do not
+<li>A published port covers IPv4 and IPv6.
+</li>
+<li>The console shows the published ports of a tailnet on the namespace detail, and it
 </li>
 </ul>
-<p>lock myself out of a tailnet.</p>
+<p>does not edit them.</p>
+<h3 id="published-ports-user-stories">User stories</h3>
 <ul>
-<li>As the operator, I want to know why a push is unavailable, so that I do not think the
+<li>As an operator, I want a peer of a tailnet to reach <code>sshd</code> on the host through the
 </li>
 </ul>
-<p>console is broken.</p>
+<p>address of that tailnet, so that I administer the host from the tailnet.</p>
 <ul>
-<li>As the operator, I want my credentials in a root-only file, so that a non-root account
+<li>As an operator, I want to publish a port to one tailnet and not to another, so that a
 </li>
 </ul>
-<p>cannot read them.</p>
-<h3 id="upstream-policy-functional-requirements">Functional requirements</h3>
-<h4 id="upstream-policy-credentials">Credentials</h4>
+<p>tailnet that I keep isolated stays isolated.</p>
 <ul>
-<li><strong>FR-policy-1</strong> — The daemon reads credentials from the file that <code>secrets_file</code>
+<li>As an operator, I want the configuration load to tell me when a published port has no
 </li>
 </ul>
-<p>names, which defaults to <code>/etc/hydrascale/secrets.yaml</code>.</p>
+<p>local rule, so that I do not search the kernel log for a dropped packet.</p>
 <ul>
-<li><strong>FR-policy-2</strong> — An environment variable overrides the matching file value.
-</li>
-<li><strong>FR-policy-3</strong> — The variable names are <code>HYDRASCALE_TS_CLIENT_ID_&lt;ID&gt;</code>,
+<li>As an operator, I want the console to show which ports a tailnet publishes, so that I
 </li>
 </ul>
-<p><code>HYDRASCALE_TS_CLIENT_SECRET_&lt;ID&gt;</code>, and <code>HYDRASCALE_HS_API_KEY_&lt;ID&gt;</code>.</p>
+<p>read the state of the host in one place.</p>
+<h3 id="published-ports-functional-requirements">Functional requirements</h3>
+<h4 id="published-ports-the-key">The key</h4>
 <ul>
-<li><strong>FR-policy-4</strong> — The control API never returns a credential value.
-</li>
-<li><strong>FR-policy-5</strong> — The control API returns, per tailnet, whether a credential is
+<li><strong>FR-publish-1</strong> — The key <code>tailnets[].publish</code> holds a list of ports of the host that
 </li>
 </ul>
-<p>present and which control server kind it targets.</p>
+<p>the peers of that tailnet reach. The key defaults to an empty list, which publishes no port.</p>
 <ul>
-<li><strong>FR-policy-5a</strong> — The control API returns, per tailnet, one of three credential states:
+<li><strong>FR-publish-2</strong> — An entry of <code>publish</code> matches <code>tcp/&lt;n&gt;</code> or <code>udp/&lt;n&gt;</code>, where <code>&lt;n&gt;</code> is
 </li>
 </ul>
-<p>the tailnet holds no credential, the control server takes no request with the credential, or the credential is usable. The state names no part of a credential value.</p>
+<p>from 1 to 65535. A range is not an entry. The parser of the local rule ports reads the entry, so the two keys spell a port the same way.</p>
 <ul>
-<li><strong>FR-policy-5b</strong> — The daemon states that the control server takes no request with a
+<li><strong>FR-publish-3</strong> — The daemon rejects a <code>publish</code> entry that is not of that form, and
 </li>
 </ul>
-<p>Tailscale credential when the client secret carries no prefix <code>tskey-client</code>, and it names that prefix. A device authentication key carries the prefix <code>tskey-auth</code> and reaches no API.</p>
+<p>it rejects a duplicate entry in one tailnet. The message names the tailnet and the entry.</p>
 <ul>
-<li><strong>FR-policy-6</strong> — The console can write a credential through <code>PUT /api/policy/{id}/credentials</code>.
-</li>
-<li><strong>FR-policy-7</strong> — The daemon writes the secrets file with mode <code>0600</code> and owner root.
-</li>
-<li><strong>FR-policy-8</strong> — The daemon never logs a credential value.
+<li><strong>FR-publish-4</strong> — The daemon rejects a <code>publish</code> list on a tailnet whose host access
 </li>
 </ul>
-<h4 id="upstream-policy-read">Read</h4>
+<p>is off, because the namespace forwards no packet to the host without host access. The message names the tailnet.</p>
 <ul>
-<li><strong>FR-policy-9</strong> — <code>GET /api/policy/{id}</code> returns the policy document of tailnet <code>{id}</code>
+<li><strong>FR-publish-5</strong> — The daemon rejects a <code>publish</code> entry that no local rule
 </li>
 </ul>
-<p>as text.</p>
+<p><code>from: &lt;tailnet&gt;, to: host</code> covers. A rule with an empty port list covers every entry. A rule with a port list covers an entry when one of its ports, or one of its ranges, holds the protocol and the number of the entry. The message names the tailnet, the entry, and the rule that the file needs.</p>
 <ul>
-<li><strong>FR-policy-10</strong> — The response states the control server kind, <code>tailscale</code> or
+<li><strong>FR-publish-6</strong> — The validation of FR-publish-3 to FR-publish-5 runs on the whole
 </li>
 </ul>
-<p><code>headscale</code>.</p>
+<p>file before the daemon changes anything, and it reports every failure together, as the validation of the local rules does.</p>
+<h4 id="published-ports-the-rules">The rules</h4>
 <ul>
-<li><strong>FR-policy-11</strong> — The response states whether a write is available. A credential that
+<li><strong>FR-publish-7</strong> — For each published port, the daemon writes one DNAT rule in the
 </li>
 </ul>
-<p>the control server refuses makes no write available.</p>
+<p><code>nat PREROUTING</code> chain of <code>iptables</code> inside the namespace. The rule matches the input device <code>tailscale0</code>, the protocol, and the destination port of the entry, and it sends the packet to the host side veth IPv4 address of the namespace with the same port.</p>
 <ul>
-<li><strong>FR-policy-12</strong> — For a Tailscale tailnet, the response carries the <code>ETag</code> value that
+<li><strong>FR-publish-8</strong> — For each published port, the daemon writes the same rule in
 </li>
 </ul>
-<p>the control server returned.</p>
+<p><code>ip6tables</code> inside the namespace, with the host side veth IPv6 address that <code>VethIPv6</code> returns as the destination. The daemon writes the IPv6 rule only when the namespace holds the IPv6 path of FR-access-29.</p>
 <ul>
-<li><strong>FR-policy-13</strong> — When no credential is configured, the route returns HTTP 409 and a
+<li><strong>FR-publish-9</strong> — The daemon writes a rule that the namespace holds already no second
 </li>
 </ul>
-<p>message that names the credential the tailnet needs.</p>
-<h4 id="upstream-policy-validate">Validate</h4>
+<p>time. It checks with <code>-C</code> and then appends with <code>-A</code>, as the DNS DNAT rules do.</p>
 <ul>
-<li><strong>FR-policy-14</strong> — <code>POST /api/policy/{id}/validate</code> sends the edited document to the
+<li><strong>FR-publish-10</strong> — On each host access sync, the daemon removes a DNAT rule on
 </li>
 </ul>
-<p>control server's validate endpoint and returns the result.</p>
+<p><code>tailscale0</code> that the configuration no longer names. A rule for a port that the operator removed from the list leaves within one tick.</p>
 <ul>
-<li><strong>FR-policy-15</strong> — The console runs validate before it offers to push.
+<li><strong>FR-publish-11</strong> — The teardown of host access removes every published port rule of
 </li>
 </ul>
-<h4 id="upstream-policy-write">Write</h4>
+<p>that namespace, together with the masquerade and the DNS DNAT rules, and it reports the failures together.</p>
 <ul>
-<li><strong>FR-policy-16</strong> — <code>PUT /api/policy/{id}</code> writes the edited document to the control
+<li><strong>FR-publish-12</strong> — A published port rule changes no other rule. The masquerade rule
 </li>
 </ul>
-<p>server.</p>
+<p>on <code>tailscale0</code> and the DNS DNAT rules on the veth keep their text.</p>
 <ul>
-<li><strong>FR-policy-17</strong> — For a Tailscale tailnet, the daemon sends the <code>If-Match</code> header with
+<li><strong>FR-publish-13</strong> — The host accepts the forwarded connection in <code>HYDRASCALE-OUT</code>
 </li>
 </ul>
-<p>the <code>ETag</code> value from the read.</p>
+<p>through the local rule <code>from: &lt;tailnet&gt;, to: host</code> and no other rule. The daemon writes no accept for a published port in a chain of the host.</p>
 <ul>
-<li><strong>FR-policy-18</strong> — When the control server returns HTTP 412, the daemon returns HTTP
+<li><strong>FR-publish-14</strong> — The reply of the host to the peer leaves through the host route of
 </li>
 </ul>
-<p>409 with a message that states that the policy changed since the read.</p>
+<p>that peer, which host access writes. The DNAT rule rewrites no source address, so the service of the host sees the Tailscale address of the peer.</p>
+<h4 id="published-ports-the-status-and-the-console">The status and the console</h4>
 <ul>
-<li><strong>FR-policy-19</strong> — For a Headscale tailnet whose control server runs the file policy
+<li><strong>FR-publish-15</strong> — <code>GET /api/status</code> carries the <code>publish</code> list of each tailnet in
 </li>
 </ul>
-<p>mode, the write fails and the daemon returns the control server's error and the reason.</p>
+<p>the <code>desired</code> map, in the order of the file.</p>
 <ul>
-<li><strong>FR-policy-20</strong> — The daemon records the event <code>policy.pushed</code> with the tailnet
+<li><strong>FR-publish-16</strong> — The namespace detail of the console holds one field <code>published</code>
 </li>
 </ul>
-<p>identifier and the control server kind.</p>
+<p>that lists each entry in the mono typeface, separated by one space. A tailnet that publishes no port shows the absent marker that the other fields use.</p>
 <ul>
-<li><strong>FR-policy-21</strong> — The daemon never writes a policy document that validate rejected.
+<li><strong>FR-publish-17</strong> — The console offers no control that changes the list. The file is
 </li>
 </ul>
-<h4 id="upstream-policy-the-console-view">The console view</h4>
+<p>the only way to change a published port.</p>
+<h4 id="published-ports-the-documentation-and-the-skills">The documentation and the skills</h4>
 <ul>
-<li><strong>FR-policy-22</strong> — The policy view lists every tailnet with its control server kind and
+<li><strong>FR-publish-18</strong> — The configuration page of the documentation site states the key
 </li>
 </ul>
-<p>its credential state.</p>
+<p><code>tailnets[].publish</code>, its form, its default, and the local rule that it needs.</p>
 <ul>
-<li><strong>FR-policy-23</strong> — Selecting a tailnet shows its policy document in a text editor.
-</li>
-<li><strong>FR-policy-24</strong> — The editor marks the document as edited when it differs from the
+<li><strong>FR-publish-19</strong> — The host access guide gains one section that states what a
 </li>
 </ul>
-<p>document that the console read.</p>
+<p>published port does, with one example that publishes <code>tcp/22</code> to one tailnet and the rule that the example needs.</p>
 <ul>
-<li><strong>FR-policy-25</strong> — The view has a validate action and a push action, and push is
+<li><strong>FR-publish-20</strong> — The troubleshooting page gains one diagnosis for a peer that gets
 </li>
 </ul>
-<p>disabled until validate succeeds.</p>
+<p>"connection refused" on a port of the host. The diagnosis reads the <code>nat PREROUTING</code> chain of the namespace, and it names the key and the rule that repair the cause.</p>
 <ul>
-<li><strong>FR-policy-26</strong> — The view shows the validate result, including each error with its
+<li><strong>FR-publish-21</strong> — The skill <code>hydrascale-troubleshoot</code> holds the same diagnosis, and
 </li>
 </ul>
-<p>line number when the control server supplies one.</p>
-<ul>
-<li><strong>FR-policy-27</strong> — For a tailnet that cannot be written, the view shows the document as
-</li>
-</ul>
-<p>read-only and it states the reason.</p>
-<ul>
-<li><strong>FR-policy-28</strong> — The view states that a policy change affects every device in the
-</li>
-</ul>
-<p>tailnet, not only this host.</p>
-<h3 id="upstream-policy-user-flows">User flows</h3>
-<h4 id="upstream-policy-the-operator-reads-and-changes-a-tailscale-policy">The operator reads and changes a Tailscale policy</h4>
+<p>the skill <code>hydrascale-setup</code> states the key. The drift test reads the key from the code, so a skill that spells it wrong fails.</p>
+<h3 id="published-ports-user-flows">User flows</h3>
+<h4 id="published-ports-flow-1-the-operator-publishes-a-port">Flow 1: The operator publishes a port</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Operator adds publish: tcp/22 to a tailnet] --&gt; B[Operator adds from: tailnet, to: host]
+  B --&gt; C[hydrascale apply]
+  C --&gt; D{Validation}
+  D -- a failure --&gt; E[Load stops; the message names the entry and the rule]
+  D -- clean --&gt; F[Reconciler tick: sync_host_access]
+  F --&gt; G[DNAT on tailscale0 inside the namespace, IPv4 and IPv6]
+  G --&gt; H[Peer opens 100.x.y.z:22]
+  H --&gt; I[Namespace sends the packet to the host veth address]
+  I --&gt; J[HYDRASCALE-OUT accepts through the local rule]
+  J --&gt; K[sshd answers; the reply follows the host route of the peer]</pre></div>
 <ol>
-<li>The operator opens the policy view and selects a Tailscale tailnet.
-</li>
-<li>The console sends <code>GET /api/policy/{id}</code>.
-</li>
-<li>The daemon requests an OAuth access token from the control server with the client
+<li>The operator adds <code>publish: ["tcp/22"]</code> to a tailnet, and the rule
 </li>
 </ol>
-<p>credentials.</p>
+<p><code>from: &lt;tailnet&gt;, to: host</code> with <code>ports: ["tcp/22"]</code> or an empty list.</p>
 <ol>
-<li>The daemon sends <code>GET /api/v2/tailnet/{tailnet}/acl</code> with the bearer token.
-</li>
-<li>The daemon returns the document and the <code>ETag</code> value.
-</li>
-<li>The console shows the document.
-</li>
-<li>The operator edits the document.
-</li>
-<li>The operator selects <strong>Validate</strong>.
-</li>
-<li>The daemon sends <code>POST /api/v2/tailnet/{tailnet}/acl/validate</code>.
-</li>
-<li>The control server accepts the document.
-</li>
-<li>The operator selects <strong>Push</strong>.
-</li>
-<li>The daemon sends <code>POST /api/v2/tailnet/{tailnet}/acl</code> with <code>If-Match</code> set to the
+<li>The operator runs <code>hydrascale apply</code>, or the reconciler reads the file on the next
 </li>
 </ol>
-<p><code>ETag</code> value.</p>
+<p>tick.</p>
 <ol>
-<li>The control server accepts the write and the daemon records <code>policy.pushed</code>.
+<li>The daemon validates the whole file. A failure stops the load with a message that
 </li>
 </ol>
-<h4 id="upstream-policy-the-operator-reads-a-headscale-policy-that-cannot-be-written">The operator reads a Headscale policy that cannot be written</h4>
+<p>names the tailnet, the entry, and the rule that the file needs.</p>
 <ol>
-<li>The operator selects a Headscale tailnet.
+<li>On the next host access sync, the daemon writes the DNAT rule inside the namespace.
 </li>
-<li>The daemon sends <code>GET /api/v1/policy</code> to the Headscale address with the API key as a
+<li>A peer opens the port on the Tailscale address of the namespace, and the service of
 </li>
 </ol>
-<p>bearer token.</p>
-<ol>
-<li>The daemon returns the document and it marks the write as unavailable.
+<p>the host answers.</p>
+<h4 id="published-ports-flow-2-the-operator-removes-a-published-port">Flow 2: The operator removes a published port</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Operator removes tcp/22 from publish] --&gt; B[Next sync_host_access]
+  B --&gt; C[Daemon reads the nat PREROUTING chain of the namespace]
+  C --&gt; D{A rule on tailscale0 that the file does not name?}
+  D -- yes --&gt; E[Daemon deletes the rule]
+  D -- no --&gt; F[No change]
+  E --&gt; G[Peer gets connection refused again]</pre></div>
+<h4 id="published-ports-flow-3-a-peer-gets-connection-refused">Flow 3: A peer gets "connection refused"</h4>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  A[Peer: connection refused on a port of the host] --&gt; B[Operator opens the troubleshooting diagnosis]
+  B --&gt; C[Read nat PREROUTING inside the namespace]
+  C --&gt; D{A DNAT rule for the port on tailscale0?}
+  D -- no --&gt; E[Add the entry to publish and the local rule, then apply]
+  D -- yes --&gt; F{The connection times out instead?}
+  F -- yes --&gt; G[The local rule from tailnet to host is absent; the load should have refused it]
+  F -- no --&gt; H[The service of the host listens on no address that the veth reaches]</pre></div>
+<h3 id="published-ports-screens-states">Screens &amp; states</h3>
+<p>The namespace detail of the console gains one field. The field sits after <code>host access</code> and before <code>exit node</code>:</p>
+<pre class="code"><code>namespace       ns-test
+address         100.72.0.222
+magicdns        test-host.tail1234.ts.net
+control server  —
+host access     on
+published       tcp/22 tcp/8888
+exit node       —</code></pre>
+<p>A tailnet with an empty list shows the absent marker in the <code>published</code> field. The field is read-only. No new view, no new dialog, and no new mockup.</p>
+<h3 id="published-ports-behaviour-rules">Behaviour rules</h3>
+<ul>
+<li>A published port follows <code>host_access</code>. When host access goes off, the published
 </li>
-<li>The console shows the document read-only.
+</ul>
+<p>port rules leave with the other host access rules.</p>
+<ul>
+<li>The DNAT rule rewrites the destination only. The source stays the address of the peer.
 </li>
-<li>The console states that the control server runs the file policy mode, and that a write
+<li>The daemon reads the configuration for the published ports on each sync, so an edit
 </li>
-</ol>
-<p>needs <code>policy.mode: "database"</code>.</p>
-<h4 id="upstream-policy-the-policy-changed-since-the-read">The policy changed since the read</h4>
-<ol>
-<li>The operator pushes a document.
+</ul>
+<p>of the file reaches the namespace within one tick after <code>hydrascale apply</code>.</p>
+<ul>
+<li>A published port reaches the address of the host side veth device. A service that
 </li>
-<li>The control server returns HTTP 412.
+</ul>
+<p>listens on <code>127.0.0.1</code> alone, such as the console, stays unreachable. The guide states this.</p>
+<ul>
+<li>The local rule <code>from: &lt;tailnet&gt;, to: host</code> also allows the namespace to reach the veth
 </li>
-<li>The daemon returns HTTP 409 with the reason.
-</li>
-<li>The console states that another person changed the policy.
-</li>
-<li>The console offers to re-read the document, and it keeps the operator's edited text so
-</li>
-</ol>
-<p>that the operator can compare.</p>
-<h3 id="upstream-policy-screens-states">Screens &amp; states</h3>
-<h4 id="upstream-policy-policy-mockups-04-upstream-policy-html">Policy — <code>mockups/04-upstream-policy.html</code></h4>
+</ul>
+<p>address of the host on the ports it names. A published port adds no reach beyond that rule.</p>
+<h3 id="published-ports-data-touched">Data touched</h3>
 <div class="table-wrap"><table>
-<tr><th>Region</th><th>Content</th></tr>
-<tr><td>Tailnet list</td><td>One row per tailnet: identifier, control server kind, credential state, write availability.</td></tr>
-<tr><td>Editor</td><td>The policy document in the mono typeface, with line numbers.</td></tr>
-<tr><td>Result</td><td>The validate result, or the push result.</td></tr>
-<tr><td>Actions</td><td>Validate, push, re-read, and discard.</td></tr>
+<tr><th>Data</th><th>Change</th></tr>
+<tr><td><code>tailnets[].publish</code></td><td>New key, a list of <code>tcp/&lt;n&gt;</code> and <code>udp/&lt;n&gt;</code>.</td></tr>
+<tr><td><code>nat PREROUTING</code> inside the namespace</td><td>One DNAT rule per entry and per address family, on <code>tailscale0</code>.</td></tr>
+<tr><td><code>GET /api/status</code></td><td>The <code>desired</code> map carries the list.</td></tr>
 </table></div>
-<div class="table-wrap"><table>
-<tr><th>State</th><th>What it shows</th></tr>
-<tr><td>No credential</td><td>The row states that the tailnet needs a credential, and it names which one. The editor region states the same.</td></tr>
-<tr><td>Read-only</td><td>The document, with a statement of why a write is unavailable.</td></tr>
-<tr><td>Loaded</td><td>The document, unedited, with push disabled.</td></tr>
-<tr><td>Edited</td><td>The document, marked edited, with validate enabled and push disabled.</td></tr>
-<tr><td>Validated</td><td>The validate result, with push enabled.</td></tr>
-<tr><td>Validate failed</td><td>Each error with its line number, and push disabled.</td></tr>
-<tr><td>Push conflict</td><td>The statement that the policy changed, and the re-read action.</td></tr>
-<tr><td>Unreachable</td><td>The control server did not answer. The view names the address and the error.</td></tr>
-</table></div>
-<h3 id="upstream-policy-behaviour-rules">Behaviour rules</h3>
+<h3 id="published-ports-interfaces">Interfaces</h3>
 <ul>
-<li>The daemon reads a credential at the moment it needs it. It does not hold a credential
+<li><code>iptables -t nat</code> and <code>ip6tables -t nat</code> inside the namespace, through <code>execx.Runner</code>,
 </li>
 </ul>
-<p>in memory between requests.</p>
+<p>with the argument lists that a test asserts: <code>ip netns exec &lt;ns&gt; iptables -t nat -A PREROUTING -i tailscale0 -p tcp --dport 22 -j DNAT --to-destination &lt;host veth IPv4&gt;:22</code> and the same with <code>ip6tables</code> and <code>[&lt;host veth IPv6&gt;]:22</code>.</p>
 <ul>
-<li>The daemon caches an OAuth access token until it expires, because a token request per
+<li><code>iptables -t nat -S PREROUTING</code> inside the namespace, to read the rules that the sync
 </li>
 </ul>
-<p>call is wasteful and the control server rate-limits.</p>
-<ul>
-<li>Push is disabled until validate succeeds on the current text. An edit after a
-</li>
-</ul>
-<p>successful validate disables push again.</p>
-<ul>
-<li>The console never edits the document for the operator. It does not reformat, it does
-</li>
-</ul>
-<p>not sort, and it does not add a field.</p>
-<ul>
-<li>The document is huJSON. The console does not parse it as JSON, because huJSON allows a
-</li>
-</ul>
-<p>comment and a trailing comma.</p>
-<ul>
-<li>A read failure never changes the local rule set. The two systems are independent.
-</li>
-<li><code>PUT /api/policy/{id}</code> sends the document to the validate route of the control server
-</li>
-</ul>
-<p>before it writes, because <strong>FR-policy-21</strong> binds the daemon and not the console alone.</p>
-<ul>
-<li>The control server kind of a tailnet comes from its control URL. A tailnet that
-</li>
-</ul>
-<p>declares no control URL is <code>tailscale</code>, and every other tailnet is <code>headscale</code>.</p>
-<ul>
-<li>The write availability of a Headscale tailnet states the credential state alone. The
-</li>
-</ul>
-<p>control server exposes no route that reports its policy mode, so the daemon learns the file policy mode from the answer to a write.</p>
-<ul>
-<li>The daemon sends the tailnet name <code>-</code> to the Tailscale API. The dash names the tailnet
-</li>
-</ul>
-<p>of the access token, and the credential is per tailnet.</p>
-<h3 id="upstream-policy-data-touched">Data touched</h3>
-<div class="table-wrap"><table>
-<tr><th>Entity</th><th>Change</th></tr>
-<tr><td>Secrets file</td><td>New file, with a per-tailnet credential block.</td></tr>
-<tr><td>Configuration</td><td>New key <code>secrets_file</code>.</td></tr>
-<tr><td>Event</td><td>New kind <code>policy.pushed</code>.</td></tr>
-</table></div>
-<h3 id="upstream-policy-interfaces">Interfaces</h3>
-<h4 id="upstream-policy-tailscale">Tailscale</h4>
-<p>Base URL <code>https://api.tailscale.com/api/v2</code>. Authentication is a bearer token. The token comes from an OAuth client. Verified against the Tailscale OpenAPI schema, retrieved 2026-08-04.</p>
-<div class="table-wrap"><table>
-<tr><th>Method and path</th><th>Purpose</th><th>Notes</th></tr>
-<tr><td><code>GET /tailnet/{tailnet}/acl</code></td><td>Read the policy.</td><td>Returns <code>application/json</code> or <code>application/hujson</code>. The scope <code>policy_file:read</code> covers it. The response carries an <code>ETag</code> header.</td></tr>
-<tr><td><code>POST /tailnet/{tailnet}/acl</code></td><td>Write the policy.</td><td>Accepts <code>application/json</code> or <code>application/hujson</code>. The optional <code>If-Match</code> header carries the <code>ETag</code> value from the read. A mismatch returns HTTP 412. The scope <code>policy_file</code> covers it, confirmed 2026-08-05.</td></tr>
-<tr><td><code>POST /tailnet/{tailnet}/acl/validate</code></td><td>Validate and test the policy.</td><td>Accepts the same content types.</td></tr>
-<tr><td><code>POST /tailnet/{tailnet}/acl/preview</code></td><td>Preview which rules match.</td><td>Version 1.0 does not use it.</td></tr>
-</table></div>
-<p>The <code>If-Match</code> header also accepts the literal <code>ts-default</code>, which writes only when the policy is still the untouched default. Version 1.0 does not use that form.</p>
-<h4 id="upstream-policy-headscale">Headscale</h4>
-<p>Base URL is the address in the credential block. Authentication is a bearer token that holds a Headscale API key. Verified against <code>headscale.proto</code> at tag <code>v0.29.3</code>, retrieved 2026-08-04.</p>
-<div class="table-wrap"><table>
-<tr><th>Method and path</th><th>Purpose</th><th>Notes</th></tr>
-<tr><td><code>GET /api/v1/policy</code></td><td>Read the policy.</td><td>Works in both policy modes.</td></tr>
-<tr><td><code>PUT /api/v1/policy</code></td><td>Write the policy.</td><td>Succeeds only when the control server runs <code>policy.mode: "database"</code>. <code>hscontrol/types/config.go:54</code> at tag <code>v0.29.3</code> declares the value.</td></tr>
-<tr><td><code>POST /api/v1/policy/check</code></td><td>Check the policy for errors.</td><td>Used as the validate step.</td></tr>
-</table></div>
-<p>Headscale exposes these over a grpc-gateway REST bridge, so the daemon uses <code>net/http</code> and adds no gRPC dependency.</p>
-<h4 id="upstream-policy-the-daemon-s-own-routes">The daemon's own routes</h4>
-<div class="table-wrap"><table>
-<tr><th>Method and path</th><th>Purpose</th></tr>
-<tr><td><code>GET /api/policy</code></td><td>List every tailnet with its control server kind, its credential state, and its write availability.</td></tr>
-<tr><td><code>GET /api/policy/{id}</code></td><td>Read one policy document.</td></tr>
-<tr><td><code>POST /api/policy/{id}/validate</code></td><td>Validate an edited document.</td></tr>
-<tr><td><code>PUT /api/policy/{id}</code></td><td>Write an edited document.</td></tr>
-<tr><td><code>PUT /api/policy/{id}/credentials</code></td><td>Write the credential for one tailnet.</td></tr>
-</table></div>
-<h3 id="upstream-policy-edge-cases-failures">Edge cases &amp; failures</h3>
+<p>removes.</p>
+<h3 id="published-ports-edge-cases-failures">Edge cases &amp; failures</h3>
 <div class="table-wrap"><table>
 <tr><th>Case</th><th>Behaviour</th></tr>
-<tr><td>The OAuth client is invalid.</td><td>The token request fails. The daemon returns HTTP 502 with the control server's message, and it does not log the secret.</td></tr>
-<tr><td>The tailnet name is unknown to Tailscale.</td><td>The control server returns HTTP 404. The console states that the tailnet name in the credential block does not match a tailnet on the account.</td></tr>
-<tr><td>The control server rate-limits the daemon.</td><td>The daemon returns the control server's status and its message. The console shows it and it does not retry automatically.</td></tr>
-<tr><td>The Headscale address uses a self-signed certificate.</td><td>The request fails. Version 1.0 does not add a certificate override. The console shows the TLS error.</td></tr>
-<tr><td>The document is 400 kilobytes.</td><td>The editor loads it. The daemon limits a request body to 1 megabyte.</td></tr>
-<tr><td>A Headscale control server older than v0.29 does not expose <code>/api/v1/policy</code>.</td><td>The request returns HTTP 404. The console states that the control server does not support policy access and it names the version that does.</td></tr>
-<tr><td>The operator pushes a policy that locks this host out.</td><td>The push succeeds. The console warned that a policy change affects every device. The daemon does not second-guess the operator.</td></tr>
+<tr><td>Two tailnets publish the same port.</td><td>Each namespace holds its own rule, and each peer reaches the host through its own tailnet. The rules do not meet.</td></tr>
+<tr><td>The operator publishes a port and the local rule holds <code>tcp/20-30</code>.</td><td>The range covers <code>tcp/22</code>, so the load succeeds.</td></tr>
+<tr><td>The operator publishes <code>udp/53</code>.</td><td>The DNAT on <code>tailscale0</code> and the DNS DNAT on the veth match different input devices, so both stay. A peer then reaches the DNS forwarder of the host only if the local rule names the port.</td></tr>
+<tr><td>The host service listens on <code>127.0.0.1</code> alone.</td><td>The host veth address receives the packet and the kernel answers with a reset. The guide states that the service must listen on the veth address or on every address.</td></tr>
+<tr><td>The namespace holds no IPv6 path.</td><td>The daemon writes the IPv4 rule alone and records no failure.</td></tr>
+<tr><td><code>ip6tables</code> is absent on the host.</td><td>The IPv6 write fails, the daemon records <code>access.write_failed</code> with the output, and the IPv4 rule stays.</td></tr>
+<tr><td>The daemon restarts.</td><td>The namespace keeps its rules, and the first sync finds each rule with <code>-C</code> and writes none again.</td></tr>
+<tr><td>The operator removes the tailnet from the file.</td><td>The namespace goes away with its rules. The host holds no rule for a published port, so nothing stays.</td></tr>
 </table></div>
-<h3 id="upstream-policy-acceptance-criteria">Acceptance criteria</h3>
+<h3 id="published-ports-acceptance-criteria">Acceptance criteria</h3>
 <ul>
-<li>[ ] <code>GET /api/policy</code> lists every tailnet with its control server kind and its
+<li>A configuration file with <code>publish: ["tcp/22"]</code> on a tailnet with host access and the
 </li>
 </ul>
-<p>credential state, and it returns no credential value.</p>
+<p>rule <code>from: &lt;tailnet&gt;, to: host</code> loads, and a file with the same list and no such rule fails with a message that names the tailnet, <code>tcp/22</code>, and the rule.</p>
 <ul>
-<li>[ ] A tailnet with no credential returns HTTP 409 from <code>GET /api/policy/{id}</code>, with a
+<li>A file with <code>publish: ["tcp/22-23"]</code> fails. A file with <code>publish: ["tcp/22", "tcp/22"]</code>
 </li>
 </ul>
-<p>message that names the credential.</p>
+<p>fails. A file with <code>publish</code> on a tailnet whose host access is off fails.</p>
 <ul>
-<li>[ ] The daemon reads a Tailscale policy document with an OAuth client and returns the
+<li>A test on the runner asserts the exact <code>iptables</code> and <code>ip6tables</code> argument lists that a
 </li>
 </ul>
-<p><code>ETag</code> value.</p>
+<p>sync writes for one entry, and asserts that a second sync writes nothing.</p>
 <ul>
-<li>[ ] <code>HYDRASCALE_TS_CLIENT_ID_&lt;ID&gt;</code> overrides the value in the secrets file.
-</li>
-<li>[ ] The daemon sends <code>If-Match</code> on a Tailscale write, and a stale value produces HTTP
+<li>A test on the runner asserts that a sync deletes a DNAT rule on <code>tailscale0</code> that the
 </li>
 </ul>
-<p>409 from the daemon.</p>
+<p>file no longer names, and that it leaves the DNS DNAT rules on the veth in place.</p>
 <ul>
-<li>[ ] The daemon reads a Headscale policy document with an API key.
-</li>
-<li>[ ] A Headscale control server in file policy mode produces a read-only view with the
+<li>A test on the runner asserts that the teardown of host access deletes each published
 </li>
 </ul>
-<p>stated reason.</p>
+<p>port rule.</p>
 <ul>
-<li>[ ] A Headscale control server in database policy mode accepts a write.
+<li><code>GET /api/status</code> carries the list under <code>desired.&lt;tailnet&gt;.publish</code>.
 </li>
-<li>[ ] Push is disabled until validate succeeds, and an edit after validate disables it
+<li>The console JavaScript tests assert the <code>published</code> field with two entries and with
 </li>
 </ul>
-<p>again.</p>
+<p>none.</p>
 <ul>
-<li>[ ] A validate failure shows each error with its line number.
-</li>
-<li>[ ] No log line contains an OAuth secret or a Headscale API key.
-</li>
-<li>[ ] The secrets file is created with mode <code>0600</code>.
-</li>
-<li>[ ] The policy view states that a change affects every device in the tailnet.
+<li>On the test host, a peer on another machine opens an SSH session to the host through
 </li>
 </ul>
-<h3 id="upstream-policy-out-of-scope">Out of scope</h3>
+<p>the Tailscale IPv4 address of the namespace, and the connection is refused again within one tick after the entry leaves the file.</p>
 <ul>
-<li>Device, user, tag, and key management on the control server.
-</li>
-<li>A visual editor for the policy document. Version 1.0 shows text.
-</li>
-<li>The Tailscale preview endpoint.
-</li>
-<li>The Headscale local-file fallback for a control server in file policy mode.
-</li>
-<li>A certificate override for a self-signed Headscale control server.
+<li>The configuration page, the host access guide, and the troubleshooting page state the
 </li>
 </ul>
-<h3 id="upstream-policy-open-questions" class="callout-h">Open questions</h3>
+<p>key, and the drift test passes.</p>
+<h3 id="published-ports-out-of-scope">Out of scope</h3>
 <ul>
-<li>~~The OAuth scope name that a Tailscale policy write needs.~~ **Answered 2026-08-05 by
+<li>A port range in <code>publish</code>. One entry publishes one port.
+</li>
+<li>A different port on the host than on the tailnet. The entry names one number.
+</li>
+<li>A published port that reaches a service in another namespace or in a container.
+</li>
+<li>A console control that edits the list.
+</li>
+<li><code>tailscale serve</code> and <code>tailscale funnel</code>, which publish through the control server.
 </li>
 </ul>
-<p>issue #155.** The scope is <code>policy_file</code>. The OpenAPI schema states <code>OAuth Scope: policy_file.</code> for <code>operationId: setPolicyFile</code>, and <code>https://tailscale.com/kb/1623/</code> states that <code>policy_file</code> covers <code>POST /api/v2/tailnet/:tailnet/acl</code>. The same page states that <code>devices:posture_attributes</code> and <code>devices:core:read</code> are required with the scope. Risk R1 in <code>spec.md</code> is closed.</p>
-<ul>
-<li>The media type that <code>POST /tailnet/{tailnet}/acl/validate</code> accepts. The OpenAPI schema
-</li>
-</ul>
-<p>names <code>application/json</code> for the request body of that endpoint alone, and the table above states that validate "Accepts the same content types". The client sends <code>application/json</code>, which the schema confirms. Issue #159 measures a document that holds a comment against a real tailnet before the console offers the validate action.</p><h2>Mockups</h2><p>Mockups convey intent — the rough shape a user will see. An implementer may diverge where framework conventions, components, accessibility, or a better idea serve the feature's requirements; the FRs and acceptance criteria are the contract, not the pixels.</p><div class="mockup"><iframe src="../mockups/04-upstream-policy.html" loading="lazy"></iframe><p><a href="../mockups/04-upstream-policy.html" target="_blank">Open ../mockups/04-upstream-policy.html in new tab</a></p></div><nav class="pager">
-<a href="feature-console-access-editor.html">&larr; Feature: Console access editor</a>
-<a href="feature-docs-and-release.html">Feature: Documentation, terminal interface restyle, and the release &rarr;</a>
+<h3 id="published-ports-open-questions" class="callout-h">Open questions</h3>
+<p>None.</p><nav class="pager">
+<a href="feature-agent-skills-refresh.html">&larr; Feature: Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a>
+<span></span>
 </nav>
 </main>
 </div>

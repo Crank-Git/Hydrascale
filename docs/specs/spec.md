@@ -5,8 +5,8 @@ repo: Crank-Git/Hydrascale
 status: approved
 spec_version: 2
 created: 2026-08-04
-approved: 2026-10-07
-html_generated: 2026-10-07
+approved: 2026-10-09
+html_generated: 2026-10-09
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -43,6 +43,8 @@ features:
     file: features/15-readme-slim.md
   - id: agent-skills-refresh
     file: features/16-agent-skills-refresh.md
+  - id: published-ports
+    file: features/17-published-ports.md
 ---
 
 # Hydrascale v1.0
@@ -136,6 +138,7 @@ the operator what is allowed.
 | listen port | noun | The UDP port of the `tailscaled` of a namespace: 41641 plus the veth index, from 41642 to 41895. | tailscale port, WireGuard port |
 | drift test | noun | The test in `cmd/hydrascale/skills_drift_test.go` that fails when a skill names a command, a flag, a key, or an event that the code does not hold. | lint, skill check |
 | result region | noun | The policy view's region that states the answer of the last validate or push, with one line per error. | result panel, status area, message box |
+| published port | noun | One port of the host that the peers of one tailnet reach through the Tailscale address of its namespace, which the key `tailnets[].publish` names. | exposed port, port forward, inbound port |
 
 ## Goals
 
@@ -201,12 +204,14 @@ version 1.0.
 | Documentation site | `features/14-docs-site.md` | Epic 14 | none |
 | A short README | `features/15-readme-slim.md` | Epic 14 | none |
 | Agent skills refresh | `features/16-agent-skills-refresh.md` | Epic 15 | none |
+| Published ports | `features/17-published-ports.md` | Epic 16 | none |
 
 Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11
 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1
 already covers the console fixes and the credential-state work between Epic 9 and Epic
 10, tagged `v1.1.0` and `v1.1.1`.) Epic 14 and Epic 15 follow version 1.5: the
-documentation site, the short README, and the agent skills for version 1.5.
+documentation site, the short README, and the agent skills for version 1.5. Epic 16
+follows version 1.6, and it answers issue #459.
 
 ## Architecture & stack
 
@@ -307,6 +312,9 @@ tailnets:
     auth_key: ""
     control_url: ""
     host_access: true
+    # new after v1.6: ports of the host that the peers of this tailnet reach.
+    # Each entry needs the local rule `from: jbones, to: host` below.
+    publish: ["tcp/22"]
 
 # new in v1.0
 console:
@@ -341,6 +349,15 @@ secrets_file: /etc/hydrascale/secrets.yaml
 
 A local rule allows traffic. There is no deny rule. The daemon denies everything that no
 local rule allows. A rule where `from` equals `to` is invalid.
+
+### Published port
+
+| Field | Type | Constraint |
+|---|---|---|
+| `tailnets[].publish` | list of string | Each entry matches `tcp/<n>` or `udp/<n>`. No range. No duplicate. The tailnet holds host access, and a local rule `from: <tailnet>, to: host` covers each entry. |
+
+A published port rewrites the destination of an inbound packet on `tailscale0` inside
+the namespace to the host side veth address. The local rule gates it on the host.
 
 ### Secrets file, `/etc/hydrascale/secrets.yaml`
 
@@ -699,6 +716,17 @@ Exit criteria: `hydrascale skills install` writes three skills. The drift test f
 an unknown flag, an unknown configuration key, an unknown event, and a source line
 reference. The four contributor skills state the real CI gate.
 
+### Epic 16: Published ports
+
+Goal: a peer of a tailnet reaches a service of the host through the Tailscale address of
+the namespace, on each port that the operator publishes.
+Covers: `features/17-published-ports.md`.
+Depends on: Epic 5, because the local rule `from: <tailnet>, to: host` gates the
+forwarded connection.
+Exit criteria: a peer on another machine opens an SSH session to the host through the
+namespace of a tailnet that publishes `tcp/22`. A file that publishes a port with no
+covering rule fails to load. The console shows the published ports of a tailnet.
+
 ## Milestones
 
 | Milestone | Epics | What is shippable |
@@ -711,6 +739,7 @@ reference. The four contributor skills state the real CI gate.
 | M6 — Agent skills | 10 | A coding agent routes a command to the named tailnet. This follows version 1.0. |
 | M7 — Visual policy editor | 11, 12, 13 | The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (`v1.1.0`, `v1.1.1`). |
 | M8 — Documentation site | 14, 15 | The documentation site serves every topic, the README is short, and the agent skills match version 1.5. |
+| M9 — Published ports | 16 | A peer reaches a published port of the host through the namespace of its tailnet. This follows version 1.6. |
 
 
 M2 is the point at which the release is worth cutting even if nothing else lands. The
@@ -952,6 +981,8 @@ advance to `status: built`. |
 | 2026-10-07 | 1 | Issue #436. **Decision: the `allowed-tools` field of `hydrascale-troubleshoot` names no prefix rule that also allows a change of the host.** A prefix rule allows every suffix. A rule for `sudo hydrascale tailscale` therefore also allows `up` and `logout`, so the skill asks the operator before each `netcheck`. A rule for `sudo journalctl` also allows `--vacuum-time`, so the field names `journalctl -u hydrascale` without `sudo`, and the skill asks before it reads the journal with `sudo`. The field names no `curl`, because `curl` also sends a `PUT`, so the skill asks before it reads `GET /api/policy` and `GET /api/events`. The diagnosis of a displaced jump rule prints `iptables -I` and then `iptables -D` with a position, because a delete first leaves the namespace without the local rules until the next tick. `docs/site/operations/troubleshooting.md` gains the section "A rule of another service comes before the jump rule", and the diagnosis links to it. The Terms table gains `diagnosis`, `jump rule`, and `listen port`. |
 | 2026-10-07 | 1 | Issue #437. **Decision: the drift test reads a configuration key and an event type with one candidate rule.** A candidate is a backtick span with the shape of a key that holds an underscore, a dot, or `[]`. A dotted candidate also opens with the first segment of a key or an event type. A candidate must be a configuration key, an event type, a key of the secrets file, or `credential_state`, which is a field of the answer of `GET /api/policy`. A short name of a kernel parameter, such as `force_forwarding`, therefore fails, and the troubleshoot skill now states `net.ipv6.conf.all.force_forwarding` and `net.ipv6.conf.<device>.accept_ra`. The test of `skills/` holds a table that names the content tests of each skill, so a new skill directory without an entry fails (FR-refresh-32). |
 | 2026-10-07 | 1 | Epic 15 complete. `features/16-agent-skills-refresh.md` is built. `hydrascale skills install` writes three skills, and the drift test checks flags, configuration keys, event types, source lines, and site links. |
+| 2026-10-09 | 1 | **The toolchain moves to Go 1.26.9 (pull request #461).** `govulncheck` named 15 called advisories on `dev`, GO-2026-6603 to GO-2026-6617, on the first pull request of the day. Each names `go1.26.9` or `golang.org/x/net` v0.60.0 as its fix, so the move follows the precedent of issues #122 and #294. `go.mod`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` hold `1.26.9`. |
+| 2026-10-09 | 1 | **Change: published ports (issue #459).** The reporter measured "connection refused" from a peer on every TCP port of the host, while ping answered. The Tailscale address lives in the namespace, so the kernel of the namespace answers a SYN with a reset, and host access carries no connection from a peer to the host. The test host reproduced it on 2026-10-09: a DNAT rule on `tailscale0` to the host veth address, with the local rule `from: havoc, to: host`, let a peer on another machine open an SSH session to the host; without the rule the connection timed out in `HYDRASCALE-OUT`. The operator decided: the local rule gates a published port and the load refuses a published port that no rule covers; a published port covers IPv4 and IPv6; the console shows the list on the namespace detail and does not edit it. New feature: `features/17-published-ports.md`, a delta on `features/00-foundation.md` and `features/05-reachability-model.md`. New epic: Epic 16. New milestone: M9. New term: published port. |
 
 ## Issue map
 
