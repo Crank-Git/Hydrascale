@@ -1,6 +1,6 @@
 ---
 name: hydrascale-troubleshoot
-description: Find the cause of a Hydrascale fault with read-only commands, and print the command that repairs it. Use when a tailnet has no IPv6, makes no direct connection, resolves no name, loses traffic after Docker or tailscaled starts, cannot read or write its policy, or when a peer gets connection refused on a port of the host.
+description: Find the cause of a Hydrascale fault with read-only commands, and print the command that repairs it. Use when a tailnet has no IPv6, makes no direct connection, or resolves no name. Use when a tailnet loses traffic after Docker or tailscaled starts, or cannot read or write its policy. Use when a peer gets connection refused on a port of the host.
 allowed-tools: Read, Bash(hydrascale version:*), Bash(hydrascale status:*), Bash(sudo hydrascale status:*), Bash(sudo hydrascale diff:*), Bash(sudo hydrascale list:*), Bash(journalctl -u hydrascale:*), Bash(sudo iptables -S:*), Bash(sudo ip6tables -S:*), Bash(sudo iptables -t nat -S:*), Bash(sudo ip6tables -t nat -S:*), Bash(ip -6 route show:*), Bash(sysctl -n:*), Bash(pgrep -a tailscaled:*), Bash(resolvectl status:*), Bash(sudo findmnt --task:*)
 ---
 

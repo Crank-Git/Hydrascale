@@ -437,7 +437,7 @@ func (m *RealManager) TeardownVeth(nsName string, infraSubnet string) error {
 // - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
 // - DNAT on tailscale0 for each published port, see syncPublishedPorts
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
-// All rules are idempotent (check before insert).
+// The sync adds each rule that is missing and deletes each stale published port rule.
 func SetupHostAccess(nsName string, index int, infraSubnet string, publish []string, ipv6 bool) error {
 	return NewRealManager().SetupHostAccess(nsName, index, infraSubnet, publish, ipv6)
 }
@@ -453,7 +453,7 @@ var ErrPublishedPorts = errors.New("published ports")
 // - DNS DNAT on veth so MagicDNS queries from host reach 100.100.100.100
 // - DNAT on tailscale0 for each published port, see syncPublishedPorts
 // - /etc/netns/NAME/resolv.conf for MagicDNS inside the namespace
-// All rules are idempotent (check before insert).
+// The sync adds each rule that is missing and deletes each stale published port rule.
 //
 // publish holds the tailnets[].publish entries of the tailnet. ipv6 is true when the
 // namespace holds the IPv6 path of FR-access-29. SetupHostAccess writes the IPv6 published

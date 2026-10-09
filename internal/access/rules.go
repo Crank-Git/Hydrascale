@@ -177,7 +177,7 @@ type PublishedPort struct {
 // entry is one item of tailnets[].publish, in the form tcp/22 or udp/53. The parser of
 // the local rule ports reads the entry, so the two keys spell a port the same way.
 // ParsePublishPort returns an error when parsePort refuses the entry, and when the entry
-// holds a range, because the daemon forwards one port of a tailnet to the same port of
+// holds a range, because a published port maps one port of a tailnet to the same port of
 // the host.
 func ParsePublishPort(entry string) (PublishedPort, error) {
 	p, err := parsePort(entry)

@@ -47,7 +47,9 @@ On each reconciliation tick of a tailnet with host access, the daemon does these
    [A dedicated route table](#a-dedicated-route-table).
 2. **Namespace masquerade.** The daemon adds an iptables masquerade rule inside the
    namespace on `tailscale0`. The traffic of the host then carries the Tailscale address
-   of the namespace, and `tailscaled` forwards it to the peer.
+   of the namespace, and `tailscaled` forwards it to the peer. The daemon also writes one
+   DNAT rule on `tailscale0` for each published port. See
+   [Published ports](#published-ports).
 3. **Names of the peers.** In the host DNS mode `hosts`, the daemon writes an entry in
    `/etc/hosts` for each peer. In the mode `resolved`, the daemon registers the domains of
    the tailnet with `systemd-resolved`. See

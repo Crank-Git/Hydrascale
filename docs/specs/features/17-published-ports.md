@@ -2,7 +2,7 @@
 id: published-ports
 feature: Published ports — a peer reaches a service of the host
 epic: "Epic 16: Published ports"
-status: issued
+status: built
 issues: [463, 464, 465, 466]
 mockups: []
 ---
@@ -223,7 +223,7 @@ field is read-only. No new view, no new dialog, and no new mockup.
 
 - `iptables -t nat` and `ip6tables -t nat` inside the namespace, through `execx.Runner`,
   with the argument lists that a test asserts:
-  `ip netns exec <ns> iptables -t nat -A PREROUTING -i tailscale0 -p tcp --dport 22 -j DNAT --to-destination <host veth IPv4>:22`
+  `ip netns exec <ns> iptables -t nat -A PREROUTING -i tailscale0 -p tcp -m tcp --dport 22 -j DNAT --to-destination <host veth IPv4>:22`
   and the same with `ip6tables` and `[<host veth IPv6>]:22`.
 - `iptables -t nat -S PREROUTING` inside the namespace, to read the rules that the sync
   removes.
