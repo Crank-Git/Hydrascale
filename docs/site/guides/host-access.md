@@ -47,7 +47,9 @@ On each reconciliation tick of a tailnet with host access, the daemon does these
    [A dedicated route table](#a-dedicated-route-table).
 2. **Namespace masquerade.** The daemon adds an iptables masquerade rule inside the
    namespace on `tailscale0`. The traffic of the host then carries the Tailscale address
-   of the namespace, and `tailscaled` forwards it to the peer.
+   of the namespace, and `tailscaled` forwards it to the peer. The daemon also writes one
+   DNAT rule on `tailscale0` for each published port. See
+   [Published ports](#published-ports).
 3. **Names of the peers.** In the host DNS mode `hosts`, the daemon writes an entry in
    `/etc/hosts` for each peer. In the mode `resolved`, the daemon registers the domains of
    the tailnet with `systemd-resolved`. See
@@ -94,6 +96,70 @@ name therefore give two different names on the host.
 The daemon writes the host name of the peer in lower case, and it replaces each space
 with a dash. It keeps the tailnet identifier as the configuration file writes it.
 
+## Published ports
+
+Host access carries the traffic of the host to the peers. It carries no connection from a
+peer to a service of the host. The Tailscale address of a tailnet lives inside its
+namespace, where no service listens. A peer that opens a connection to that address
+therefore gets `connection refused`.
+
+A **published port** carries such a connection to the host. The key `tailnets[].publish`
+names the ports of the host that the peers of one tailnet reach. Each entry has the form
+`tcp/<n>` or `udp/<n>`. The key defaults to an empty list, which publishes no port.
+
+This example publishes `tcp/22` to the tailnet `corp-prod`, so a peer opens an SSH session
+to the host:
+
+```yaml
+tailnets:
+  - id: corp-prod
+    host_access: true
+    publish: ["tcp/22"]
+
+access:
+  rules:
+    - from: corp-prod
+      to: host
+      ports: ["tcp/22"]
+```
+
+A peer then runs `ssh <user>@<the Tailscale address of corp-prod>`. The daemon applies
+the change within one reconciliation tick after `hydrascale apply`.
+
+A published port needs two things, and the configuration load refuses the file without
+them:
+
+- Host access for the tailnet. A `publish` list on a tailnet whose host access is off
+  fails.
+- A local rule `from: <tailnet>, to: host` that covers each entry. A rule with an empty
+  port list covers every entry. A range such as `tcp/20-30` covers `tcp/22`.
+
+For each entry, the daemon writes one DNAT rule in the `nat PREROUTING` chain inside the
+namespace for IPv4. When the namespace holds the IPv6 path, the daemon writes the same
+rule for IPv6. The rule matches the device `tailscale0`, and it sends the connection to
+the host side veth address with the same port. The local rule then accepts the
+connection on the host in `HYDRASCALE-OUT`.
+
+These facts apply to a published port:
+
+- **The service listens on the veth address.** The connection reaches the host side veth
+  address, not `127.0.0.1`. A service that listens on `127.0.0.1` alone stays unreachable.
+  The console at `127.0.0.1:9443` is such a service. Make the service listen on the veth
+  address, or on every address.
+- **A published port follows `host_access`.** When host access goes off, the published
+  port rules leave with the other host access rules.
+- **The service sees the address of the peer.** The DNAT rule rewrites the destination
+  only, so the source stays the Tailscale address of the peer. The reply leaves through
+  the host route of that peer.
+- **A published port adds no reach beyond the rule.** The rule `from: <tailnet>, to: host`
+  also lets the namespace reach the same ports of the host.
+
+Two tailnets can publish the same port. Each namespace holds its own rule, and each peer
+reaches the host through its own tailnet.
+
+If a peer still gets `connection refused`, see
+[A peer gets `connection refused` on a port of the host](../operations/troubleshooting.md#a-peer-gets-connection-refused-on-a-port-of-the-host).
+
 ## Teardown
 
 The daemon removes the host access state in three cases.
@@ -101,7 +167,8 @@ The daemon removes the host access state in three cases.
 If the operator sets `host_access: false` for a tailnet, the daemon removes:
 
 - Every host route of the peers of that tailnet.
-- The masquerade rule and the DNS DNAT rules inside the namespace.
+- The masquerade rule, the DNS DNAT rules, and the published port rules inside the
+  namespace.
 - The entries of that tailnet in `/etc/hosts`, or its `systemd-resolved` registration.
 
 The namespace stays, and the other tailnets keep their routes and names.
@@ -109,7 +176,8 @@ The namespace stays, and the other tailnets keep their routes and names.
 If the operator removes a tailnet from the configuration file, the daemon removes:
 
 - Every host route of the peers of that tailnet.
-- The namespace, with the masquerade rule and the DNS DNAT rules inside it.
+- The namespace, with the masquerade rule, the DNS DNAT rules, and the published port
+  rules inside it.
 - The entries of that tailnet in `/etc/hosts`, or its `systemd-resolved` registration.
 
 A graceful shutdown removes every host route, and every name of a peer. If `route_table`

@@ -160,7 +160,7 @@ body.rv-open .layout { padding-right:21rem; }
 </ul></aside>
 <main>
 <h1>Feature: Published ports — a peer reaches a service of the host</h1>
-<p class="meta">Epic 16: Published ports &nbsp; <span class="badge">issued</span></p>
+<p class="meta">Epic 16: Published ports &nbsp; <span class="badge">built</span></p>
 <h3 id="published-ports-purpose">Purpose</h3>
 <p>This is a delta feature. It changes the host access that <code>features/00-foundation.md</code> describes and the namespace rules that <code>features/05-reachability-model.md</code> governs.</p>
 <p>The Tailscale address of a managed tailnet lives inside its namespace. A peer that opens a connection to that address reaches <code>tailscale0</code> inside the namespace, where no service listens, so the kernel of the namespace answers with a reset. Issue #459 measured this: a peer pinged the namespace and got an answer, and the same peer got "connection refused" on port 22, 8888, and every other port. Host access carries the traffic of the host to the peers. It carries no connection from a peer to a service of the host.</p>
@@ -407,7 +407,7 @@ exit node       —</code></pre>
 <li><code>iptables -t nat</code> and <code>ip6tables -t nat</code> inside the namespace, through <code>execx.Runner</code>,
 </li>
 </ul>
-<p>with the argument lists that a test asserts: <code>ip netns exec &lt;ns&gt; iptables -t nat -A PREROUTING -i tailscale0 -p tcp --dport 22 -j DNAT --to-destination &lt;host veth IPv4&gt;:22</code> and the same with <code>ip6tables</code> and <code>[&lt;host veth IPv6&gt;]:22</code>.</p>
+<p>with the argument lists that a test asserts: <code>ip netns exec &lt;ns&gt; iptables -t nat -A PREROUTING -i tailscale0 -p tcp -m tcp --dport 22 -j DNAT --to-destination &lt;host veth IPv4&gt;:22</code> and the same with <code>ip6tables</code> and <code>[&lt;host veth IPv6&gt;]:22</code>.</p>
 <ul>
 <li><code>iptables -t nat -S PREROUTING</code> inside the namespace, to read the rules that the sync
 </li>

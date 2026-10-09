@@ -25,7 +25,7 @@ var skillTests = map[string][]func(*testing.T){
 	},
 	"hydrascale-troubleshoot": {
 		TestTheTroubleshootSkillIsEmbedded,
-		TestTheTroubleshootSkillHoldsFiveDiagnoses,
+		TestTheTroubleshootSkillHoldsSixDiagnoses,
 		TestTheTroubleshootSkillAllowsNoHostChange,
 		TestTheTroubleshootSkillNamesEachEvent,
 		TestTheTroubleshootSkillDiagnosesIPv6,
@@ -33,6 +33,7 @@ var skillTests = map[string][]func(*testing.T){
 		TestTheTroubleshootSkillDiagnosesDNS,
 		TestTheTroubleshootSkillDiagnosesADisplacedJumpRule,
 		TestTheTroubleshootSkillDiagnosesARejectedCredential,
+		TestTheTroubleshootSkillDiagnosesARefusedPortOfTheHost,
 		TestTheTroubleshootSkillStatesTheResultWithNoFault,
 		TestTheTroubleshootSkillNamesNoSourceLine,
 	},

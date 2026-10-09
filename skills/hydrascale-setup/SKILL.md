@@ -123,6 +123,7 @@ The operator sets these keys in `/etc/hydrascale/config.yaml` most often:
 | `ipv6` | When `true`, the daemon sets `net.ipv6.conf.all.forwarding` on a kernel older than Linux 6.17. |
 | `host_dns.mode` | `hosts` writes the peer names into `/etc/hosts`. `resolved` registers the peer domains with `systemd-resolved`. |
 | `socket_group` | The Unix group that reaches the control socket without root. |
+| `tailnets[].publish` | The ports of the host that the peers of the tailnet reach, such as `["tcp/22"]`. The tailnet needs host access and a local rule `from: <tailnet-id>, to: host` that covers each entry. |
 
 **Warning — membership of `socket_group` gives the access of root.** A member sends a
 command to the daemon, and the daemon runs as root. State this risk before you print a
