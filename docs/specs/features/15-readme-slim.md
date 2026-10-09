@@ -49,6 +49,7 @@ the new location of each fact.
   Hydrascale does, Requirements, Install, Quick start, The console, Documentation, Agent
   skills, License.
 - **FR-readme-3** — The header keeps the mark, the name, the one-line summary, and the
+  badges, and it holds one screenshot of the Overview view of the console below the
   badges.
 - **FR-readme-4** — What Hydrascale does holds three paragraphs or fewer.
 - **FR-readme-5** — The console section holds one screenshot and one paragraph, and the

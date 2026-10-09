@@ -13,6 +13,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8d867d" alt="The license"></a>
 </p>
 
+<p align="center">
+  <img src="docs/site/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events. The names and the addresses are placeholders." width="900">
+</p>
+
 ## What Hydrascale does
 
 Hydrascale lets one Linux host join more than one tailnet at the same time. The daemon
@@ -141,7 +145,7 @@ start the daemon.
 ## The console
 
 <p align="center">
-  <img src="docs/site/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events that are not routine reconcile ticks. The names and the addresses are placeholders." width="900">
+  <img src="docs/site/images/console-namespaces.png" alt="The Namespaces view of the console. A table holds one row per tailnet with its state, reachability, policy credential, peer count, address, and namespace. A panel on the right shows one selected tailnet: its namespace, address, MagicDNS name, host access, exit node, the list of its peers, and its recent events. The names and the addresses are placeholders." width="900">
 </p>
 
 The daemon serves the console on `127.0.0.1:9443`. The console shows the namespaces, the
