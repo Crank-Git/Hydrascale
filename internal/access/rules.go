@@ -166,3 +166,49 @@ func (r Rule) String() string {
 	}
 	return r.From + " -> " + r.To + " " + strings.Join(r.Ports, ",")
 }
+
+// PublishedPort holds one entry of the key tailnets[].publish.
+type PublishedPort struct {
+	Protocol string
+	Number   int
+}
+
+// ParsePublishPort returns the protocol and the number of one published port.
+// entry is one item of tailnets[].publish, in the form tcp/22 or udp/53. The parser of
+// the local rule ports reads the entry, so the two keys spell a port the same way.
+// ParsePublishPort returns an error when parsePort refuses the entry, and when the entry
+// holds a range, because the daemon forwards one port of a tailnet to the same port of
+// the host.
+func ParsePublishPort(entry string) (PublishedPort, error) {
+	p, err := parsePort(entry)
+	if err != nil {
+		return PublishedPort{}, err
+	}
+	if p.high != p.low {
+		return PublishedPort{}, fmt.Errorf("invalid port %q: a published port is one port, not a range", entry)
+	}
+	return PublishedPort{Protocol: p.protocol, Number: p.low}, nil
+}
+
+// CoversHost reports whether a rule of the set allows the tailnet from to reach the host
+// on one port.
+// A rule from: <from>, to: host with an empty port list covers every port. A rule with a
+// port list covers the port when one entry holds the protocol and the number. CoversHost
+// skips an entry that parsePort refuses, because Validate reports that entry.
+func (s RuleSet) CoversHost(from, protocol string, number int) bool {
+	for _, rule := range s.Rules {
+		if rule.From != from || rule.To != Host {
+			continue
+		}
+		if len(rule.Ports) == 0 {
+			return true
+		}
+		for _, entry := range rule.Ports {
+			p, err := parsePort(entry)
+			if err == nil && p.protocol == protocol && p.low <= number && number <= p.high {
+				return true
+			}
+		}
+	}
+	return false
+}

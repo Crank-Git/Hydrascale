@@ -109,6 +109,7 @@ Each item of `tailnets` declares one tailnet.
 | `tailnets[].auth_key` | empty | An auth key for an unattended setup. The environment variable `HYDRASCALE_AUTHKEY_<ID>` overrides it. See [Environment variables](environment.md). |
 | `tailnets[].host_access` | the global `host_access` | Host access for this tailnet. The value overrides the global key. |
 | `tailnets[].control_url` | the global `control_url` | The control server URL of this tailnet. The same rule for the scheme applies. |
+| `tailnets[].publish` | empty | The ports of the host that the peers of this tailnet reach. An entry is `tcp/<n>` or `udp/<n>`. The tailnet needs host access, and a local rule `from: <tailnet>, to: host` must cover each entry. |
 
 When `resolver.resolve_aliases` is `true`, an alias is also a DNS label. The alias then
 holds no underscore, and two aliases that differ by case alone are a conflict.
