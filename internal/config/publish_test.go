@@ -134,6 +134,19 @@ access:
 		}
 	})
 
+	t.Run("refuses two entries that name one port with different digits", func(t *testing.T) {
+		tmp := writeTemp(t, publishFile(`["tcp/22", "tcp/022"]`, `
+access:
+  rules:
+    - from: "alpha"
+      to: "host"
+`))
+		_, err := LoadConfig(tmp)
+		if err == nil || !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), `"tcp/022"`) {
+			t.Fatalf("LoadConfig error = %v, want a refusal of the duplicate entry", err)
+		}
+	})
+
 	t.Run("refuses a publish list on a tailnet with host access off", func(t *testing.T) {
 		tmp := writeTemp(t, `
 version: 2

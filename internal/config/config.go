@@ -328,18 +328,19 @@ func ValidatePublish(tailnets []Tailnet, hostAccess func(id string) bool, set *a
 		if !on {
 			failures = append(failures, fmt.Errorf("tailnet %q: publish needs host access, and host access is off for this tailnet", tn.ID))
 		}
-		seen := make(map[string]bool, len(tn.Publish))
+		// The check compares the parsed port, because tcp/22 and tcp/022 name one port.
+		seen := make(map[access.PublishedPort]bool, len(tn.Publish))
 		for _, entry := range tn.Publish {
-			if seen[entry] {
-				failures = append(failures, fmt.Errorf("tailnet %q: publish entry %q: duplicate entry", tn.ID, entry))
-				continue
-			}
-			seen[entry] = true
 			p, err := access.ParsePublishPort(entry)
 			if err != nil {
 				failures = append(failures, fmt.Errorf("tailnet %q: publish entry %q: %w", tn.ID, entry, err))
 				continue
 			}
+			if seen[p] {
+				failures = append(failures, fmt.Errorf("tailnet %q: publish entry %q: duplicate entry", tn.ID, entry))
+				continue
+			}
+			seen[p] = true
 			if on && !rules.CoversHost(tn.ID, p.Protocol, p.Number) {
 				failures = append(failures, fmt.Errorf("tailnet %q: publish entry %q: needs a local rule from: %s, to: %s that covers %s", tn.ID, entry, tn.ID, access.Host, entry))
 			}
