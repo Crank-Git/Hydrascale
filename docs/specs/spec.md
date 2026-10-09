@@ -1009,6 +1009,7 @@ fix.
 | Epic 13: Visual policy editor — SSH and advanced constructs | #320 | #321 #322 #323 #324 #325 | `features/13-visual-policy-advanced.md` |
 | Epic 14: Documentation site | #426 | #428 #429 #430 #431 #432 #433 | `features/14-docs-site.md`, `features/15-readme-slim.md` |
 | Epic 15: Agent skills refresh | #427 | #434 #435 #436 #437 #438 | `features/16-agent-skills-refresh.md` |
+| Epic 16: Published ports | #462 | #463 #464 #465 #466 | `features/17-published-ports.md` |
 
 Epics 11 to 13 were filed on 2026-08-23, after the `/spec-update` round that added version
 1.1 was approved.
@@ -1058,6 +1059,7 @@ documentation site and the skills refresh was approved.
 | docs-site | FR-site-1 to 46 | #428 #429 #430 #431 #432 |
 | readme-slim | FR-readme-1 to 11 | #433 |
 | agent-skills-refresh | FR-refresh-1 to 35 | #434 #435 #436 #437 #438 |
+| published-ports | FR-publish-1 to 21 | #463 #464 #465 #466 |
 
 Every one of the 244 requirements in these ten features is cited by at least one issue.
 Every one of the 49 requirements across `policy-document-model`, `visual-acl-editor`,

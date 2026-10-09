@@ -160,7 +160,7 @@ body.rv-open .layout { padding-right:21rem; }
 </ul></aside>
 <main>
 <h1>Feature: Published ports — a peer reaches a service of the host</h1>
-<p class="meta">Epic 16: Published ports &nbsp; <span class="badge">planned</span></p>
+<p class="meta">Epic 16: Published ports &nbsp; <span class="badge">issued</span></p>
 <h3 id="published-ports-purpose">Purpose</h3>
 <p>This is a delta feature. It changes the host access that <code>features/00-foundation.md</code> describes and the namespace rules that <code>features/05-reachability-model.md</code> governs.</p>
 <p>The Tailscale address of a managed tailnet lives inside its namespace. A peer that opens a connection to that address reaches <code>tailscale0</code> inside the namespace, where no service listens, so the kernel of the namespace answers with a reset. Issue #459 measured this: a peer pinged the namespace and got an answer, and the same peer got "connection refused" on port 22, 8888, and every other port. Host access carries the traffic of the host to the peers. It carries no connection from a peer to a service of the host.</p>
