@@ -174,9 +174,10 @@ body.rv-open .layout { padding-right:21rem; }
 <li><a href="html/feature-docs-site.html">Documentation site</a></li>
 <li><a href="html/feature-readme-slim.html">A short README that links to the documentation site</a></li>
 <li><a href="html/feature-agent-skills-refresh.html">Agent skills for version 1.5, a troubleshooting skill, and a stricter drift test</a></li>
+<li><a href="html/feature-published-ports.html">Published ports — a peer reaches a service of the host</a></li>
 </ul></aside>
 <main>
-<p class="meta"><span class="badge">approved</span> &nbsp; created 2026-08-04 &nbsp; rendered 2026-10-07</p>
+<p class="meta"><span class="badge">approved</span> &nbsp; created 2026-08-04 &nbsp; rendered 2026-10-09</p>
 <h1>Hydrascale v1.0</h1>
 <h1 id="hydrascale-v1-0">Hydrascale v1.0</h1>
 <h2 id="overview">Overview</h2>
@@ -252,6 +253,7 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>listen port</td><td>noun</td><td>The UDP port of the <code>tailscaled</code> of a namespace: 41641 plus the veth index, from 41642 to 41895.</td><td>tailscale port, WireGuard port</td></tr>
 <tr><td>drift test</td><td>noun</td><td>The test in <code>cmd/hydrascale/skills_drift_test.go</code> that fails when a skill names a command, a flag, a key, or an event that the code does not hold.</td><td>lint, skill check</td></tr>
 <tr><td>result region</td><td>noun</td><td>The policy view's region that states the answer of the last validate or push, with one line per error.</td><td>result panel, status area, message box</td></tr>
+<tr><td>published port</td><td>noun</td><td>One port of the host that the peers of one tailnet reach through the Tailscale address of its namespace, which the key <code>tailnets[].publish</code> names.</td><td>exposed port, port forward, inbound port</td></tr>
 </table></div>
 <h2 id="goals">Goals</h2>
 <ol>
@@ -335,8 +337,9 @@ body.rv-open .layout { padding-right:21rem; }
 <tr><td>Documentation site</td><td><code>features/14-docs-site.md</code></td><td>Epic 14</td><td>none</td></tr>
 <tr><td>A short README</td><td><code>features/15-readme-slim.md</code></td><td>Epic 14</td><td>none</td></tr>
 <tr><td>Agent skills refresh</td><td><code>features/16-agent-skills-refresh.md</code></td><td>Epic 15</td><td>none</td></tr>
+<tr><td>Published ports</td><td><code>features/17-published-ports.md</code></td><td>Epic 16</td><td>none</td></tr>
 </table></div>
-<p>Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1 already covers the console fixes and the credential-state work between Epic 9 and Epic 10, tagged <code>v1.1.0</code> and <code>v1.1.1</code>.) Epic 14 and Epic 15 follow version 1.5: the documentation site, the short README, and the agent skills for version 1.5.</p>
+<p>Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1 already covers the console fixes and the credential-state work between Epic 9 and Epic 10, tagged <code>v1.1.0</code> and <code>v1.1.1</code>.) Epic 14 and Epic 15 follow version 1.5: the documentation site, the short README, and the agent skills for version 1.5. Epic 16 follows version 1.6, and it answers issue #459.</p>
 <h2 id="architecture-stack">Architecture &amp; stack</h2>
 <h3 id="components-after-version-1-0">Components after version 1.0</h3>
 <div class="table-wrap"><table>
@@ -390,6 +393,9 @@ tailnets:
     auth_key: ""
     control_url: ""
     host_access: true
+    # new after v1.6: ports of the host that the peers of this tailnet reach.
+    # Each entry needs the local rule `from: jbones, to: host` below.
+    publish: ["tcp/22"]
 
 # new in v1.0
 console:
@@ -420,6 +426,12 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td><code>ports</code></td><td>list of string</td><td>Each entry matches <code>tcp/&lt;n&gt;</code>, <code>udp/&lt;n&gt;</code>, or <code>tcp/&lt;n&gt;-&lt;m&gt;</code>. An empty list allows every port.</td></tr>
 </table></div>
 <p>A local rule allows traffic. There is no deny rule. The daemon denies everything that no local rule allows. A rule where <code>from</code> equals <code>to</code> is invalid.</p>
+<h3 id="published-port">Published port</h3>
+<div class="table-wrap"><table>
+<tr><th>Field</th><th>Type</th><th>Constraint</th></tr>
+<tr><td><code>tailnets[].publish</code></td><td>list of string</td><td>Each entry matches <code>tcp/&lt;n&gt;</code> or <code>udp/&lt;n&gt;</code>. No range. No duplicate. The tailnet holds host access, and a local rule <code>from: &lt;tailnet&gt;, to: host</code> covers each entry.</td></tr>
+</table></div>
+<p>A published port rewrites the destination of an inbound packet on <code>tailscale0</code> inside the namespace to the host side veth address. The local rule gates it on the host.</p>
 <h3 id="secrets-file-etc-hydrascale-secrets-yaml">Secrets file, <code>/etc/hydrascale/secrets.yaml</code></h3>
 <p>The daemon creates this file with mode <code>0600</code> and owner <code>root</code>. The control API never returns its contents. The console writes it through a dedicated route.</p>
 <pre class="code"><code>tailnets:
@@ -585,6 +597,8 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <p>Goal: the operator finds any fact on one documentation site, and the README states what Hydrascale does and links to the site. Covers: <code>features/14-docs-site.md</code>, <code>features/15-readme-slim.md</code>. Depends on: the release of version 1.5. Exit criteria: <code>https://crank-git.github.io/Hydrascale/</code> serves the site from <code>main</code>. CI fails a pull request whose page holds a broken link. <code>README.md</code> holds 220 lines or fewer and links to every section of the site. <code>docs/manual/</code>, <code>docs/images/</code>, <code>docs/UPGRADING.md</code>, and <code>docs/security-audit.md</code> live under <code>docs/site/</code>.</p>
 <h3 id="epic-15-agent-skills-refresh">Epic 15: Agent skills refresh</h3>
 <p>Goal: the coding agent of the operator states the commands of version 1.5 correctly, diagnoses a fault with read-only commands, and links to the documentation site. Covers: <code>features/16-agent-skills-refresh.md</code>. Depends on: Epic 14, because each skill links to a page of the documentation site. Exit criteria: <code>hydrascale skills install</code> writes three skills. The drift test fails on an unknown flag, an unknown configuration key, an unknown event, and a source line reference. The four contributor skills state the real CI gate.</p>
+<h3 id="epic-16-published-ports">Epic 16: Published ports</h3>
+<p>Goal: a peer of a tailnet reaches a service of the host through the Tailscale address of the namespace, on each port that the operator publishes. Covers: <code>features/17-published-ports.md</code>. Depends on: Epic 5, because the local rule <code>from: &lt;tailnet&gt;, to: host</code> gates the forwarded connection. Exit criteria: a peer on another machine opens an SSH session to the host through the namespace of a tailnet that publishes <code>tcp/22</code>. A file that publishes a port with no covering rule fails to load. The console shows the published ports of a tailnet.</p>
 <h2 id="milestones">Milestones</h2>
 <div class="table-wrap"><table>
 <tr><th>Milestone</th><th>Epics</th><th>What is shippable</th></tr>
@@ -596,6 +610,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>M6 — Agent skills</td><td>10</td><td>A coding agent routes a command to the named tailnet. This follows version 1.0.</td></tr>
 <tr><td>M7 — Visual policy editor</td><td>11, 12, 13</td><td>The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (<code>v1.1.0</code>, <code>v1.1.1</code>).</td></tr>
 <tr><td>M8 — Documentation site</td><td>14, 15</td><td>The documentation site serves every topic, the README is short, and the agent skills match version 1.5.</td></tr>
+<tr><td>M9 — Published ports</td><td>16</td><td>A peer reaches a published port of the host through the namespace of its tailnet. This follows version 1.6.</td></tr>
 </table></div>
 <p>M2 is the point at which the release is worth cutting even if nothing else lands. The security and DNS work must not wait behind the console.</p>
 <h2 id="assumptions" class="callout-h">Assumptions</h2>
@@ -830,6 +845,11 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>2026-10-07</td><td>1</td><td>Issue #436. <strong>Decision: the <code>allowed-tools</code> field of <code>hydrascale-troubleshoot</code> names no prefix rule that also allows a change of the host.</strong> A prefix rule allows every suffix. A rule for <code>sudo hydrascale tailscale</code> therefore also allows <code>up</code> and <code>logout</code>, so the skill asks the operator before each <code>netcheck</code>. A rule for <code>sudo journalctl</code> also allows <code>--vacuum-time</code>, so the field names <code>journalctl -u hydrascale</code> without <code>sudo</code>, and the skill asks before it reads the journal with <code>sudo</code>. The field names no <code>curl</code>, because <code>curl</code> also sends a <code>PUT</code>, so the skill asks before it reads <code>GET /api/policy</code> and <code>GET /api/events</code>. The diagnosis of a displaced jump rule prints <code>iptables -I</code> and then <code>iptables -D</code> with a position, because a delete first leaves the namespace without the local rules until the next tick. <code>docs/site/operations/troubleshooting.md</code> gains the section "A rule of another service comes before the jump rule", and the diagnosis links to it. The Terms table gains <code>diagnosis</code>, <code>jump rule</code>, and <code>listen port</code>.</td></tr>
 <tr><td>2026-10-07</td><td>1</td><td>Issue #437. <strong>Decision: the drift test reads a configuration key and an event type with one candidate rule.</strong> A candidate is a backtick span with the shape of a key that holds an underscore, a dot, or <code>[]</code>. A dotted candidate also opens with the first segment of a key or an event type. A candidate must be a configuration key, an event type, a key of the secrets file, or <code>credential_state</code>, which is a field of the answer of <code>GET /api/policy</code>. A short name of a kernel parameter, such as <code>force_forwarding</code>, therefore fails, and the troubleshoot skill now states <code>net.ipv6.conf.all.force_forwarding</code> and <code>net.ipv6.conf.&lt;device&gt;.accept_ra</code>. The test of <code>skills/</code> holds a table that names the content tests of each skill, so a new skill directory without an entry fails (FR-refresh-32).</td></tr>
 <tr><td>2026-10-07</td><td>1</td><td>Epic 15 complete. <code>features/16-agent-skills-refresh.md</code> is built. <code>hydrascale skills install</code> writes three skills, and the drift test checks flags, configuration keys, event types, source lines, and site links.</td></tr>
+<tr><td>2026-10-09</td><td>1</td><td><strong>Decision: the README header holds a screenshot of the Overview view below the badges.</strong> The operator asked for a preview of the console near the top of the README. FR-readme-3 now states the header screenshot, and the console section (FR-readme-5) shows the Namespaces view instead, so the two screenshots differ. Both come from <code>docs/site/images/</code>.</td></tr>
+<tr><td>2026-10-09</td><td>1</td><td><strong>The toolchain moves to Go 1.26.9 (pull request #461).</strong> <code>govulncheck</code> named 15 called advisories on <code>dev</code>, GO-2026-6603 to GO-2026-6617, on the first pull request of the day. Each names <code>go1.26.9</code> or <code>golang.org/x/net</code> v0.60.0 as its fix, so the move follows the precedent of issues #122 and #294. <code>go.mod</code>, <code>.github/workflows/ci.yml</code>, and <code>.github/workflows/release.yml</code> hold <code>1.26.9</code>.</td></tr>
+<tr><td>2026-10-09</td><td>1</td><td><strong>Change: published ports (issue #459).</strong> The reporter measured "connection refused" from a peer on every TCP port of the host, while ping answered. The Tailscale address lives in the namespace, so the kernel of the namespace answers a SYN with a reset, and host access carries no connection from a peer to the host. The test host reproduced it on 2026-10-09: a DNAT rule on <code>tailscale0</code> to the host veth address, with the local rule <code>from: havoc, to: host</code>, let a peer on another machine open an SSH session to the host; without the rule the connection timed out in <code>HYDRASCALE-OUT</code>. The operator decided: the local rule gates a published port and the load refuses a published port that no rule covers; a published port covers IPv4 and IPv6; the console shows the list on the namespace detail and does not edit it. New feature: <code>features/17-published-ports.md</code>, a delta on <code>features/00-foundation.md</code> and <code>features/05-reachability-model.md</code>. New epic: Epic 16. New milestone: M9. New term: published port.</td></tr>
+<tr><td>2026-10-09</td><td>1</td><td>Epic 16. <strong>Decision: the teardown of host access reads the IPv6 nat chain even when the IPv6 path is off.</strong> A published port rule that the daemon wrote while the path was on leaves at teardown. On a host with no <code>ip6tables</code> binary the teardown reports the failure, as the veth teardown already does, because a silent best-effort step is a defect. The event <code>access.write_failed</code> repeats on every tick while a write fails, as the other write failures of the reconciler do. The test host measured the published port on 2026-10-09: the load refused an uncovered entry, one DNAT rule on <code>tailscale0</code> carried an SSH session from the peer <code>brain</code> to the host, and the rule left within one tick after the entry left the file.</td></tr>
+<tr><td>2026-10-09</td><td>1</td><td>Epic 16 complete. <code>features/17-published-ports.md</code> is built. The key <code>tailnets[].publish</code>, the namespace DNAT rules, the <code>published</code> field of the console, the site pages, and the two operator skills shipped in pull request #473.</td></tr>
 </table></div>
 <h2 id="issue-map">Issue map</h2>
 <p>Every epic of version 1.0 is on the tracker. Epics 5 to 9 were filed on 2026-08-05, after the security audit closed, so that each decomposition carries the audit findings it must fix.</p>
@@ -852,6 +872,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>Epic 13: Visual policy editor — SSH and advanced constructs</td><td>#320</td><td>#321 #322 #323 #324 #325</td><td><code>features/13-visual-policy-advanced.md</code></td></tr>
 <tr><td>Epic 14: Documentation site</td><td>#426</td><td>#428 #429 #430 #431 #432 #433</td><td><code>features/14-docs-site.md</code>, <code>features/15-readme-slim.md</code></td></tr>
 <tr><td>Epic 15: Agent skills refresh</td><td>#427</td><td>#434 #435 #436 #437 #438</td><td><code>features/16-agent-skills-refresh.md</code></td></tr>
+<tr><td>Epic 16: Published ports</td><td>#462</td><td>#463 #464 #465 #466</td><td><code>features/17-published-ports.md</code></td></tr>
 </table></div>
 <p>Epics 11 to 13 were filed on 2026-08-23, after the <code>/spec-update</code> round that added version 1.1 was approved.</p>
 <p>Epics 14 and 15 were filed on 2026-10-07, after the <code>/spec-update</code> round that added the documentation site and the skills refresh was approved.</p>
@@ -896,6 +917,7 @@ secrets_file: /etc/hydrascale/secrets.yaml</code></pre>
 <tr><td>docs-site</td><td>FR-site-1 to 46</td><td>#428 #429 #430 #431 #432</td></tr>
 <tr><td>readme-slim</td><td>FR-readme-1 to 11</td><td>#433</td></tr>
 <tr><td>agent-skills-refresh</td><td>FR-refresh-1 to 35</td><td>#434 #435 #436 #437 #438</td></tr>
+<tr><td>published-ports</td><td>FR-publish-1 to 21</td><td>#463 #464 #465 #466</td></tr>
 </table></div>
 <p>Every one of the 244 requirements in these ten features is cited by at least one issue. Every one of the 49 requirements across <code>policy-document-model</code>, <code>visual-acl-editor</code>, and <code>visual-policy-advanced</code> is cited by exactly one issue.</p>
 <p><strong>FR-access-2 is covered and reversed.</strong> The requirement states that the daemon appends the jump rule into <code>FORWARD</code>. The operator decided on 2026-08-05 that the daemon keeps the insert at position 1. Issue #139 edits the requirement text, corrects <code>CLAUDE.md</code>, and adds the detection that the decision needs.</p>

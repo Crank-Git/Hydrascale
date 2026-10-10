@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -65,6 +66,10 @@ type Tailnet struct {
 	// the ID of the tailnet, and it prints the alias. No path, no device name and no
 	// command argument carries it.
 	Alias string `yaml:"alias,omitempty"`
+	// Publish names the ports of the host that the peers of this tailnet reach, in the
+	// form tcp/<n> or udp/<n>. The JSON tag gives GET /api/status the key publish, which
+	// the console reads. ValidatePublish holds the rules for an entry.
+	Publish []string `yaml:"publish,omitempty" json:"publish,omitempty"`
 }
 
 // HostDNSConfig holds DNS configuration for host access.
@@ -220,6 +225,12 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
+	// A published port needs a local rule to the host, so the check reads the rule set
+	// after the rule set itself passes.
+	if err := ValidatePublish(cfg.Tailnets, cfg.TailnetHostAccess, cfg.Access); err != nil {
+		return nil, fmt.Errorf("invalid publish list: %w", err)
+	}
+
 	// Validate global control_url
 	if err := ValidateControlURL(cfg.ControlURL); err != nil {
 		return nil, fmt.Errorf("global %w", err)
@@ -289,6 +300,53 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// ValidatePublish returns an error when a publish list of a tailnet holds an entry that
+// the daemon cannot forward.
+// tailnets holds the tailnets of the configuration. hostAccess answers the host access of
+// one tailnet. set is the local rule set, and a nil set holds no rule.
+// ValidatePublish rejects each of these, and it reports every failure together:
+//   - an entry that is not of the form tcp/<n> or udp/<n>, which includes a range;
+//   - a duplicate entry in one tailnet;
+//   - a publish list on a tailnet whose host access is off;
+//   - an entry that no local rule from: <tailnet>, to: host covers.
+func ValidatePublish(tailnets []Tailnet, hostAccess func(id string) bool, set *access.RuleSet) error {
+	rules := access.RuleSet{}
+	if set != nil {
+		rules = *set
+	}
+
+	var failures []error
+	for _, tn := range tailnets {
+		if len(tn.Publish) == 0 {
+			continue
+		}
+		// The namespace forwards no packet to the host without host access, so a
+		// published port on such a tailnet reaches nothing.
+		on := hostAccess(tn.ID)
+		if !on {
+			failures = append(failures, fmt.Errorf("tailnet %q: publish needs host access, and host access is off for this tailnet", tn.ID))
+		}
+		// The check compares the parsed port, because tcp/22 and tcp/022 name one port.
+		seen := make(map[access.PublishedPort]bool, len(tn.Publish))
+		for _, entry := range tn.Publish {
+			p, err := access.ParsePublishPort(entry)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("tailnet %q: publish entry %q: %w", tn.ID, entry, err))
+				continue
+			}
+			if seen[p] {
+				failures = append(failures, fmt.Errorf("tailnet %q: publish entry %q: duplicate entry", tn.ID, entry))
+				continue
+			}
+			seen[p] = true
+			if on && !rules.CoversHost(tn.ID, p.Protocol, p.Number) {
+				failures = append(failures, fmt.Errorf("tailnet %q: publish entry %q: needs a local rule from: %s, to: %s that covers %s", tn.ID, entry, tn.ID, access.Host, entry))
+			}
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // Reserved routing table numbers. The kernel gives each of these a meaning, therefore the

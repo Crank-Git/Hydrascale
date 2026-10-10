@@ -91,6 +91,13 @@ func (s *Server) putAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A rule set that removes the cover of a published port contradicts the file, the
+	// same as a file that LoadConfig refuses.
+	if err := config.ValidatePublish(cfg.Tailnets, cfg.TailnetHostAccess, &set); err != nil {
+		writeRefusal(w, err.Error())
+		return
+	}
+
 	// The compiler holds the rest of the refusals, such as a tailnet that the topology
 	// names no device for. The route runs it before the write, so that a rule set that
 	// the daemon cannot apply never reaches the configuration file.

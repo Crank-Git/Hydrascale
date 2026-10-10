@@ -92,10 +92,10 @@ func TestTheTroubleshootSkillIsEmbedded(t *testing.T) {
 
 // FR-refresh-23 and FR-refresh-24: each diagnosis holds a read-only check, a printed
 // repair command, and a link to the site.
-func TestTheTroubleshootSkillHoldsFiveDiagnoses(t *testing.T) {
+func TestTheTroubleshootSkillHoldsSixDiagnoses(t *testing.T) {
 	sections := diagnoses(troubleshootSkill(t))
-	if len(sections) != 5 {
-		t.Fatalf("the skill holds %d diagnosis sections, want 5", len(sections))
+	if len(sections) != 6 {
+		t.Fatalf("the skill holds %d diagnosis sections, want 6", len(sections))
 	}
 	for heading, section := range sections {
 		check, ok := subsection(section, "Check")
@@ -210,6 +210,19 @@ func TestTheTroubleshootSkillDiagnosesARejectedCredential(t *testing.T) {
 		"`rejected`",
 		"An absent credential is not a fault",
 		siteURL+"guides/credentials/",
+	)
+}
+
+// FR-publish-21: the refused port diagnosis reads the nat PREROUTING chain of the
+// namespace, and it names the key and the local rule that repair the cause.
+func TestTheTroubleshootSkillDiagnosesARefusedPortOfTheHost(t *testing.T) {
+	requireTroubleshootText(t, diagnosisSection(t, troubleshootSkill(t), "refused"),
+		"iptables -t nat -S PREROUTING",
+		"tailscale0",
+		"`tailnets[].publish`",
+		"to: host",
+		"127.0.0.1",
+		siteURL+"operations/troubleshooting/#a-peer-gets-connection-refused-on-a-port-of-the-host",
 	)
 }
 

@@ -1411,6 +1411,10 @@ belongs with it. Record this finding for the console work.
 - **Condition**: The operator sets `host_access: false` on a tailnet that is running with
   `host_access: true`, and the operator does not delete the tailnet.
 - **Epic 3**: Yes. Issue #69 emits a teardown action when `host_access` changes to false.
+- **Note, 2026-10-09**: The count of three rules is dated. Epic 16 adds one DNAT rule on
+  `tailscale0` inside the namespace for each published port, in IPv4 and in IPv6. The
+  teardown removes these rules together with the other three. See
+  [Published ports](../guides/host-access.md#published-ports).
 
 #### SA-27 — `TeardownHostAccess` cannot report a failure, because its signature returns nothing
 
@@ -1641,6 +1645,10 @@ after Epic 5 lands and it needs a note that says so until then.
   to all traffic.
 - **Epic 3**: Partly. Epic 3 writes the IPv4 chain. Version 1.0 keeps the IPv6 gap by
   decision. See `docs/specs/features/05-reachability-model.md:231`.
+- **Note, 2026-10-09**: The statement "writes no IPv6 firewall rule" is dated. Epic 16
+  writes one DNAT rule with `ip6tables` on `tailscale0` inside the namespace for each
+  published port, when the namespace holds the IPv6 path. See
+  [Published ports](../guides/host-access.md#published-ports).
 
 #### SA-35 — No rule covers IPv6, and each namespace holds an IPv6 tailnet address
 
