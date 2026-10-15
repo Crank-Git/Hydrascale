@@ -755,6 +755,17 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 		return resp.Peers[i].HostName < resp.Peers[j].HostName
 	})
 
+	// A Tailscale service holds no peer entry, so the response carries it apart from the
+	// peers. CollectServices reads the capability map of every node in the status and returns
+	// one entry per service, in the order of the names.
+	for _, service := range daemon.CollectServices(status) {
+		resp.Services = append(resp.Services, ServiceInfo{
+			Name:  service.Name,
+			Addrs: service.Addrs,
+			Ports: service.Ports,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
 		log.Printf("handleTailnetDetail: encode success response: %v", encErr)

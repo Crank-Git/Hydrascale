@@ -794,3 +794,51 @@ func TestTempSocketPath_returns_a_path_below_the_sun_path_limit_for_a_long_test_
 	}
 	ln.Close()
 }
+
+func TestDetailEndpoint_HoldsTheServicesOfTheTailnet(t *testing.T) {
+	// A Tailscale service holds no peer entry, so the response carries it apart from the
+	// peers. The status reports the service as a capability of the node.
+	cfgPath := writeTestConfig(t, "alpha")
+	md := newMockDaemon()
+	md.statusResult = &daemon.TailscaleStatus{
+		MagicDNSSuffix: "tail1234.ts.net",
+		Self: daemon.StatusNode{
+			HostName:     "myhost",
+			TailscaleIPs: []string{"100.64.1.5"},
+			CapMap: map[string][]json.RawMessage{
+				"services/litellm": {json.RawMessage(`{"Name":"svc:litellm","Addrs":["100.64.0.138","fd7a:115c:a1e0::4242"],"Ports":["tcp:443"]}`)},
+			},
+		},
+		Peer: map[string]daemon.StatusNode{
+			"nodekeyA": {HostName: "alpha-peer", TailscaleIPs: []string{"100.64.1.2"}},
+		},
+	}
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	detail, err := client.TailnetDetail("alpha")
+	if err != nil {
+		t.Fatalf("TailnetDetail: %v", err)
+	}
+	if detail.Error != "" {
+		t.Fatalf("expected no error, got: %s", detail.Error)
+	}
+	if len(detail.Services) != 1 {
+		t.Fatalf("Services: got %d, want 1: %+v", len(detail.Services), detail.Services)
+	}
+	service := detail.Services[0]
+	if service.Name != "svc:litellm" {
+		t.Errorf("Name: got %q, want svc:litellm", service.Name)
+	}
+	if len(service.Addrs) != 2 || service.Addrs[0] != "100.64.0.138" {
+		t.Errorf("Addrs: got %v, want [100.64.0.138 fd7a:115c:a1e0::4242]", service.Addrs)
+	}
+	if len(service.Ports) != 1 || service.Ports[0] != "tcp:443" {
+		t.Errorf("Ports: got %v, want [tcp:443]", service.Ports)
+	}
+	// A service is not a peer, so it changes no peer count.
+	if detail.PeerCount != 1 {
+		t.Errorf("PeerCount: got %d, want 1", detail.PeerCount)
+	}
+}

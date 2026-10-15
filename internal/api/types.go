@@ -307,6 +307,18 @@ type PeerInfo struct {
 	LastSeen     time.Time `json:"last_seen,omitempty"`
 }
 
+// ServiceInfo is one Tailscale service that a tailnet advertises.
+//
+// A service holds no peer entry in the status, so it reaches the daemon through the
+// capability map of the node that collects its endpoints. Name holds the name that the
+// control server reported, which carries the prefix `svc:`. Addrs holds every address that
+// the service answers on, and Ports holds entries of the form `tcp:443`.
+type ServiceInfo struct {
+	Name  string   `json:"name"`
+	Addrs []string `json:"addrs,omitempty"`
+	Ports []string `json:"ports,omitempty"`
+}
+
 // TailnetDetailResponse is the JSON response for GET /api/tailnet/{id}/detail.
 // It contains live data fetched from inside the tailnet's network namespace.
 // Config fields (ExitNode, HostAccess) and reconciler route state are NOT included
@@ -316,16 +328,17 @@ type PeerInfo struct {
 // authorizes a node that is not logged in. The console shows a warning dot and the login
 // URL for that node, therefore it reads both from the daemon.
 type TailnetDetailResponse struct {
-	TailscaleIPs   []string   `json:"tailscale_ips"`
-	MagicDNSName   string     `json:"magic_dns_name,omitempty"`
-	MagicDNSSuffix string     `json:"magic_dns_suffix,omitempty"`
-	PeerCount      int        `json:"peer_count"`
-	OnlinePeers    int        `json:"online_peers"`
-	Peers          []PeerInfo `json:"peers,omitempty"`
-	BackendState   string     `json:"backend_state,omitempty"`
-	LoginURL       string     `json:"login_url,omitempty"`
-	FetchedAt      time.Time  `json:"fetched_at"`
-	Error          string     `json:"error,omitempty"`
+	TailscaleIPs   []string      `json:"tailscale_ips"`
+	MagicDNSName   string        `json:"magic_dns_name,omitempty"`
+	MagicDNSSuffix string        `json:"magic_dns_suffix,omitempty"`
+	PeerCount      int           `json:"peer_count"`
+	OnlinePeers    int           `json:"online_peers"`
+	Peers          []PeerInfo    `json:"peers,omitempty"`
+	Services       []ServiceInfo `json:"services,omitempty"`
+	BackendState   string        `json:"backend_state,omitempty"`
+	LoginURL       string        `json:"login_url,omitempty"`
+	FetchedAt      time.Time     `json:"fetched_at"`
+	Error          string        `json:"error,omitempty"`
 }
 
 // TailnetRemovalPlanResponse is the JSON response for GET /api/tailnet/{id}/removal-plan.

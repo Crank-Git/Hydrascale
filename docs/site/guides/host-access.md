@@ -81,6 +81,30 @@ sudo hydrascale tailscale corp-prod -- up --accept-routes
 The configuration file needs no change. A subnet route appears on the host within one
 tick after the login. The daemon removes it when the tailnet goes away.
 
+## Tailscale services
+
+A Tailscale service is not a machine. The control server reports it as a capability of the
+node that collects its endpoints, under the key `services/<name>`, and `tailscale status
+--json` holds no peer entry for it. The daemon reads the capability map of every node in the
+status, so a service needs no configuration key and no login flag. It also needs no
+`--accept-routes`, because the address of a service does not come from routing table 52.
+
+For each service, the daemon writes the state below on the host.
+
+| State | Shape |
+|-------|-------|
+| One route per address | One host route for every address that the service answers on, through the veth gateway of the tailnet, in the shape a peer route takes. |
+| One name in the hosts file | `<tailnet-id>-<service>`, for example `havoc-litellm`, in the managed block. |
+| One record in the alias zone | `<service>.<alias>.ts.internal`, when `resolver.resolve_aliases` is on and the tailnet holds an alias. |
+
+The name drops the `svc:` prefix that the control server puts on the service, and it maps
+every character that is not a letter, a digit or a hyphen to a hyphen. A service whose name
+leaves no usable label gets no record, and the daemon states the reason in the log. A peer
+that already holds the name keeps it.
+
+`GET /api/tailnet/{id}/detail` returns each service with its addresses and its ports under
+`services`. The console does not show them yet.
+
 ## The names of the peers
 
 Each peer takes the name `<tailnet-id>-<hostname>`. Two tailnets with a peer of the same

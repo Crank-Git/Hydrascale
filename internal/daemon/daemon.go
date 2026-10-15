@@ -49,6 +49,113 @@ type StatusNode struct {
 	AllowedIPs   []string  `json:"AllowedIPs"`
 	Online       bool      `json:"Online"`
 	LastSeen     time.Time `json:"LastSeen"`
+	// CapMap holds the capability records of the node. A Tailscale service reaches the
+	// daemon here rather than through the peer list. The records of one map hold several
+	// shapes, so the daemon keeps them as raw JSON and reads only the keys that name a
+	// service. See StatusNode.Services.
+	CapMap map[string][]json.RawMessage `json:"CapMap,omitempty"`
+}
+
+// ServiceCapKeyPrefix is the prefix of the capability key that names a service. The control
+// server writes it as `services/<name>`.
+const ServiceCapKeyPrefix = "services/"
+
+// ServiceNamePrefix is the prefix that the control server puts on the name inside a service
+// record.
+const ServiceNamePrefix = "svc:"
+
+// ServiceEndpoint is one record of a Tailscale service, as the control server reports it in
+// the capability map of the node that collects the endpoints of that service.
+//
+// Name carries the prefix `svc:`, which is not a DNS label. Addrs holds every address that
+// the service answers on. Ports holds entries of the form `tcp:443`.
+type ServiceEndpoint struct {
+	Name  string   `json:"Name"`
+	Addrs []string `json:"Addrs"`
+	Ports []string `json:"Ports"`
+}
+
+// Services returns every Tailscale service that this node reports.
+//
+// A service is not a peer, and the status holds no peer entry for it. The control server
+// reports it as a capability, under a key of the form `services/<name>`, on the node that
+// collects its endpoints. Services keeps a record when the key names a service or the record
+// names itself with the prefix `svc:`. It drops a record that holds no name or no address,
+// because no route and no host name reaches either one.
+//
+// One key that holds a record of another shape is skipped rather than failing the status.
+// Services sorts by name, because map iteration has no order.
+func (n StatusNode) Services() []ServiceEndpoint {
+	if len(n.CapMap) == 0 {
+		return nil
+	}
+	var out []ServiceEndpoint
+	for key, records := range n.CapMap {
+		keyNamesService := strings.HasPrefix(key, ServiceCapKeyPrefix)
+		for _, raw := range records {
+			var endpoint ServiceEndpoint
+			if err := json.Unmarshal(raw, &endpoint); err != nil {
+				continue
+			}
+			if !keyNamesService && !strings.HasPrefix(endpoint.Name, ServiceNamePrefix) {
+				continue
+			}
+			if endpoint.Name == "" || len(endpoint.Addrs) == 0 {
+				continue
+			}
+			out = append(out, endpoint)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// CollectServices returns every Tailscale service that a status reports.
+//
+// The control server attaches a service to the node that collects its endpoints, and the
+// daemon does not know which node that is, so CollectServices reads the capability map of
+// every node in the status. A service that two nodes report arrives once, with the addresses
+// and the ports of both reports merged.
+func CollectServices(status *TailscaleStatus) []ServiceEndpoint {
+	if status == nil {
+		return nil
+	}
+	nodes := make([]StatusNode, 0, len(status.Peer)+1)
+	nodes = append(nodes, status.Self)
+	for _, node := range status.Peer {
+		nodes = append(nodes, node)
+	}
+
+	var out []ServiceEndpoint
+	byName := make(map[string]int)
+	for _, node := range nodes {
+		for _, endpoint := range node.Services() {
+			if index, seen := byName[endpoint.Name]; seen {
+				out[index].Addrs = mergeUnique(out[index].Addrs, endpoint.Addrs)
+				out[index].Ports = mergeUnique(out[index].Ports, endpoint.Ports)
+				continue
+			}
+			byName[endpoint.Name] = len(out)
+			out = append(out, endpoint)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// mergeUnique returns list with every value of extra that list does not hold appended.
+func mergeUnique(list, extra []string) []string {
+	hold := make(map[string]bool, len(list))
+	for _, value := range list {
+		hold[value] = true
+	}
+	for _, value := range extra {
+		if !hold[value] {
+			list = append(list, value)
+			hold[value] = true
+		}
+	}
+	return list
 }
 
 // UnprotectedRecord is what the __nsdaemon helper writes when the overlay mount on /etc

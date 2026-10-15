@@ -603,3 +603,84 @@ func TestTableIsEmptyReadsTheAnswerOfTheHost(t *testing.T) {
 		t.Error("tableIsEmpty reads another failure as a missing table")
 	}
 }
+
+func TestSyncHostRoutesWritesAHostRouteForEveryAddressOfAService(t *testing.T) {
+	// A Tailscale service holds no peer entry, so its addresses reach the host through
+	// desiredServiceRoutes alone. The daemon writes one route per address, through the veth
+	// gateway of the tailnet, which is the shape a peer route takes.
+	peers := TailnetPeers{
+		TailnetID:   "corp",
+		VethGateway: "10.200.0.1",
+		VethHost:    "vh001",
+		NsName:      "ns-corp",
+		Services: []Service{{
+			Name:  "litellm",
+			Raw:   "svc:litellm",
+			IPv4:  []string{"100.64.0.138"},
+			IPv6:  []string{"fd7a:115c:a1e0::4242"},
+			Ports: []string{"tcp:443"},
+		}},
+	}
+
+	rec := execx.NewRecorder(t)
+	rec.Script(execx.Result{}, "ip", "netns", "exec", "ns-corp", "ip", "route", "show", "table", "52")
+	rec.Script(execx.Result{}, "ip", "netns", "exec", "ns-corp", "ip", "-6", "route", "show", "table", "52")
+	rec.Script(execx.Result{Output: []byte("100.64.0.138 via 10.200.0.1 dev vh001 src 10.200.0.2\n")},
+		"ip", "route", "get", "100.64.0.138")
+	rec.Script(execx.Result{Output: []byte("fd7a:115c:a1e0::4242 via fe80::1 dev vh001 src fd7a::2\n")},
+		"ip", "-6", "route", "get", "fd7a:115c:a1e0::4242")
+	rec.Script(execx.Result{}, "ip", "route", "show")
+	rec.Script(execx.Result{}, "ip", "-6", "route", "show")
+	rec.Script(execx.Result{}, "ip", "route", "replace", "100.64.0.138", "via", "10.200.0.1", "dev", "vh001")
+	rec.Script(execx.Result{}, "ip", "-6", "route", "replace", "fd7a:115c:a1e0::4242", "dev", "vh001")
+
+	m := NewManager("hosts", filepath.Join(t.TempDir(), "hosts"), "10.200.0.0/16", 0)
+	m.Runner = rec
+
+	if err := m.SyncHostRoutes(peers); err != nil {
+		t.Fatalf("SyncHostRoutes: %v", err)
+	}
+
+	got := rec.Calls()
+	want := []execx.Call{
+		{Name: "ip", Args: []string{"netns", "exec", "ns-corp", "ip", "route", "show", "table", "52"}},
+		{Name: "ip", Args: []string{"netns", "exec", "ns-corp", "ip", "-6", "route", "show", "table", "52"}},
+		{Name: "ip", Args: []string{"route", "get", "100.64.0.138"}},
+		{Name: "ip", Args: []string{"-6", "route", "get", "fd7a:115c:a1e0::4242"}},
+		{Name: "ip", Args: []string{"route", "show"}},
+		{Name: "ip", Args: []string{"-6", "route", "show"}},
+		{Name: "ip", Args: []string{"route", "replace", "100.64.0.138", "via", "10.200.0.1", "dev", "vh001"}},
+		{Name: "ip", Args: []string{"-6", "route", "replace", "fd7a:115c:a1e0::4242", "dev", "vh001"}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("SyncHostRoutes ran %d commands, want %d:\n%s", len(got), len(want), callList(got))
+	}
+	for i := range want {
+		if got[i].String() != want[i].String() {
+			t.Errorf("command %d = %q, want %q", i, got[i].String(), want[i].String())
+		}
+	}
+}
+
+func TestDesiredServiceRoutesReturnsEveryAddressOfEveryService(t *testing.T) {
+	peers := TailnetPeers{
+		Services: []Service{
+			{Name: "litellm", IPv4: []string{"100.64.0.138"}, IPv6: []string{"fd7a:115c:a1e0::4242"}},
+			{Name: "redis", IPv4: []string{"100.64.0.139", "100.64.0.140"}},
+		},
+	}
+
+	v4, v6 := desiredServiceRoutes(peers)
+	wantV4 := []string{"100.64.0.138", "100.64.0.139", "100.64.0.140"}
+	if len(v4) != len(wantV4) {
+		t.Fatalf("v4 = %v, want %v", v4, wantV4)
+	}
+	for i := range wantV4 {
+		if v4[i] != wantV4[i] {
+			t.Errorf("v4[%d] = %q, want %q", i, v4[i], wantV4[i])
+		}
+	}
+	if len(v6) != 1 || v6[0] != "fd7a:115c:a1e0::4242" {
+		t.Errorf("v6 = %v, want [fd7a:115c:a1e0::4242]", v6)
+	}
+}
