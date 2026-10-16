@@ -130,6 +130,23 @@ function peerWord(count) {
 }
 
 /**
+ * serviceOf returns the service that the panel draws.
+ *
+ * host_name is the name that the daemon writes into the hosts file and the name that the
+ * alias zone answers for, so the panel states the word that the operator types on the host.
+ * The daemon states no host name for a service whose name holds no DNS label, because it
+ * writes no record for one, so the panel falls back to the name of the control server and the
+ * operator sees the service without inventing a name for it.
+ */
+function serviceOf(service) {
+  return {
+    name: service.host_name || service.name || ABSENT,
+    addresses: (service.addrs || []).join(" ") || ABSENT,
+    ports: (service.ports || []).join(" ") || ABSENT,
+  };
+}
+
+/**
  * buildRows returns one row per declared tailnet, in identifier order.
  *
  * status is the body of GET /api/status. details maps an identifier to the body of
@@ -196,6 +213,7 @@ export function buildPanel(status, details, events, id) {
   const desired = status.desired[id];
   const actual = (status.actual && status.actual[id]) || null;
   const peers = (detail && detail.peers) || [];
+  const services = ((detail && detail.services) || []).map(serviceOf);
   const credential = credentialOf(status, id);
 
   return {
@@ -219,6 +237,8 @@ export function buildPanel(status, details, events, id) {
       address: (peer.tailscale_ips && peer.tailscale_ips[0]) || ABSENT,
       online: peer.online === true,
     })),
+    // A service is not a machine, so it holds no state word and no dot of its own.
+    services,
     // The region carries a fixed height, so 200 peers scroll inside the panel rather
     // than push the actions off the view.
     scrolls: true,
@@ -611,6 +631,22 @@ function drawPanel(panel) {
       peers.append(more);
     }
     aside.append(peers);
+  }
+
+  // A service reaches the host through its own route and its own name, so the panel states it
+  // beside the peers. It draws no section for a tailnet that holds no service: the panel holds
+  // the state that the daemon reported and nothing else.
+  if (panel.services.length > 0) {
+    aside.append(el("span", "label ns-section", `Services · ${panel.services.length}`));
+    const services = el("div", "ns-services-list");
+    for (const service of panel.services) {
+      const line = el("div", "ns-service");
+      line.append(el("span", "mono", service.name));
+      line.append(el("span", "mono ns-service-addr", service.addresses));
+      line.append(el("span", "mono ns-service-ports", service.ports));
+      services.append(line);
+    }
+    aside.append(services);
   }
 
   aside.append(el("span", "label ns-section", "Recent events"));

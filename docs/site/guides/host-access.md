@@ -103,7 +103,10 @@ leaves no usable label gets no record, and the daemon states the reason in the l
 that already holds the name keeps it.
 
 `GET /api/tailnet/{id}/detail` returns each service with its addresses and its ports under
-`services`. The console does not show them yet.
+`services`, and it returns the host name of the service under `host_name`. The namespace panel
+of the console lists each service under **Services**, with its host name, its addresses and its
+ports. A service whose name leaves no usable label holds no `host_name`, and the panel shows
+the name that the control server reported.
 
 ## The names of the peers
 

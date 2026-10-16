@@ -248,6 +248,26 @@ func serviceLabel(name string) string {
 	return label
 }
 
+// ServiceHostName returns the name that this host gives a service: `<tailnetID>-<label>`, for
+// example `havoc-litellm` for the service that the control server names `svc:litellm`. It is
+// the name that BuildServiceRecords writes into the hosts file and the name that the alias
+// zone answers for, so a control API response and the console state the word that the operator
+// types on the host. It returns an empty string when the name of the service holds no DNS
+// label, because the daemon writes no record for such a service.
+func ServiceHostName(tailnetID, rawName string) string {
+	label := serviceLabel(rawName)
+	if label == "" {
+		return ""
+	}
+	return serviceRecordName(tailnetID, label)
+}
+
+// serviceRecordName joins the identifier of a tailnet and the label of one of its services
+// into the name that the hosts file holds.
+func serviceRecordName(tailnetID, label string) string {
+	return tailnetID + "-" + label
+}
+
 // BuildServiceRecords returns the address records of the services of one tailnet, keyed by
 // `<tailnetID>-<service name>`. The key follows the convention of BuildDNSRecords, so a
 // service and a peer of one tailnet hold names of one shape, and a service of another tailnet
@@ -260,7 +280,7 @@ func BuildServiceRecords(tailnetID string, services []Service) (v4, v6 map[strin
 	v4 = make(map[string]string, len(services))
 	v6 = make(map[string]string, len(services))
 	for _, s := range services {
-		name := tailnetID + "-" + s.Name
+		name := serviceRecordName(tailnetID, s.Name)
 		if len(s.IPv4) > 0 {
 			v4[name] = s.IPv4[0]
 		}

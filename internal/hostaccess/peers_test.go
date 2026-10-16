@@ -326,6 +326,36 @@ func TestBuildServiceRecordsNamesAServiceAfterTheTailnet(t *testing.T) {
 	}
 }
 
+func TestServiceHostNameNamesAServiceAsTheHostDoes(t *testing.T) {
+	// The control API and the console name a service with the word that the hosts file holds,
+	// so an operator reads one name in the console, in the hosts file, and in a query.
+	cases := []struct {
+		tailnetID string
+		raw       string
+		want      string
+	}{
+		{"corp", "svc:litellm", "corp-litellm"},
+		{"corp", "svc:Lite Llm", "corp-lite-llm"},
+		{"havoc", "svc:redis--staging", "havoc-redis-staging"},
+		{"corp", "svc:100.64.0.9 evil", "corp-100-64-0-9-evil"},
+		{"corp", "svc:::", ""},
+	}
+	for _, tc := range cases {
+		if got := ServiceHostName(tc.tailnetID, tc.raw); got != tc.want {
+			t.Errorf("ServiceHostName(%q, %q) = %q, want %q", tc.tailnetID, tc.raw, got, tc.want)
+		}
+	}
+
+	// The name is the key that BuildServiceRecords writes into the hosts file, so the two
+	// cannot drift apart.
+	v4, _ := BuildServiceRecords("corp", parseServices([]daemon.ServiceEndpoint{
+		{Name: "svc:litellm", Addrs: []string{"100.64.0.138"}},
+	}))
+	if v4[ServiceHostName("corp", "svc:litellm")] != "100.64.0.138" {
+		t.Errorf("the hosts record of the service holds no name that ServiceHostName states: %v", v4)
+	}
+}
+
 func TestAddServiceAliasRecordsKeepsANameThatAPeerHolds(t *testing.T) {
 	zone4 := map[string]string{"litellm": "100.64.0.9"}
 	zone6 := map[string]string{}

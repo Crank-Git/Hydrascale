@@ -831,6 +831,11 @@ func TestDetailEndpoint_HoldsTheServicesOfTheTailnet(t *testing.T) {
 	if service.Name != "svc:litellm" {
 		t.Errorf("Name: got %q, want svc:litellm", service.Name)
 	}
+	// The response names the service the way the host names it, so the console and the hosts
+	// file hold one word.
+	if service.HostName != "alpha-litellm" {
+		t.Errorf("HostName: got %q, want alpha-litellm", service.HostName)
+	}
 	if len(service.Addrs) != 2 || service.Addrs[0] != "100.64.0.138" {
 		t.Errorf("Addrs: got %v, want [100.64.0.138 fd7a:115c:a1e0::4242]", service.Addrs)
 	}
@@ -840,5 +845,41 @@ func TestDetailEndpoint_HoldsTheServicesOfTheTailnet(t *testing.T) {
 	// A service is not a peer, so it changes no peer count.
 	if detail.PeerCount != 1 {
 		t.Errorf("PeerCount: got %d, want 1", detail.PeerCount)
+	}
+}
+
+func TestDetailEndpoint_StatesNoHostNameForAServiceThatHoldsNoDNSLabel(t *testing.T) {
+	// hostaccess writes no route, no hosts record, and no resolver record for a service whose
+	// name leaves no label behind. The response still reports the service, and it states no
+	// host name for it, so the console shows the name of the control server and nothing that
+	// the host does not hold.
+	cfgPath := writeTestConfig(t, "alpha")
+	md := newMockDaemon()
+	md.statusResult = &daemon.TailscaleStatus{
+		MagicDNSSuffix: "tail1234.ts.net",
+		Self: daemon.StatusNode{
+			HostName:     "myhost",
+			TailscaleIPs: []string{"100.64.1.5"},
+			CapMap: map[string][]json.RawMessage{
+				"services/odd": {json.RawMessage(`{"Name":"svc:::","Addrs":["100.64.0.140"],"Ports":["tcp:8080"]}`)},
+			},
+		},
+	}
+	r := reconciler.New(cfgPath, newMockNS(), md, &mockRouting{}, 1*time.Second, nil, "10.200.0.0/16")
+	_, client, cleanup := startTestServer(t, r)
+	defer cleanup()
+
+	detail, err := client.TailnetDetail("alpha")
+	if err != nil {
+		t.Fatalf("TailnetDetail: %v", err)
+	}
+	if len(detail.Services) != 1 {
+		t.Fatalf("Services: got %d, want 1: %+v", len(detail.Services), detail.Services)
+	}
+	if detail.Services[0].Name != "svc:::" {
+		t.Errorf("Name: got %q, want svc:::", detail.Services[0].Name)
+	}
+	if detail.Services[0].HostName != "" {
+		t.Errorf("HostName: got %q, want no host name", detail.Services[0].HostName)
 	}
 }

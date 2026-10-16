@@ -311,12 +311,17 @@ type PeerInfo struct {
 //
 // A service holds no peer entry in the status, so it reaches the daemon through the
 // capability map of the node that collects its endpoints. Name holds the name that the
-// control server reported, which carries the prefix `svc:`. Addrs holds every address that
-// the service answers on, and Ports holds entries of the form `tcp:443`.
+// control server reported, which carries the prefix `svc:`. HostName holds the name that this
+// host gives the service, which is the name in the managed block of the hosts file and the
+// name that the alias zone answers for. Addrs holds every address that the service answers
+// on, and Ports holds entries of the form `tcp:443`.
 type ServiceInfo struct {
-	Name  string   `json:"name"`
-	Addrs []string `json:"addrs,omitempty"`
-	Ports []string `json:"ports,omitempty"`
+	Name string `json:"name"`
+	// HostName is empty when the name of the service holds no DNS label, because the daemon
+	// writes no route, no hosts record, and no resolver record for such a service.
+	HostName string   `json:"host_name,omitempty"`
+	Addrs    []string `json:"addrs,omitempty"`
+	Ports    []string `json:"ports,omitempty"`
 }
 
 // TailnetDetailResponse is the JSON response for GET /api/tailnet/{id}/detail.
