@@ -6,7 +6,7 @@ status: approved
 spec_version: 2
 created: 2026-08-04
 approved: 2026-10-09
-html_generated: 2026-10-09
+html_generated: 2026-10-26
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -45,6 +45,8 @@ features:
     file: features/16-agent-skills-refresh.md
   - id: published-ports
     file: features/17-published-ports.md
+  - id: tailscale-services
+    file: features/18-tailscale-services.md
 ---
 
 # Hydrascale v1.0
@@ -117,7 +119,7 @@ the operator what is allowed.
 | group | noun | A named set of users that a policy document's `groups` block defines, named `group:<name>`. | tag (for a group), team |
 | host alias | noun | A named alias for a device or a subnet that a policy document's `hosts` block defines. Distinct from `host`, the Linux machine that runs the daemon. | host, alias |
 | tailnet alias | noun | A second name for a tailnet that the configuration file declares in the key `alias`. It holds a letter, a digit, a hyphen and an underscore. Every command that takes a tailnet ID takes it. Distinct from `host alias`, which a policy document defines. | alias, nickname, short name, label |
-| alias zone | noun | The DNS zone `<tailnet alias>.ts.internal`, which the DNS forwarder answers from the peer list of that tailnet. | alias domain, short zone, internal zone |
+| alias zone | noun | The DNS zone `<tailnet alias>.ts.internal`, which the DNS forwarder answers from the peers and the Tailscale services of that tailnet. | alias domain, short zone, internal zone |
 | split DNS | noun | The mapping of a domain name to a resolver of one tailnet, which the control server gives the client of that tailnet. | split horizon, custom DNS route, conditional forwarder |
 | autogroup | noun | A control-server-defined group that a policy document references by name, such as `autogroup:internet`. | built-in group |
 | allow rule | noun | One entry of a policy document's `acls` block: a source, a destination, and a port list. | acl, rule |
@@ -139,6 +141,7 @@ the operator what is allowed.
 | drift test | noun | The test in `cmd/hydrascale/skills_drift_test.go` that fails when a skill names a command, a flag, a key, or an event that the code does not hold. | lint, skill check |
 | result region | noun | The policy view's region that states the answer of the last validate or push, with one line per error. | result panel, status area, message box |
 | published port | noun | One port of the host that the peers of one tailnet reach through the Tailscale address of its namespace, which the key `tailnets[].publish` names. | exposed port, port forward, inbound port |
+| Tailscale service | noun | An endpoint that a tailnet advertises through the capability map of the node that collects it. The control server names it `svc:<name>`, and the host names it `<tailnet-id>-<label>`. Distinct from `daemon`, which is the `hydrascale` process. | service (alone), app, endpoint |
 
 ## Goals
 
@@ -205,13 +208,15 @@ version 1.0.
 | A short README | `features/15-readme-slim.md` | Epic 14 | none |
 | Agent skills refresh | `features/16-agent-skills-refresh.md` | Epic 15 | none |
 | Published ports | `features/17-published-ports.md` | Epic 16 | none |
+| Tailscale services | `features/18-tailscale-services.md` | Epic 17 | none |
 
 Epic 0 to Epic 9 build version 1.0. Epic 10 follows the release of version 1.0. Epics 11
 to 13 build version 1.2, the visual policy editor, and they follow Epic 10. (Version 1.1
 already covers the console fixes and the credential-state work between Epic 9 and Epic
 10, tagged `v1.1.0` and `v1.1.1`.) Epic 14 and Epic 15 follow version 1.5: the
 documentation site, the short README, and the agent skills for version 1.5. Epic 16
-follows version 1.6, and it answers issue #459.
+follows version 1.6, and it answers issue #459. Epic 17 follows version 1.7. The operator
+asked for it on 2026-10-26, and the tracker holds no issue for it.
 
 ## Architecture & stack
 
@@ -727,6 +732,19 @@ Exit criteria: a peer on another machine opens an SSH session to the host throug
 namespace of a tailnet that publishes `tcp/22`. A file that publishes a port with no
 covering rule fails to load. The console shows the published ports of a tailnet.
 
+### Epic 17: Tailscale services
+
+Goal: the host names and routes every Tailscale service that a tailnet advertises, and the
+operator reads the services of a tailnet in the console.
+Covers: `features/18-tailscale-services.md`.
+Depends on: Epic 0, because the feature extends the routes and the names that host access
+already writes.
+Exit criteria: one live tailnet that advertises a service holds one host route per address
+of it, the name `<tailnet-id>-<service>` in the managed block of the hosts file, and an
+answer for `<service>.<alias>.ts.internal`. A service whose name holds no DNS label gets no
+route, no name, and one log line. The namespace panel lists each service with its host name,
+its addresses and its ports. The live part of these criteria is open.
+
 ## Milestones
 
 | Milestone | Epics | What is shippable |
@@ -740,6 +758,7 @@ covering rule fails to load. The console shows the published ports of a tailnet.
 | M7 — Visual policy editor | 11, 12, 13 | The operator edits an upstream policy document by drawing tags, groups, rules, SSH access, auto-approvers, node attributes, postures, and tests, without leaving a byte of the document's other content changed. This is version 1.2, and it follows version 1.1 (`v1.1.0`, `v1.1.1`). |
 | M8 — Documentation site | 14, 15 | The documentation site serves every topic, the README is short, and the agent skills match version 1.5. |
 | M9 — Published ports | 16 | A peer reaches a published port of the host through the namespace of its tailnet. This follows version 1.6. |
+| M10 — Tailscale services | 17 | The host reaches a Tailscale service of a tailnet by name, and the console lists the services. This follows version 1.7. |
 
 
 M2 is the point at which the release is worth cutting even if nothing else lands. The
@@ -986,6 +1005,9 @@ advance to `status: built`. |
 | 2026-10-09 | 1 | **Change: published ports (issue #459).** The reporter measured "connection refused" from a peer on every TCP port of the host, while ping answered. The Tailscale address lives in the namespace, so the kernel of the namespace answers a SYN with a reset, and host access carries no connection from a peer to the host. The test host reproduced it on 2026-10-09: a DNAT rule on `tailscale0` to the host veth address, with the local rule `from: havoc, to: host`, let a peer on another machine open an SSH session to the host; without the rule the connection timed out in `HYDRASCALE-OUT`. The operator decided: the local rule gates a published port and the load refuses a published port that no rule covers; a published port covers IPv4 and IPv6; the console shows the list on the namespace detail and does not edit it. New feature: `features/17-published-ports.md`, a delta on `features/00-foundation.md` and `features/05-reachability-model.md`. New epic: Epic 16. New milestone: M9. New term: published port. |
 | 2026-10-09 | 1 | Epic 16. **Decision: the teardown of host access reads the IPv6 nat chain even when the IPv6 path is off.** A published port rule that the daemon wrote while the path was on leaves at teardown. On a host with no `ip6tables` binary the teardown reports the failure, as the veth teardown already does, because a silent best-effort step is a defect. The event `access.write_failed` repeats on every tick while a write fails, as the other write failures of the reconciler do. The test host measured the published port on 2026-10-09: the load refused an uncovered entry, one DNAT rule on `tailscale0` carried an SSH session from the peer `brain` to the host, and the rule left within one tick after the entry left the file. |
 | 2026-10-09 | 1 | Epic 16 complete. `features/17-published-ports.md` is built. The key `tailnets[].publish`, the namespace DNAT rules, the `published` field of the console, the site pages, and the two operator skills shipped in pull request #473. |
+| 2026-10-26 | 1 | **Change: a Tailscale service reaches the host by name (Epic 17).** `tailscale status --json` reports a Tailscale service as a capability under the key `services/<name>` of the node that collects its endpoints. It holds no peer entry for a service, so host access wrote no route, no name, and no alias record for one. `features/18-tailscale-services.md` records the state that the daemon now writes. The daemon writes one host route per address, `<tailnet-id>-<label>` in the managed block of the hosts file, and `<label>.<alias>.ts.internal` in the alias zone. The detail route gains the field `services`, and the namespace panel gains one section. The address of a service sits in `100.64.0.0/10` or in `fd7a:115c:a1e0::/48`. The reads of routing table 52 drop both ranges, so the host route of the service is its only path (FR-svc-15). The `## Terms` table gains the row `Tailscale service`. The row `alias zone` now states that the zone answers for the services of a tailnet too. The tracker holds no issue, because the operator asked for the work on the branch `feat/tailscale-services`. |
+| 2026-10-26 | 1 | **Decision: the detail route states the host name of a service, and the console derives nothing.** The console could strip the `svc:` prefix in browser JavaScript, and that gives a name that the host does not hold. `hostaccess.ServiceHostName` builds the hosts record of a service. `ServiceInfo.HostName` carries its answer, so the console and the host state one word (FR-svc-22). A name that holds no DNS label gives an empty string. The panel then falls back to the name that the control server reported (FR-svc-25). |
+| 2026-10-26 | 1 | Epic 17 is issued, not built. The change holds Go tests and console JavaScript tests only. No live tailnet has advertised a service to the test host. The route, the hosts record, and the alias record of a real service are unverified there. The exit criteria of Epic 17 name that check. |
 
 ## Issue map
 
@@ -1013,6 +1035,7 @@ fix.
 | Epic 14: Documentation site | #426 | #428 #429 #430 #431 #432 #433 | `features/14-docs-site.md`, `features/15-readme-slim.md` |
 | Epic 15: Agent skills refresh | #427 | #434 #435 #436 #437 #438 | `features/16-agent-skills-refresh.md` |
 | Epic 16: Published ports | #462 | #463 #464 #465 #466 | `features/17-published-ports.md` |
+| Epic 17: Tailscale services | none | none | `features/18-tailscale-services.md` |
 
 Epics 11 to 13 were filed on 2026-08-23, after the `/spec-update` round that added version
 1.1 was approved.
@@ -1063,6 +1086,11 @@ documentation site and the skills refresh was approved.
 | readme-slim | FR-readme-1 to 11 | #433 |
 | agent-skills-refresh | FR-refresh-1 to 35 | #434 #435 #436 #437 #438 |
 | published-ports | FR-publish-1 to 21 | #463 #464 #465 #466 |
+| tailscale-services | FR-svc-1 to 26 | none |
+
+`tailscale-services` is the one feature that no issue cites. The operator asked for Epic 17
+on 2026-10-26, and the entry arrived with the code on the branch
+`feat/tailscale-services`.
 
 Every one of the 244 requirements in these ten features is cited by at least one issue.
 Every one of the 49 requirements across `policy-document-model`, `visual-acl-editor`,
