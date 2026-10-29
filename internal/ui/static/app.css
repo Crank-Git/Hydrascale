@@ -725,6 +725,14 @@ a.btn:focus-visible{outline:none; box-shadow:var(--ring-focus)}
 .ns-peer:last-child{border-bottom:none}
 .ns-peer-addr{color:var(--text-tertiary); font-size:var(--fs-data)}
 
+/* A service holds no state and no last-seen time, so its row holds three machine values and
+   no dot. The address cell wraps, because a service answers on one address of each family. */
+.ns-services-list{margin-top:var(--sp-3)}
+.ns-service{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
+.ns-service:last-child{border-bottom:none}
+.ns-service-addr,
+.ns-service-ports{color:var(--text-tertiary); font-size:var(--fs-data); overflow-wrap:anywhere}
+
 .ns-events{margin-top:var(--sp-3)}
 .ns-event{display:grid; grid-template-columns:132px minmax(0,1fr); gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--border-soft); align-items:baseline}
 .ns-event:last-child{border-bottom:none}

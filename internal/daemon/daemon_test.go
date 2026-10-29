@@ -189,3 +189,91 @@ func TestStopDaemon_StalePID(t *testing.T) {
 		t.Error("stale PID should not validate")
 	}
 }
+
+func TestStatusNodeServicesReadsAServiceOffTheCapabilityMap(t *testing.T) {
+	// A trimmed sample of `tailscale status --json` for a tailnet that holds a Tailscale
+	// service. The service reaches the node as a capability, under the key
+	// `services/<name>`, and the status holds no peer entry for it. The second key holds a
+	// capability of another shape, which Services must skip.
+	raw := `{
+		"MagicDNSSuffix": "tail1234.ts.net",
+		"Self": {
+			"HostName": "myhost",
+			"CapMap": {
+				"services/litellm": [
+					{"Name": "svc:litellm", "Addrs": ["100.64.0.138", "fd7a:115c:a1e0::4242"], "Ports": ["tcp:443"]}
+				],
+				"https://tailscale.com/cap/file-sharing": [{}]
+			}
+		}
+	}`
+	var st TailscaleStatus
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	services := st.Self.Services()
+	if len(services) != 1 {
+		t.Fatalf("Services returned %d records, want 1: %+v", len(services), services)
+	}
+	got := services[0]
+	if got.Name != "svc:litellm" {
+		t.Errorf("Name = %q, want %q", got.Name, "svc:litellm")
+	}
+	wantAddrs := []string{"100.64.0.138", "fd7a:115c:a1e0::4242"}
+	if len(got.Addrs) != len(wantAddrs) {
+		t.Fatalf("Addrs = %v, want %v", got.Addrs, wantAddrs)
+	}
+	for i := range wantAddrs {
+		if got.Addrs[i] != wantAddrs[i] {
+			t.Errorf("Addrs[%d] = %q, want %q", i, got.Addrs[i], wantAddrs[i])
+		}
+	}
+	if len(got.Ports) != 1 || got.Ports[0] != "tcp:443" {
+		t.Errorf("Ports = %v, want [tcp:443]", got.Ports)
+	}
+}
+
+func TestCollectServicesReportsOneServiceOnce(t *testing.T) {
+	// Two nodes report the same service, because the control server attaches it to each node
+	// that collects an endpoint of it. The daemon writes one route per address, so one service
+	// must arrive once, with the addresses and the ports of both reports merged.
+	status := &TailscaleStatus{
+		Self: StatusNode{HostName: "myhost", CapMap: map[string][]json.RawMessage{
+			"services/litellm": {json.RawMessage(`{"Name":"svc:litellm","Addrs":["100.64.0.138"],"Ports":["tcp:443"]}`)},
+		}},
+		Peer: map[string]StatusNode{
+			"nodekeyA": {HostName: "router", CapMap: map[string][]json.RawMessage{
+				"services/litellm": {json.RawMessage(`{"Name":"svc:litellm","Addrs":["100.64.0.138","100.64.0.139"],"Ports":["tcp:8443"]}`)},
+			}},
+			"nodekeyB": {HostName: "plain"},
+		},
+	}
+
+	got := CollectServices(status)
+	if len(got) != 1 {
+		t.Fatalf("CollectServices returned %d services, want 1: %+v", len(got), got)
+	}
+	if got[0].Name != "svc:litellm" {
+		t.Errorf("Name = %q, want %q", got[0].Name, "svc:litellm")
+	}
+	if len(got[0].Addrs) != 2 {
+		t.Errorf("Addrs = %v, want two addresses", got[0].Addrs)
+	}
+	if len(got[0].Ports) != 2 {
+		t.Errorf("Ports = %v, want two ports", got[0].Ports)
+	}
+}
+
+func TestCollectServicesReturnsNothingForAStatusWithoutACapabilityMap(t *testing.T) {
+	status := &TailscaleStatus{
+		Self: StatusNode{HostName: "myhost"},
+		Peer: map[string]StatusNode{"nodekeyA": {HostName: "peer"}},
+	}
+	if got := CollectServices(status); len(got) != 0 {
+		t.Errorf("CollectServices returned %d services, want none: %+v", len(got), got)
+	}
+	if got := CollectServices(nil); got != nil {
+		t.Errorf("CollectServices(nil) returned %+v, want nil", got)
+	}
+}

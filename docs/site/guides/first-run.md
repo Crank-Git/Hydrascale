@@ -32,8 +32,8 @@ every tailnet.
 
 Click a tailnet in the Namespaces list. The console opens a detail panel for that
 tailnet. The panel lists the namespace name, the address, the magicdns name, the control
-server, host access, the exit node, the peer list, and a Recent events feed for that
-namespace.
+server, host access, the exit node, the peer list, the service list when the tailnet
+advertises a service, and a Recent events feed for that namespace.
 
 ![The Namespaces list, with the detail panel of one tailnet open](../images/console-namespaces.png)
 

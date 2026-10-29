@@ -410,17 +410,33 @@ func (m *Manager) syncDNS() error {
 		for k, v := range v6 {
 			allV6[k] = v
 		}
+		// A service takes the name `<tailnet-id>-<service>`, which follows the convention of
+		// a peer. A peer that already holds the name keeps it, because the peer is the record
+		// that the daemon held first and the operator's traffic already reaches it.
+		sv4, sv6 := BuildServiceRecords(peers.TailnetID, peers.Services)
+		for k, v := range sv4 {
+			if _, taken := allV4[k]; !taken {
+				allV4[k] = v
+			}
+		}
+		for k, v := range sv6 {
+			if _, taken := allV6[k]; !taken {
+				allV6[k] = v
+			}
+		}
 	}
 
 	for _, id := range ids {
 		peers := m.activeTailnets[id]
 
 		// The alias zone needs the alias of the tailnet and the host side address, on
-		// which the forwarder answers.
+		// which the forwarder answers. A service of the tailnet answers under its own name
+		// in the same zone, and a peer that holds that name keeps it.
 		alias := m.aliases[id]
 		zoneOn := m.resolveAliases && alias != "" && peers.VethHostIP != ""
 		if zoneOn {
 			zv4, zv6 := BuildAliasRecords(peers.Peers)
+			addServiceAliasRecords(zv4, zv6, peers.Services)
 			aliasZones[dns.AliasZoneName(alias)] = dns.AliasZone{V4: zv4, V6: zv6}
 			listenAddrs = append(listenAddrs, peers.VethHostIP)
 		}

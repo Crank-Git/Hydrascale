@@ -1,6 +1,7 @@
 package hostaccess
 
 import (
+	"encoding/json"
 	"sort"
 	"testing"
 
@@ -226,5 +227,203 @@ func TestBuildDNSRecords(t *testing.T) {
 	}
 	if v6["net-gamma"] != "fd7a::3" {
 		t.Errorf("v6[net-gamma] = %q, want %q", v6["net-gamma"], "fd7a::3")
+	}
+}
+
+func TestParsePeersPicksUpTheServicesOfTheTailnet(t *testing.T) {
+	status := makeStatus("tail1234.ts.net", map[string]daemon.StatusNode{
+		"abc123": {HostName: "Alpha", TailscaleIPs: []string{"100.64.0.1"}, Online: true},
+	})
+	status.Self = daemon.StatusNode{
+		HostName: "host",
+		CapMap: map[string][]json.RawMessage{
+			"services/litellm": {json.RawMessage(`{"Name":"svc:litellm","Addrs":["100.64.0.138","fd7a:115c:a1e0::4242"],"Ports":["tcp:443"]}`)},
+		},
+	}
+
+	result := ParsePeers("corp", status, "10.200.0.1", "vh001", "10.200.0.2", "ns-corp")
+
+	if len(result.Services) != 1 {
+		t.Fatalf("len(Services) = %d, want 1: %+v", len(result.Services), result.Services)
+	}
+	service := result.Services[0]
+	if service.Name != "litellm" {
+		t.Errorf("Name = %q, want %q", service.Name, "litellm")
+	}
+	if service.Raw != "svc:litellm" {
+		t.Errorf("Raw = %q, want %q", service.Raw, "svc:litellm")
+	}
+	if len(service.IPv4) != 1 || service.IPv4[0] != "100.64.0.138" {
+		t.Errorf("IPv4 = %v, want [100.64.0.138]", service.IPv4)
+	}
+	if len(service.IPv6) != 1 || service.IPv6[0] != "fd7a:115c:a1e0::4242" {
+		t.Errorf("IPv6 = %v, want [fd7a:115c:a1e0::4242]", service.IPv6)
+	}
+	if len(service.Ports) != 1 || service.Ports[0] != "tcp:443" {
+		t.Errorf("Ports = %v, want [tcp:443]", service.Ports)
+	}
+}
+
+func TestServiceLabelMapsEveryCharacterThatIsNotADNSLabel(t *testing.T) {
+	// The name of a service reaches the hosts file and the resolver, so every character that
+	// is not a letter, a digit or a hyphen becomes a hyphen, and a name that leaves nothing
+	// behind holds no record.
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"svc:litellm", "litellm"},
+		{"svc:Lite Llm", "lite-llm"},
+		{"svc:litellm--staging", "litellm-staging"},
+		{"svc:lit:ellm\n100.64.0.9  evil", "lit-ellm-100-64-0-9-evil"},
+		{"svc:_evil", "evil"},
+		{"svc:1", "1"},
+		{"svc:", ""},
+		{"svc:---", ""},
+		{"svc:.", ""},
+	}
+	for _, tc := range cases {
+		got := serviceLabel(tc.in)
+		if got != tc.want {
+			t.Errorf("serviceLabel(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestParseServicesDropsANameWithoutALabelAndAnEntryThatIsNotAnAddress(t *testing.T) {
+	got := parseServices([]daemon.ServiceEndpoint{
+		{Name: "svc::", Addrs: []string{"100.64.0.138"}},
+		{Name: "svc:ok", Addrs: []string{"not-an-address", "100.64.0.139"}},
+		{Name: "svc:empty", Addrs: nil},
+		{Name: "svc:zeta", Addrs: []string{"100.64.0.140"}},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("parseServices returned %d services, want 2: %+v", len(got), got)
+	}
+	// parseServices sorts by name, so the order is fixed.
+	if got[0].Name != "ok" || got[1].Name != "zeta" {
+		t.Errorf("names = %q, %q, want ok then zeta", got[0].Name, got[1].Name)
+	}
+	if len(got[0].IPv4) != 1 || got[0].IPv4[0] != "100.64.0.139" {
+		t.Errorf("IPv4 of ok = %v, want [100.64.0.139]", got[0].IPv4)
+	}
+}
+
+func TestBuildServiceRecordsNamesAServiceAfterTheTailnet(t *testing.T) {
+	services := []Service{{
+		Name: "litellm",
+		IPv4: []string{"100.64.0.138"},
+		IPv6: []string{"fd7a:115c:a1e0::4242"},
+	}}
+
+	v4, v6 := BuildServiceRecords("corp", services)
+	if v4["corp-litellm"] != "100.64.0.138" {
+		t.Errorf("v4 record = %q, want 100.64.0.138", v4["corp-litellm"])
+	}
+	if v6["corp-litellm"] != "fd7a:115c:a1e0::4242" {
+		t.Errorf("v6 record = %q, want fd7a:115c:a1e0::4242", v6["corp-litellm"])
+	}
+}
+
+func TestServiceHostNameNamesAServiceAsTheHostDoes(t *testing.T) {
+	// The control API and the console name a service with the word that the hosts file holds,
+	// so an operator reads one name in the console, in the hosts file, and in a query.
+	cases := []struct {
+		tailnetID string
+		raw       string
+		want      string
+	}{
+		{"corp", "svc:litellm", "corp-litellm"},
+		{"corp", "svc:Lite Llm", "corp-lite-llm"},
+		{"havoc", "svc:redis--staging", "havoc-redis-staging"},
+		{"corp", "svc:100.64.0.9 evil", "corp-100-64-0-9-evil"},
+		{"corp", "svc:::", ""},
+	}
+	for _, tc := range cases {
+		if got := ServiceHostName(tc.tailnetID, tc.raw); got != tc.want {
+			t.Errorf("ServiceHostName(%q, %q) = %q, want %q", tc.tailnetID, tc.raw, got, tc.want)
+		}
+	}
+
+	// The name is the key that BuildServiceRecords writes into the hosts file, so the two
+	// cannot drift apart.
+	v4, _ := BuildServiceRecords("corp", parseServices([]daemon.ServiceEndpoint{
+		{Name: "svc:litellm", Addrs: []string{"100.64.0.138"}},
+	}))
+	if v4[ServiceHostName("corp", "svc:litellm")] != "100.64.0.138" {
+		t.Errorf("the hosts record of the service holds no name that ServiceHostName states: %v", v4)
+	}
+}
+
+func TestAddServiceAliasRecordsKeepsANameThatAPeerHolds(t *testing.T) {
+	zone4 := map[string]string{"litellm": "100.64.0.9"}
+	zone6 := map[string]string{}
+
+	addServiceAliasRecords(zone4, zone6, []Service{
+		{Name: "litellm", IPv4: []string{"100.64.0.138"}, IPv6: []string{"fd7a:115c:a1e0::4242"}},
+		{Name: "redis", IPv4: []string{"100.64.0.139"}},
+	})
+
+	if zone4["litellm"] != "100.64.0.9" {
+		t.Errorf("the service took the name of a peer: zone4[litellm] = %q", zone4["litellm"])
+	}
+	if zone6["litellm"] != "fd7a:115c:a1e0::4242" {
+		t.Errorf("zone6[litellm] = %q, want fd7a:115c:a1e0::4242", zone6["litellm"])
+	}
+	if zone4["redis"] != "100.64.0.139" {
+		t.Errorf("zone4[redis] = %q, want 100.64.0.139", zone4["redis"])
+	}
+}
+
+func TestParseServicesGivesALabelThatTwoServicesShareToTheFirstOnly(t *testing.T) {
+	// `svc:my_app` and `svc:my-app` both give the label `my-app`. CollectServices sorts by the
+	// name of the control server, so `svc:my-app` comes first and keeps the label.
+	got := parseServices([]daemon.ServiceEndpoint{
+		{Name: "svc:my-app", Addrs: []string{"100.64.0.138"}},
+		{Name: "svc:my_app", Addrs: []string{"100.64.0.139"}},
+	})
+	if len(got) != 2 {
+		t.Fatalf("parseServices returned %d services, want 2: %+v", len(got), got)
+	}
+	byRaw := map[string]Service{got[0].Raw: got[0], got[1].Raw: got[1]}
+	if byRaw["svc:my-app"].Name != "my-app" {
+		t.Errorf("Name of svc:my-app = %q, want my-app", byRaw["svc:my-app"].Name)
+	}
+	if byRaw["svc:my_app"].Name != "" {
+		t.Errorf("Name of svc:my_app = %q, want empty", byRaw["svc:my_app"].Name)
+	}
+
+	// The second service keeps its route but takes no hosts record and no alias record.
+	v4, _ := BuildServiceRecords("corp", got)
+	if len(v4) != 1 || v4["corp-my-app"] != "100.64.0.138" {
+		t.Errorf("hosts records = %v, want only corp-my-app -> 100.64.0.138", v4)
+	}
+	zone4, zone6 := map[string]string{}, map[string]string{}
+	addServiceAliasRecords(zone4, zone6, got)
+	if len(zone4) != 1 || zone4["my-app"] != "100.64.0.138" {
+		t.Errorf("alias records = %v, want only my-app -> 100.64.0.138", zone4)
+	}
+	routes, _ := desiredServiceRoutes(TailnetPeers{Services: got})
+	if len(routes) != 2 {
+		t.Errorf("service routes = %v, want both addresses", routes)
+	}
+}
+
+func TestServiceHostNamesStatesAHostNameThatTwoServicesShareOnce(t *testing.T) {
+	got := ServiceHostNames("corp", []daemon.ServiceEndpoint{
+		{Name: "svc:my-app"},
+		{Name: "svc:my_app"},
+		{Name: "svc:::"},
+		{Name: "svc:redis"},
+	})
+	want := map[string]string{"svc:my-app": "corp-my-app", "svc:redis": "corp-redis"}
+	if len(got) != len(want) {
+		t.Fatalf("ServiceHostNames = %v, want %v", got, want)
+	}
+	for raw, name := range want {
+		if got[raw] != name {
+			t.Errorf("ServiceHostNames[%q] = %q, want %q", raw, got[raw], name)
+		}
 	}
 }

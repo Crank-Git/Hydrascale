@@ -284,6 +284,23 @@ func desiredPeerRoutes(peers TailnetPeers) (v4, v6 []string) {
 	return v4, v6
 }
 
+// desiredServiceRoutes extracts every address that a Tailscale service of the tailnet answers
+// on from a TailnetPeers set.
+//
+// A service holds no peer entry, so its addresses reach no other path. The daemon writes one
+// host route per address, through the veth gateway of the tailnet, which is the same shape a
+// peer route takes. The addresses of a service sit in the Tailscale address ranges, so the
+// filter that keeps the address space of one tailnet from swallowing the peers of another
+// tailnet never sees them: that filter reads routing table 52 of the namespace, and a service
+// reaches the host through this path instead.
+func desiredServiceRoutes(peers TailnetPeers) (v4, v6 []string) {
+	for _, s := range peers.Services {
+		v4 = append(v4, s.IPv4...)
+		v6 = append(v6, s.IPv6...)
+	}
+	return v4, v6
+}
+
 // diffRoutes returns the destinations to add (in desired but not actual) and to remove
 // (in actual but not desired).
 func diffRoutes(desired, actual []string) (toAdd, toRemove []string) {
@@ -620,8 +637,13 @@ func (m *Manager) SyncHostRoutes(peers TailnetPeers) error {
 		}
 	}
 
-	// Build the combined desired set: peer IPs + accepted routes from table 52
+	// Build the combined desired set: peer IPs + service addresses + accepted routes from
+	// table 52. A Tailscale service holds no peer entry, so its addresses reach the host
+	// through this path alone. See desiredServiceRoutes.
 	wantV4, wantV6 := desiredPeerRoutes(peers)
+	sv4, sv6 := desiredServiceRoutes(peers)
+	wantV4 = mergeRoutes(wantV4, sv4)
+	wantV6 = mergeRoutes(wantV6, sv6)
 
 	if peers.NsName != "" {
 		nsV4, err := m.listNsTableRoutes(peers.NsName, infraSubnet)
