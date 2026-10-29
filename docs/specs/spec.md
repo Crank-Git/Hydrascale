@@ -6,7 +6,7 @@ status: approved
 spec_version: 2
 created: 2026-08-04
 approved: 2026-10-09
-html_generated: 2026-10-09
+html_generated: 2026-10-29
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -986,6 +986,7 @@ advance to `status: built`. |
 | 2026-10-09 | 1 | **Change: published ports (issue #459).** The reporter measured "connection refused" from a peer on every TCP port of the host, while ping answered. The Tailscale address lives in the namespace, so the kernel of the namespace answers a SYN with a reset, and host access carries no connection from a peer to the host. The test host reproduced it on 2026-10-09: a DNAT rule on `tailscale0` to the host veth address, with the local rule `from: havoc, to: host`, let a peer on another machine open an SSH session to the host; without the rule the connection timed out in `HYDRASCALE-OUT`. The operator decided: the local rule gates a published port and the load refuses a published port that no rule covers; a published port covers IPv4 and IPv6; the console shows the list on the namespace detail and does not edit it. New feature: `features/17-published-ports.md`, a delta on `features/00-foundation.md` and `features/05-reachability-model.md`. New epic: Epic 16. New milestone: M9. New term: published port. |
 | 2026-10-09 | 1 | Epic 16. **Decision: the teardown of host access reads the IPv6 nat chain even when the IPv6 path is off.** A published port rule that the daemon wrote while the path was on leaves at teardown. On a host with no `ip6tables` binary the teardown reports the failure, as the veth teardown already does, because a silent best-effort step is a defect. The event `access.write_failed` repeats on every tick while a write fails, as the other write failures of the reconciler do. The test host measured the published port on 2026-10-09: the load refused an uncovered entry, one DNAT rule on `tailscale0` carried an SSH session from the peer `brain` to the host, and the rule left within one tick after the entry left the file. |
 | 2026-10-09 | 1 | Epic 16 complete. `features/17-published-ports.md` is built. The key `tailnets[].publish`, the namespace DNAT rules, the `published` field of the console, the site pages, and the two operator skills shipped in pull request #473. |
+| 2026-10-29 | 1 | **The toolchain moves to Go 1.26.10.** `govulncheck` named GO-2026-6809 in `crypto/x509@go1.26.9`, with the trace `internal/api/server.go:164:31: api.Start calls http.Server.Serve, which eventually calls x509.Certificate.Verify`. The advisory names `crypto/x509@go1.26.10` as its fix, so the move follows the precedent of pull request #461. `go.mod`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` hold `1.26.10`. |
 
 ## Issue map
 
