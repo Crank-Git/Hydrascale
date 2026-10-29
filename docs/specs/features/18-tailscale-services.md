@@ -11,8 +11,9 @@ mockups: []
 
 This is a delta feature. It extends the host access that `features/00-foundation.md`
 describes, and it extends the alias zone that the decision of 2026-09-22 opened behind the
-key `resolver.resolve_aliases`. The operator asked for it on 2026-10-26. The tracker holds
-no issue for it, and the work lives on the branch `feat/tailscale-services`.
+key `resolver.resolve_aliases`. A contributor proposed it in pull request #476 on
+2026-10-26. The tracker holds no issue for it, and the work lives on the branch
+`feat/tailscale-services`.
 
 A Tailscale service is not a machine. The control server reports it as a capability of the
 node that collects its endpoints, under the key `services/<name>` of the capability map.
@@ -99,6 +100,10 @@ no login flag, and no `--accept-routes`.
 - **FR-svc-12** — A peer that already holds the name keeps it, and the daemon writes no
   second record under that name. A peer `litellm` and a service `svc:litellm` of one
   tailnet hold one name, which is the peer's.
+- **FR-svc-12a** — Two services of one tailnet whose names give one label hold one name.
+  The service whose reported name sorts first keeps the name. The other service keeps every
+  route of FR-svc-13, and it gets no hosts record and no alias record. The daemon records
+  one log line that names the other service and the label.
 
 ### The routes
 
@@ -134,8 +139,8 @@ no login flag, and no `--accept-routes`.
 - **FR-svc-21** — `GET /api/tailnet/{id}/detail` answers the services of the tailnet under
   `services`, in the order of the names, and it omits the key when the tailnet holds no
   service. Each entry holds `name`, `host_name`, `addrs`, and `ports`.
-- **FR-svc-22** — `host_name` holds the name of FR-svc-7, and it is absent when the reported
-  name holds no label of FR-svc-10. The daemon computes it with the same function that
+- **FR-svc-22** — `host_name` holds the name of FR-svc-7. It is absent when the reported
+  name holds no label of FR-svc-10, and when FR-svc-12a gives the name to another service. The daemon computes it with the same function that
   writes the hosts record.
 - **FR-svc-23** — A service is not a peer: it changes no peer count and no peer field of a
   control API response, and `GET /api/status` holds no service list.
@@ -229,6 +234,9 @@ route.
   reaches it (FR-svc-3).
 - A service label equals the hostname of a peer of the same tailnet. The peer keeps the name
   (FR-svc-12), and every address of the service keeps its route (FR-svc-13).
+- Two names give one label, such as `svc:my-app` and `svc:my_app`. The name `svc:my-app`
+  sorts first and keeps `<tailnet-id>-my-app`. The service `svc:my_app` keeps its routes
+  and gets no `host_name` (FR-svc-12a, FR-svc-22).
 - A name holds only characters outside the label shape, such as `svc:::`. The daemon drops
   the service and records the reason (FR-svc-10, FR-svc-11).
 - The control server removes a service. Its route leaves within one tick (FR-svc-14), and
@@ -251,6 +259,9 @@ route.
   `TestServiceHostNameNamesAServiceAsTheHostDoes`, and
   `TestAddServiceAliasRecordsKeepsANameThatAPeerHolds` cover FR-svc-7, FR-svc-12, and
   FR-svc-20.
+- `TestParseServicesGivesALabelThatTwoServicesShareToTheFirstOnly` and
+  `TestServiceHostNamesStatesAHostNameThatTwoServicesShareOnce` cover FR-svc-12a and the
+  absent `host_name` of FR-svc-22.
 - `TestUpdateHostsFileHoldsTheRecordOfAService` covers the hosts entry of FR-svc-19.
 - `TestSyncHostRoutesWritesAHostRouteForEveryAddressOfAService` asserts one
   `ip route replace` per address of a service, which covers FR-svc-13. The removal of a

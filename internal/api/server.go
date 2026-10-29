@@ -758,13 +758,15 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 
 	// A Tailscale service holds no peer entry, so the response carries it apart from the
 	// peers. CollectServices reads the capability map of every node in the status and returns
-	// one entry per service, in the order of the names. ServiceHostName is the function that
+	// one entry per service, in the order of the names. ServiceHostNames applies the rule that
 	// hostaccess uses for the hosts record of a service, so the response names a service with
 	// the word that the operator types on the host.
-	for _, service := range daemon.CollectServices(status) {
+	services := daemon.CollectServices(status)
+	hostNames := hostaccess.ServiceHostNames(id, services)
+	for _, service := range services {
 		resp.Services = append(resp.Services, ServiceInfo{
 			Name:     service.Name,
-			HostName: hostaccess.ServiceHostName(id, service.Name),
+			HostName: hostNames[service.Name],
 			Addrs:    service.Addrs,
 			Ports:    service.Ports,
 		})

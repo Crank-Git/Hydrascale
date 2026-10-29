@@ -163,7 +163,7 @@ body.rv-open .layout { padding-right:21rem; }
 <h1>Feature: Tailscale services — the host names and routes a service of a tailnet</h1>
 <p class="meta">Epic 17: Tailscale services &nbsp; <span class="badge">issued</span></p>
 <h3 id="tailscale-services-purpose">Purpose</h3>
-<p>This is a delta feature. It extends the host access that <code>features/00-foundation.md</code> describes, and it extends the alias zone that the decision of 2026-09-22 opened behind the key <code>resolver.resolve_aliases</code>. The operator asked for it on 2026-10-26. The tracker holds no issue for it, and the work lives on the branch <code>feat/tailscale-services</code>.</p>
+<p>This is a delta feature. It extends the host access that <code>features/00-foundation.md</code> describes, and it extends the alias zone that the decision of 2026-09-22 opened behind the key <code>resolver.resolve_aliases</code>. A contributor proposed it in pull request #476 on 2026-10-26. The tracker holds no issue for it, and the work lives on the branch <code>feat/tailscale-services</code>.</p>
 <p>A Tailscale service is not a machine. The control server reports it as a capability of the node that collects its endpoints, under the key <code>services/&lt;name&gt;</code> of the capability map. The record names itself <code>svc:&lt;name&gt;</code>. <code>tailscale status --json</code> holds no peer entry for it.</p>
 <p>Host access saw no route, no name, and no address for such a record. The operator reached a service by typing one of its addresses. The name <code>svc:litellm</code> is not a DNS label, so the host held no name for it.</p>
 <p>The feature turns every service of a tailnet into host state. The daemon writes one host route per address, one name in the hosts file, and one record in the alias zone. The namespace panel of the console lists the service. The feature needs no configuration key, no login flag, and no <code>--accept-routes</code>.</p>
@@ -288,6 +288,11 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p>second record under that name. A peer <code>litellm</code> and a service <code>svc:litellm</code> of one tailnet hold one name, which is the peer's.</p>
+<ul>
+<li><strong>FR-svc-12a</strong> — Two services of one tailnet whose names give one label hold one name.
+</li>
+</ul>
+<p>The service whose reported name sorts first keeps the name. The other service keeps every route of FR-svc-13, and it gets no hosts record and no alias record. The daemon records one log line that names the other service and the label.</p>
 <h4 id="tailscale-services-the-routes">The routes</h4>
 <ul>
 <li><strong>FR-svc-13</strong> — The daemon writes one host route for every address of every service of
@@ -337,10 +342,10 @@ body.rv-open .layout { padding-right:21rem; }
 </ul>
 <p><code>services</code>, in the order of the names, and it omits the key when the tailnet holds no service. Each entry holds <code>name</code>, <code>host_name</code>, <code>addrs</code>, and <code>ports</code>.</p>
 <ul>
-<li><strong>FR-svc-22</strong> — <code>host_name</code> holds the name of FR-svc-7, and it is absent when the reported
+<li><strong>FR-svc-22</strong> — <code>host_name</code> holds the name of FR-svc-7. It is absent when the reported
 </li>
 </ul>
-<p>name holds no label of FR-svc-10. The daemon computes it with the same function that writes the hosts record.</p>
+<p>name holds no label of FR-svc-10, and when FR-svc-12a gives the name to another service. The daemon computes it with the same function that writes the hosts record.</p>
 <ul>
 <li><strong>FR-svc-23</strong> — A service is not a peer: it changes no peer count and no peer field of a
 </li>
@@ -457,6 +462,11 @@ body.rv-open .layout { padding-right:21rem; }
 </ul>
 <p>(FR-svc-12), and every address of the service keeps its route (FR-svc-13).</p>
 <ul>
+<li>Two names give one label, such as <code>svc:my-app</code> and <code>svc:my_app</code>. The name <code>svc:my-app</code>
+</li>
+</ul>
+<p>sorts first and keeps <code>&lt;tailnet-id&gt;-my-app</code>. The service <code>svc:my_app</code> keeps its routes and gets no <code>host_name</code> (FR-svc-12a, FR-svc-22).</p>
+<ul>
 <li>A name holds only characters outside the label shape, such as <code>svc:::</code>. The daemon drops
 </li>
 </ul>
@@ -492,6 +502,11 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p><code>TestServiceHostNameNamesAServiceAsTheHostDoes</code>, and <code>TestAddServiceAliasRecordsKeepsANameThatAPeerHolds</code> cover FR-svc-7, FR-svc-12, and FR-svc-20.</p>
+<ul>
+<li><code>TestParseServicesGivesALabelThatTwoServicesShareToTheFirstOnly</code> and
+</li>
+</ul>
+<p><code>TestServiceHostNamesStatesAHostNameThatTwoServicesShareOnce</code> cover FR-svc-12a and the absent <code>host_name</code> of FR-svc-22.</p>
 <ul>
 <li><code>TestUpdateHostsFileHoldsTheRecordOfAService</code> covers the hosts entry of FR-svc-19.
 </li>

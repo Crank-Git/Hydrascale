@@ -317,8 +317,9 @@ type PeerInfo struct {
 // on, and Ports holds entries of the form `tcp:443`.
 type ServiceInfo struct {
 	Name string `json:"name"`
-	// HostName is empty when the name of the service holds no DNS label, because the daemon
-	// writes no route, no hosts record, and no resolver record for such a service.
+	// HostName is empty when the name of the service holds no DNS label, or when another
+	// service of the tailnet holds the same host name. The daemon writes no hosts record and
+	// no resolver record for such a service.
 	HostName string   `json:"host_name,omitempty"`
 	Addrs    []string `json:"addrs,omitempty"`
 	Ports    []string `json:"ports,omitempty"`

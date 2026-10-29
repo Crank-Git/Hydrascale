@@ -375,3 +375,55 @@ func TestAddServiceAliasRecordsKeepsANameThatAPeerHolds(t *testing.T) {
 		t.Errorf("zone4[redis] = %q, want 100.64.0.139", zone4["redis"])
 	}
 }
+
+func TestParseServicesGivesALabelThatTwoServicesShareToTheFirstOnly(t *testing.T) {
+	// `svc:my_app` and `svc:my-app` both give the label `my-app`. CollectServices sorts by the
+	// name of the control server, so `svc:my-app` comes first and keeps the label.
+	got := parseServices([]daemon.ServiceEndpoint{
+		{Name: "svc:my-app", Addrs: []string{"100.64.0.138"}},
+		{Name: "svc:my_app", Addrs: []string{"100.64.0.139"}},
+	})
+	if len(got) != 2 {
+		t.Fatalf("parseServices returned %d services, want 2: %+v", len(got), got)
+	}
+	byRaw := map[string]Service{got[0].Raw: got[0], got[1].Raw: got[1]}
+	if byRaw["svc:my-app"].Name != "my-app" {
+		t.Errorf("Name of svc:my-app = %q, want my-app", byRaw["svc:my-app"].Name)
+	}
+	if byRaw["svc:my_app"].Name != "" {
+		t.Errorf("Name of svc:my_app = %q, want empty", byRaw["svc:my_app"].Name)
+	}
+
+	// The second service keeps its route but takes no hosts record and no alias record.
+	v4, _ := BuildServiceRecords("corp", got)
+	if len(v4) != 1 || v4["corp-my-app"] != "100.64.0.138" {
+		t.Errorf("hosts records = %v, want only corp-my-app -> 100.64.0.138", v4)
+	}
+	zone4, zone6 := map[string]string{}, map[string]string{}
+	addServiceAliasRecords(zone4, zone6, got)
+	if len(zone4) != 1 || zone4["my-app"] != "100.64.0.138" {
+		t.Errorf("alias records = %v, want only my-app -> 100.64.0.138", zone4)
+	}
+	routes, _ := desiredServiceRoutes(TailnetPeers{Services: got})
+	if len(routes) != 2 {
+		t.Errorf("service routes = %v, want both addresses", routes)
+	}
+}
+
+func TestServiceHostNamesStatesAHostNameThatTwoServicesShareOnce(t *testing.T) {
+	got := ServiceHostNames("corp", []daemon.ServiceEndpoint{
+		{Name: "svc:my-app"},
+		{Name: "svc:my_app"},
+		{Name: "svc:::"},
+		{Name: "svc:redis"},
+	})
+	want := map[string]string{"svc:my-app": "corp-my-app", "svc:redis": "corp-redis"}
+	if len(got) != len(want) {
+		t.Fatalf("ServiceHostNames = %v, want %v", got, want)
+	}
+	for raw, name := range want {
+		if got[raw] != name {
+			t.Errorf("ServiceHostNames[%q] = %q, want %q", raw, got[raw], name)
+		}
+	}
+}

@@ -33,7 +33,7 @@ type Peer struct {
 // A service is not a machine. The control server advertises it as a capability of the node
 // that collects its endpoints, so it reaches the daemon through the capability map of that
 // node and not through the peer list. Name holds the label that the host names the service
-// with. Raw holds the name that the control server reported, which carries the prefix `svc:`
+// with, and it is empty when another service of the tailnet holds that label. Raw holds the name that the control server reported, which carries the prefix `svc:`
 // and is not a DNS label. IPv4 and IPv6 hold the addresses that the service answers on, and
 // Ports holds entries of the form `tcp:443`.
 type Service struct {
@@ -183,17 +183,27 @@ func BuildDNSRecords(tailnetID string, peers []Peer) (v4 map[string]string, v6 m
 // name reaches the hosts file and the resolver. An entry of Addrs that is not an address is
 // dropped, because an address reaches one argument of `ip route replace`. A record that
 // holds no address of either family is dropped, because no route and no name reaches it.
+// Two names such as `svc:my_app` and `svc:my-app` give one label. The record that comes
+// first in the order of the input keeps the label, and the other record keeps its routes
+// with an empty Name, as a service does when a peer holds its name.
 // parseServices sorts by name, because the capability maps of the status have no order.
 func parseServices(endpoints []daemon.ServiceEndpoint) []Service {
 	if len(endpoints) == 0 {
 		return nil
 	}
 	var out []Service
+	taken := make(map[string]bool, len(endpoints))
 	for _, endpoint := range endpoints {
 		label := serviceLabel(endpoint.Name)
 		if label == "" {
 			log.Printf("hostaccess: the daemon writes no record for the service %q, because its name holds no DNS label", endpoint.Name)
 			continue
+		}
+		if taken[label] {
+			log.Printf("hostaccess: the daemon writes no name for the service %q, because another service holds the label %q", endpoint.Name, label)
+			label = ""
+		} else {
+			taken[label] = true
 		}
 		service := Service{Name: label, Raw: endpoint.Name, Ports: endpoint.Ports}
 		for _, addr := range endpoint.Addrs {
@@ -262,6 +272,24 @@ func ServiceHostName(tailnetID, rawName string) string {
 	return serviceRecordName(tailnetID, label)
 }
 
+// ServiceHostNames returns the host name of each service, keyed by the name that the control
+// server reported. It applies the rule of parseServices: when two services give one host
+// name, the first service in the order of endpoints keeps it, and the other is absent from
+// the map. A control API response therefore never states one host name for two services.
+func ServiceHostNames(tailnetID string, endpoints []daemon.ServiceEndpoint) map[string]string {
+	out := make(map[string]string, len(endpoints))
+	taken := make(map[string]bool, len(endpoints))
+	for _, endpoint := range endpoints {
+		name := ServiceHostName(tailnetID, endpoint.Name)
+		if name == "" || taken[name] {
+			continue
+		}
+		taken[name] = true
+		out[endpoint.Name] = name
+	}
+	return out
+}
+
 // serviceRecordName joins the identifier of a tailnet and the label of one of its services
 // into the name that the hosts file holds.
 func serviceRecordName(tailnetID, label string) string {
@@ -280,6 +308,10 @@ func BuildServiceRecords(tailnetID string, services []Service) (v4, v6 map[strin
 	v4 = make(map[string]string, len(services))
 	v6 = make(map[string]string, len(services))
 	for _, s := range services {
+		// A service with an empty Name lost its label to another service of the tailnet.
+		if s.Name == "" {
+			continue
+		}
 		name := serviceRecordName(tailnetID, s.Name)
 		if len(s.IPv4) > 0 {
 			v4[name] = s.IPv4[0]
@@ -297,6 +329,9 @@ func BuildServiceRecords(tailnetID string, services []Service) (v4, v6 map[strin
 // keeps it, because the peer is the record that the daemon held first.
 func addServiceAliasRecords(zone4, zone6 map[string]string, services []Service) {
 	for _, s := range services {
+		if s.Name == "" {
+			continue
+		}
 		if len(s.IPv4) > 0 {
 			if _, taken := zone4[s.Name]; !taken {
 				zone4[s.Name] = s.IPv4[0]
