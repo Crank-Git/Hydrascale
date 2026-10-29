@@ -2,7 +2,7 @@
 id: tailscale-services
 feature: Tailscale services — the host names and routes a service of a tailnet
 epic: "Epic 17: Tailscale services"
-status: issued
+status: built
 issues: []
 mockups: []
 ---
@@ -36,8 +36,10 @@ no login flag, and no `--accept-routes`.
 - `internal/hostaccess/routes.go` already holds the two Tailscale address ranges
   `100.64.0.0/10` and `fd7a:115c:a1e0::/48`, and the reads of routing table 52 drop both.
   FR-svc-15 states what that means for a service address.
-- The live check is open. No tailnet has advertised a service to the test host, so the
-  route, the hosts record, and the alias record of a real service are unverified there.
+- The live check of 2026-10-29 ran on the test host against the service `svc:hydratest`
+  of the tailnet `jbones`. It verified the read, the host route, the hosts record, the
+  detail route, and the namespace panel. It did not verify the alias record, because the
+  test host runs with `resolver.resolve_aliases` off.
 
 ## Decisions
 
@@ -273,7 +275,7 @@ route.
   host name, the absent service list, the fallback name, the place of the section, and the
   mono typeface.
 - FR-svc-15 and FR-svc-16 hold no test. They state which path a service address does not
-  take, and the test host has not held a live service.
+  take. The live check of 2026-10-29 observed FR-svc-15 on the test host.
 
 ## Out of scope
 
