@@ -73,6 +73,9 @@ function detailOf(fields = {}) {
     peer_count: fields.peers ? fields.peers.length : 0,
     online_peers: 0,
     peers: fields.peers || [],
+    // api.ServiceInfo carries the tag json:"services,omitempty", so a tailnet with no service
+    // writes no key.
+    services: fields.services,
     backend_state: fields.backendState || "Running",
     login_url: fields.loginURL || "",
     error: fields.error || "",
@@ -336,6 +339,90 @@ test("the panel lists two hundred peers in a scrolling region and it states the 
   assert.equal(panel.peerLabel, "200 peers");
   assert.equal(panel.peers.length, 200);
   assert.equal(panel.scrolls, true);
+});
+
+test("the panel states a service with the name that the host gives it", () => {
+  const status = statusOf([{ id: "havoc" }]);
+  const detail = detailOf({
+    peers: [{ host_name: "mars", tailscale_ips: ["100.83.2.11"] }],
+    services: [
+      {
+        name: "svc:litellm",
+        host_name: "havoc-litellm",
+        addrs: ["100.64.0.138", "fd7a:115c:a1e0::4242"],
+        ports: ["tcp:443", "tcp:8443"],
+      },
+    ],
+  });
+  const panel = buildPanel(status, { havoc: detail }, [], "havoc");
+
+  // host_name is the name in the managed block of the hosts file, so the console and the host
+  // state one word for one service.
+  assert.equal(panel.services.length, 1);
+  assert.equal(panel.services[0].name, "havoc-litellm");
+  assert.equal(panel.services[0].addresses, "100.64.0.138 fd7a:115c:a1e0::4242");
+  assert.equal(panel.services[0].ports, "tcp:443 tcp:8443");
+
+  // A service is not a machine. It holds no state word and no last-seen time, and it changes
+  // no peer count.
+  assert.equal(panel.services[0].online, undefined);
+  assert.equal(panel.peerCount, 1);
+  assert.equal(panel.peers.length, 1);
+});
+
+test("the panel holds no service for a tailnet that reports none", () => {
+  for (const services of [undefined, []]) {
+    const panel = buildPanel(statusOf([{ id: "alpha" }]), { alpha: detailOf({ services }) }, [], "alpha");
+    assert.deepEqual(panel.services, []);
+  }
+});
+
+test("the panel names a service that holds no host name with the name of the control server", () => {
+  // The daemon writes no route, no hosts record, and no resolver record for a service whose
+  // name holds no DNS label, so the detail states no host name for it. The panel shows the
+  // name that the control server reported and it invents nothing.
+  const detail = detailOf({ services: [{ name: "svc:::", addrs: ["100.64.0.140"], ports: [] }] });
+  const panel = buildPanel(statusOf([{ id: "alpha" }]), { alpha: detail }, [], "alpha");
+
+  assert.equal(panel.services.length, 1);
+  assert.equal(panel.services[0].name, "svc:::");
+  assert.equal(panel.services[0].addresses, "100.64.0.140");
+  assert.equal(panel.services[0].ports, "—");
+});
+
+test("the panel draws the services after the peers and before the events", async () => {
+  const source = await readFile(new URL("../static/namespaces.js", import.meta.url), "utf8");
+  const peers = source.indexOf("`Peers · ${panel.peerCount}`");
+  const services = source.indexOf("`Services · ${panel.services.length}`");
+  const events = source.indexOf('"Recent events"');
+  assert.ok(peers !== -1 && services !== -1 && events !== -1, "the panel holds no services section");
+  assert.ok(peers < services, "the panel draws the services before the peers");
+  assert.ok(services < events, "the panel draws the services after the events");
+
+  // The section shows only when the daemon reported a service, so a tailnet with no service
+  // draws no empty section.
+  assert.match(
+    source,
+    /if \(panel\.services\.length > 0\) \{\s*aside\.append\(el\("span", "label ns-section", `Services · \$\{panel\.services\.length\}`\)\)/,
+  );
+});
+
+test("the panel draws every value of a service in the mono typeface", async () => {
+  const source = await readFile(new URL("../static/namespaces.js", import.meta.url), "utf8");
+  for (const span of [
+    /line\.append\(el\("span", "mono", service\.name\)\)/,
+    /line\.append\(el\("span", "mono ns-service-addr", service\.addresses\)\)/,
+    /line\.append\(el\("span", "mono ns-service-ports", service\.ports\)\)/,
+  ]) {
+    assert.match(source, span);
+  }
+
+  // A service answers on one address of each family, and an address of a family holds no
+  // space that breaks it, so the address cell needs the rule that keeps it inside the panel.
+  const style = await readFile(new URL("../static/app.css", import.meta.url), "utf8");
+  const values = style.match(/^\.ns-service-addr,\n\.ns-service-ports\{([^}]*)\}/m);
+  assert.ok(values, "app.css holds no rule for the values of a service row");
+  assert.match(values[1], /overflow-wrap:\s*anywhere/);
 });
 
 test("the panel of a tailnet that is not authenticated states the login url", () => {

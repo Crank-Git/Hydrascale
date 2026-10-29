@@ -201,3 +201,35 @@ func TestHostsFileNotExist(t *testing.T) {
 		t.Error("missing entry")
 	}
 }
+
+func TestUpdateHostsFileHoldsTheRecordOfAService(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hosts")
+	if err := os.WriteFile(path, []byte("127.0.0.1  localhost\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	v4, v6 := BuildServiceRecords("corp", []Service{{
+		Name: "litellm",
+		IPv4: []string{"100.64.0.138"},
+		IPv6: []string{"fd7a:115c:a1e0::4242"},
+	}})
+	if err := UpdateHostsFile(path, v4, v6); err != nil {
+		t.Fatalf("UpdateHostsFile: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(got)
+	if !strings.Contains(content, "100.64.0.138  corp-litellm") {
+		t.Errorf("missing the v4 record of the service in:\n%s", content)
+	}
+	if !strings.Contains(content, "fd7a:115c:a1e0::4242  corp-litellm") {
+		t.Errorf("missing the v6 record of the service in:\n%s", content)
+	}
+	if !strings.Contains(content, "127.0.0.1  localhost") {
+		t.Errorf("the hosts file outside the managed block changed:\n%s", content)
+	}
+}

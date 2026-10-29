@@ -22,6 +22,7 @@ import (
 	"hydrascale/internal/config"
 	"hydrascale/internal/daemon"
 	"hydrascale/internal/dns"
+	"hydrascale/internal/hostaccess"
 	"hydrascale/internal/namespaces"
 	"hydrascale/internal/reconciler"
 	"hydrascale/internal/session"
@@ -754,6 +755,22 @@ func (s *Server) handleTailnetDetail(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(resp.Peers, func(i, j int) bool {
 		return resp.Peers[i].HostName < resp.Peers[j].HostName
 	})
+
+	// A Tailscale service holds no peer entry, so the response carries it apart from the
+	// peers. CollectServices reads the capability map of every node in the status and returns
+	// one entry per service, in the order of the names. ServiceHostNames applies the rule that
+	// hostaccess uses for the hosts record of a service, so the response names a service with
+	// the word that the operator types on the host.
+	services := daemon.CollectServices(status)
+	hostNames := hostaccess.ServiceHostNames(id, services)
+	for _, service := range services {
+		resp.Services = append(resp.Services, ServiceInfo{
+			Name:     service.Name,
+			HostName: hostNames[service.Name],
+			Addrs:    service.Addrs,
+			Ports:    service.Ports,
+		})
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
