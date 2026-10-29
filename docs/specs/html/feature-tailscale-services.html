@@ -161,7 +161,7 @@ body.rv-open .layout { padding-right:21rem; }
 </ul></aside>
 <main>
 <h1>Feature: Tailscale services — the host names and routes a service of a tailnet</h1>
-<p class="meta">Epic 17: Tailscale services &nbsp; <span class="badge">issued</span></p>
+<p class="meta">Epic 17: Tailscale services &nbsp; <span class="badge">built</span></p>
 <h3 id="tailscale-services-purpose">Purpose</h3>
 <p>This is a delta feature. It extends the host access that <code>features/00-foundation.md</code> describes, and it extends the alias zone that the decision of 2026-09-22 opened behind the key <code>resolver.resolve_aliases</code>. A contributor proposed it in pull request #476 on 2026-10-26. The tracker holds no issue for it, and the work lives on the branch <code>feat/tailscale-services</code>.</p>
 <p>A Tailscale service is not a machine. The control server reports it as a capability of the node that collects its endpoints, under the key <code>services/&lt;name&gt;</code> of the capability map. The record names itself <code>svc:&lt;name&gt;</code>. <code>tailscale status --json</code> holds no peer entry for it.</p>
@@ -179,10 +179,10 @@ body.rv-open .layout { padding-right:21rem; }
 </ul>
 <p><code>100.64.0.0/10</code> and <code>fd7a:115c:a1e0::/48</code>, and the reads of routing table 52 drop both. FR-svc-15 states what that means for a service address.</p>
 <ul>
-<li>The live check is open. No tailnet has advertised a service to the test host, so the
+<li>The live check of 2026-10-29 ran on the test host against the service <code>svc:hydratest</code>
 </li>
 </ul>
-<p>route, the hosts record, and the alias record of a real service are unverified there.</p>
+<p>of the tailnet <code>jbones</code>. It verified the read, the host route, the hosts record, the detail route, and the namespace panel. It did not verify the alias record, because the test host runs with <code>resolver.resolve_aliases</code> off.</p>
 <h3 id="tailscale-services-decisions">Decisions</h3>
 <ul>
 <li>The host names a service <code>&lt;tailnet-id&gt;-&lt;label&gt;</code>, in the shape of a peer name. The hosts
@@ -528,7 +528,7 @@ body.rv-open .layout { padding-right:21rem; }
 <li>FR-svc-15 and FR-svc-16 hold no test. They state which path a service address does not
 </li>
 </ul>
-<p>take, and the test host has not held a live service.</p>
+<p>take. The live check of 2026-10-29 observed FR-svc-15 on the test host.</p>
 <h3 id="tailscale-services-out-of-scope">Out of scope</h3>
 <ul>
 <li>A configuration key that selects or names a service. The status is the only source.

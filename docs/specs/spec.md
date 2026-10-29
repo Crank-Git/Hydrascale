@@ -743,7 +743,8 @@ Exit criteria: one live tailnet that advertises a service holds one host route p
 of it, the name `<tailnet-id>-<service>` in the managed block of the hosts file, and an
 answer for `<service>.<alias>.ts.internal`. A service whose name holds no DNS label gets no
 route, no name, and one log line. The namespace panel lists each service with its host name,
-its addresses and its ports. The live part of these criteria is open.
+its addresses and its ports. The live check of 2026-10-29 met these criteria, except the
+alias record.
 
 ## Milestones
 
@@ -1009,6 +1010,7 @@ advance to `status: built`. |
 | 2026-10-26 | 1 | **Decision: the detail route states the host name of a service, and the console derives nothing.** The console could strip the `svc:` prefix in browser JavaScript, and that gives a name that the host does not hold. `hostaccess.ServiceHostName` builds the hosts record of a service. `ServiceInfo.HostName` carries its answer, so the console and the host state one word (FR-svc-22). A name that holds no DNS label gives an empty string. The panel then falls back to the name that the control server reported (FR-svc-25). |
 | 2026-10-26 | 1 | Epic 17 is issued, not built. The change holds Go tests and console JavaScript tests only. No live tailnet has advertised a service to the test host. The route, the hosts record, and the alias record of a real service are unverified there. The exit criteria of Epic 17 name that check. |
 | 2026-10-29 | 1 | **The toolchain moves to Go 1.26.10.** `govulncheck` named GO-2026-6809 in `crypto/x509@go1.26.9`, with the trace `internal/api/server.go:164:31: api.Start calls http.Server.Serve, which eventually calls x509.Certificate.Verify`. The advisory names `crypto/x509@go1.26.10` as its fix, so the move follows the precedent of pull request #461. `go.mod`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` hold `1.26.10`. |
+| 2026-10-29 | 1 | Epic 17 complete. `features/18-tailscale-services.md` is built, and it shipped in pull request #476. The live check ran on the test host against the service `svc:hydratest` of the tailnet `jbones`. The detail route answered `host_name: jbones-hydratest`, and the hosts file held `100.74.168.170  jbones-hydratest`. When the host tailscaled was down, the daemon wrote `100.74.168.170 via 10.200.0.166 dev vh02a1edb1c461`, and `curl http://jbones-hydratest/` answered through the namespace. When the host tailscaled was up, the daemon wrote no route, because routing table 52 answers for the address. The alias record is unverified, because the test host runs with `resolver.resolve_aliases` off. |
 
 ## Issue map
 
