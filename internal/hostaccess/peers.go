@@ -168,6 +168,9 @@ func BuildDNSRecords(tailnetID string, peers []Peer) (v4 map[string]string, v6 m
 		name := tailnetID + "-" + p.Hostname
 		if p.IPv4 != "" {
 			v4[name] = p.IPv4
+			if _, ok := v4[p.Hostname]; !ok {
+				v4[p.Hostname] = p.IPv4
+			}
 		}
 		if p.IPv6 != "" {
 			v6[name] = p.IPv6

@@ -176,6 +176,80 @@ func TestHasEtcOverlay_rejects_an_empty_stream(t *testing.T) {
 	}
 }
 
+func TestSeedEtcUpper_copies_the_namespace_resolv_conf(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "namespace-resolv.conf")
+	const content = "nameserver 9.9.9.9\nnameserver 149.112.112.112\n"
+	if err := os.WriteFile(source, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	upper := filepath.Join(dir, "etc-upper")
+	if err := os.MkdirAll(upper, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	if err := seedEtcUpper(upper, source); err != nil {
+		t.Fatalf("seedEtcUpper: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(upper, "resolv.conf"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("upper resolv.conf = %q, want %q", got, content)
+	}
+}
+
+func TestSeedEtcUpper_returns_nil_when_the_namespace_resolv_conf_is_absent(t *testing.T) {
+	dir := t.TempDir()
+	upper := filepath.Join(dir, "etc-upper")
+	if err := os.MkdirAll(upper, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	err := seedEtcUpper(upper, filepath.Join(dir, "missing"))
+	if err != nil {
+		t.Fatalf("seedEtcUpper: %v, want nil", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(upper, "resolv.conf")); !os.IsNotExist(statErr) {
+		t.Errorf("upper resolv.conf exists, want no file")
+	}
+}
+
+func TestSeedEtcUpper_reports_a_read_failure(t *testing.T) {
+	dir := t.TempDir()
+	// A directory cannot serve as a resolv.conf, so the read fails.
+	err := seedEtcUpper(dir, dir)
+	if err == nil {
+		t.Fatal("seedEtcUpper returned no error, want the read failure")
+	}
+	if !strings.Contains(err.Error(), "read") {
+		t.Errorf("error = %q, want it to name the read", err)
+	}
+}
+
+func TestSeedEtcUpper_reports_a_write_failure(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "namespace-resolv.conf")
+	if err := os.WriteFile(source, []byte("nameserver 9.9.9.9\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	// A file cannot hold the upper directory, so the write fails.
+	upper := filepath.Join(dir, "etc-upper")
+	if err := os.WriteFile(upper, []byte("x"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	err := seedEtcUpper(upper, source)
+	if err == nil {
+		t.Fatal("seedEtcUpper returned no error, want the write failure")
+	}
+	if !strings.Contains(err.Error(), "write") {
+		t.Errorf("error = %q, want it to name the write", err)
+	}
+}
+
 func TestNsDaemon_hides_systemctl_after_the_overlay_mount_and_before_the_child(t *testing.T) {
 	// Issue #410. tailscaled restarts the host systemd-resolved through systemctl after
 	// each write of its resolv.conf, and five restarts within ten seconds stop the host
