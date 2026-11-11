@@ -122,10 +122,39 @@ func writeUnprotectedFile(path, reason string, allowed bool) error {
 	return nil
 }
 
+// namespaceResolvConf is the file that `ip netns exec` bind-mounts over /etc/resolv.conf
+// in the namespace.
+const namespaceResolvConf = "/etc/resolv.conf"
+
+// seedEtcUpper copies the namespace resolv.conf into the overlay upper directory.
+// OverlayFS does not follow the bind mount that `ip netns exec` places on
+// /etc/resolv.conf, so the child reads the host file from the lower layer. The host file
+// names the host resolver, and tailscaled then sends the namespace DNS through that
+// resolver instead of the private overlay. The seeded file names no resolver, so
+// tailscaled selects the direct backend and writes the MagicDNS address into the private
+// overlay.
+// seedEtcUpper returns nil when the namespace file is absent. It returns an error when it
+// cannot read or write a file.
+func seedEtcUpper(upper, source string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", source, err)
+	}
+	path := filepath.Join(upper, "resolv.conf")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 // mountEtcOverlay places the overlay mount on /etc and verifies it.
 // mountEtcOverlay returns an error when it cannot prepare the upper directory or the
-// work directory, when the mount call fails, and when /proc/self/mountinfo then holds no
-// overlay mount on /etc.
+// work directory, when it cannot copy the namespace resolv.conf into the upper directory,
+// when the mount call fails, and when /proc/self/mountinfo then holds no overlay mount on
+// /etc.
 func mountEtcOverlay(upper, work string) error {
 	// A stale upper resolv.conf hides the current one until tailscaled writes its own,
 	// and OverlayFS needs an empty work directory.
@@ -140,6 +169,9 @@ func mountEtcOverlay(upper, work string) error {
 	}
 	if err := os.MkdirAll(work, 0755); err != nil {
 		return fmt.Errorf("create overlay workdir: %w", err)
+	}
+	if err := seedEtcUpper(upper, namespaceResolvConf); err != nil {
+		return err
 	}
 	opts := fmt.Sprintf("lowerdir=/etc,upperdir=%s,workdir=%s", upper, work)
 	if err := syscall.Mount("overlay", "/etc", "overlay", 0, opts); err != nil {
