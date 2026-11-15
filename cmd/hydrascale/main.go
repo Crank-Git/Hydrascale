@@ -70,6 +70,7 @@ reconciles toward it. GitOps for tailnets.`,
 
 	rootCmd.AddCommand(initCmd())
 	rootCmd.AddCommand(nsDaemonCmd())
+	rootCmd.AddCommand(nsExecCmd())
 	rootCmd.AddCommand(addCmd())
 	rootCmd.AddCommand(removeCmd())
 	rootCmd.AddCommand(listCmd())
@@ -720,7 +721,13 @@ func execCmd() *cobra.Command {
 			if len(cmdArgs) == 0 {
 				return fmt.Errorf("exec requires a command after --")
 			}
-			return runInNamespace(tailnetID, cmdArgs, true)
+			// The command reads the resolv.conf of tailscaled, so it resolves the name
+			// of a peer. See issue #482.
+			self, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("cannot locate hydrascale binary: %w", err)
+			}
+			return runInNamespace(tailnetID, nsExecArgs(self, daemon.ResolvConfPath(tailnetID), cmdArgs), true)
 		},
 	}
 }
