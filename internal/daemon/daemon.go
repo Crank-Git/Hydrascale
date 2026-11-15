@@ -710,6 +710,12 @@ func SocketPath(tailnetID string) string {
 	return filepath.Join(DefaultStateDir, tailnetID, "tailscaled.sock")
 }
 
+// ResolvConfPath returns the resolv.conf that the tailscaled of a tailnet writes into the
+// upper directory of its /etc overlay. `hydrascale exec` reads the file from this path.
+func ResolvConfPath(tailnetID string) string {
+	return filepath.Join(DefaultStateDir, tailnetID, "etc-upper", "resolv.conf")
+}
+
 // cleanupExistingDaemon kills any running tailscaled for a tailnet before
 // starting a new one. Prevents orphan accumulation on restarts.
 func (m *RealManager) cleanupExistingDaemon(tailnetID string) {

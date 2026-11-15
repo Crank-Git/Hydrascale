@@ -6,7 +6,7 @@ status: approved
 spec_version: 2
 created: 2026-08-04
 approved: 2026-10-09
-html_generated: 2026-10-29
+html_generated: 2026-11-15
 branch_model: dev-and-live
 features:
   - id: foundation
@@ -1011,6 +1011,8 @@ advance to `status: built`. |
 | 2026-10-26 | 1 | Epic 17 is issued, not built. The change holds Go tests and console JavaScript tests only. No live tailnet has advertised a service to the test host. The route, the hosts record, and the alias record of a real service are unverified there. The exit criteria of Epic 17 name that check. |
 | 2026-10-29 | 1 | **The toolchain moves to Go 1.26.10.** `govulncheck` named GO-2026-6809 in `crypto/x509@go1.26.9`, with the trace `internal/api/server.go:164:31: api.Start calls http.Server.Serve, which eventually calls x509.Certificate.Verify`. The advisory names `crypto/x509@go1.26.10` as its fix, so the move follows the precedent of pull request #461. `go.mod`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` hold `1.26.10`. |
 | 2026-10-29 | 1 | Epic 17 complete. `features/18-tailscale-services.md` is built, and it shipped in pull request #476. The live check ran on the test host against the service `svc:hydratest` of the tailnet `jbones`. The detail route answered `host_name: jbones-hydratest`, and the hosts file held `100.74.168.170  jbones-hydratest`. When the host tailscaled was down, the daemon wrote `100.74.168.170 via 10.200.0.166 dev vh02a1edb1c461`, and `curl http://jbones-hydratest/` answered through the namespace. When the host tailscaled was up, the daemon wrote no route, because routing table 52 answers for the address. The alias record is unverified, because the test host runs with `resolver.resolve_aliases` off. |
+| 2026-11-15 | 1 | **The toolchain moves to Go 1.26.11.** `govulncheck` named GO-2026-6859 in `net/http@go1.26.10`, with the trace `internal/api/server.go:164:31: api.Start calls http.Server.Serve`. The advisory names `net/http@go1.26.11` as its fix, so the move follows the precedent of pull requests #461 and #477. `go.mod`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` hold `1.26.11`. |
+| 2026-11-15 | 1 | **Issue #482: the command of `hydrascale exec` resolved no name of a peer.** `ip netns exec` places `/etc/netns/<ns>/resolv.conf` over `/etc/resolv.conf`, and that file holds the host upstreams. The namespace `tailscaled` writes `nameserver 100.100.100.100` into the upper directory of its `/etc` overlay, and only the mount namespace of `__nsdaemon` holds that overlay. On the test host, `hydrascale exec havoc -- getent hosts nt-micro` printed nothing. FR-dns-20 to FR-dns-23 add the helper `__nsexec`, which places the file of `tailscaled` over `/etc/resolv.conf` for the command. FR-dns-19 stays free for pull request #481. |
 
 ## Issue map
 
