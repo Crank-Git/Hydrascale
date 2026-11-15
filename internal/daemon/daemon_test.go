@@ -44,6 +44,15 @@ func TestSocketPath(t *testing.T) {
 	}
 }
 
+func TestResolvConfPath_names_the_upper_directory_of_the_overlay(t *testing.T) {
+	// The test host holds the file of tailscaled at this path. See issue #482.
+	got := ResolvConfPath("havoc")
+	want := "/var/lib/hydrascale/state/havoc/etc-upper/resolv.conf"
+	if got != want {
+		t.Errorf("ResolvConfPath = %q, want %q", got, want)
+	}
+}
+
 func TestBuildTailscaleUpArgs(t *testing.T) {
 	tests := []struct {
 		name        string

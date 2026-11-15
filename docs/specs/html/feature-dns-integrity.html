@@ -233,6 +233,27 @@ body.rv-open .layout { padding-right:21rem; }
 </li>
 </ul>
 <p>they apply to a failed overlay mount.</p>
+<h4 id="dns-integrity-the-command-of-hydrascale-exec">The command of <code>hydrascale exec</code></h4>
+<ul>
+<li><strong>FR-dns-20</strong> — <code>hydrascale exec</code> runs the helper <code>__nsexec</code> inside the namespace. The
+</li>
+</ul>
+<p>helper places <code>/var/lib/hydrascale/state/&lt;id&gt;/etc-upper/resolv.conf</code> over <code>/etc/resolv.conf</code>, then executes the command. Issue #482 measured that the command read the host upstreams and resolved no name of a peer.</p>
+<ul>
+<li><strong>FR-dns-21</strong> — When that file is absent, the helper writes a warning to stderr and
+</li>
+</ul>
+<p>executes the command without the mount.</p>
+<ul>
+<li><strong>FR-dns-22</strong> — When the mount fails, the helper executes no command and returns the
+</li>
+</ul>
+<p>error.</p>
+<ul>
+<li><strong>FR-dns-23</strong> — When the helper shares the mount namespace of PID 1, the helper
+</li>
+</ul>
+<p>executes no command and returns an error.</p>
 <h4 id="dns-integrity-the-host-file-check">The host file check</h4>
 <ul>
 <li><strong>FR-dns-7</strong> — At start, the daemon records a SHA-256 checksum of the host
@@ -435,7 +456,15 @@ body.rv-open .layout { padding-right:21rem; }
 <ul>
 <li>[ ] The test host runs the daemon with two tailnets and both report <code>protected: true</code>.
 </li>
+<li>[ ] On the test host, <code>sudo hydrascale exec &lt;id&gt; -- getent hosts &lt;peer&gt;</code> prints the
+</li>
 </ul>
+<p>tailnet address of the peer.</p>
+<ul>
+<li>[ ] On the test host, the host <code>/etc/resolv.conf</code> file does not change after
+</li>
+</ul>
+<p><code>hydrascale exec</code> runs.</p>
 <h3 id="dns-integrity-out-of-scope">Out of scope</h3>
 <ul>
 <li>A change to the DNS forwarder's resolution logic. This feature set covers protection

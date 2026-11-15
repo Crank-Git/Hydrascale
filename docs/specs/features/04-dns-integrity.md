@@ -3,7 +3,7 @@ id: dns-integrity
 feature: DNS integrity
 epic: "Epic 4: DNS integrity"
 status: built
-issues: [74, 75, 76, 77, 78, 79]
+issues: [74, 75, 76, 77, 78, 79, 482]
 mockups: []
 ---
 
@@ -73,6 +73,19 @@ the test host needs working DNS for every other epic.
   restarts of the host `systemd-resolved` in 30 minutes before this requirement.
 - **FR-dns-18** — When the helper cannot hide `systemctl`, FR-dns-3 to FR-dns-6 apply as
   they apply to a failed overlay mount.
+
+### The command of `hydrascale exec`
+
+- **FR-dns-20** — `hydrascale exec` runs the helper `__nsexec` inside the namespace. The
+  helper places `/var/lib/hydrascale/state/<id>/etc-upper/resolv.conf` over
+  `/etc/resolv.conf`, then executes the command. Issue #482 measured that the command
+  read the host upstreams and resolved no name of a peer.
+- **FR-dns-21** — When that file is absent, the helper writes a warning to stderr and
+  executes the command without the mount.
+- **FR-dns-22** — When the mount fails, the helper executes no command and returns the
+  error.
+- **FR-dns-23** — When the helper shares the mount namespace of PID 1, the helper
+  executes no command and returns an error.
 
 ### The host file check
 
@@ -216,6 +229,10 @@ OverlayFS mount.
 - [ ] `docs/dns-investigation.md` states which of the three candidate causes the
       remaining defect matches, or states that none of them matched.
 - [ ] The test host runs the daemon with two tailnets and both report `protected: true`.
+- [ ] On the test host, `sudo hydrascale exec <id> -- getent hosts <peer>` prints the
+      tailnet address of the peer.
+- [ ] On the test host, the host `/etc/resolv.conf` file does not change after
+      `hydrascale exec` runs.
 
 ## Out of scope
 
