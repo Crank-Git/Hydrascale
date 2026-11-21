@@ -16,7 +16,7 @@ const siteURL = "https://crank-git.github.io/Hydrascale/"
 // readmeSections are the "## " headings that FR-readme-2 requires after the header, in
 // order.
 var readmeSections = []string{
-	"What Hydrascale does",
+	"Why Hydrascale",
 	"Requirements",
 	"Install",
 	"Quick start",

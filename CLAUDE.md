@@ -133,7 +133,8 @@ fewer.
 ### Writing
 
 Every document, issue, comment, and code comment uses Simplified Technical English.
-`.claude/rules/ste.md` holds the standard. The controlled vocabulary is the `## Terms`
+`.claude/rules/ste.md` holds the standard. `README.md` is the one exception: it
+uses the voice of the operator, and `features/15-readme-slim.md` holds its rules. The controlled vocabulary is the `## Terms`
 table in `docs/specs/spec.md`. Read it before you write a domain word.
 
 ### This repository is public
