@@ -13,6 +13,10 @@ Every specification file, issue body, comment, manual page, and **code comment**
 project uses Simplified Technical English. A requirement that reads two ways gets built
 two ways.
 
+`README.md` is the one exception. It uses the voice of the operator, and
+`docs/specs/features/15-readme-slim.md` holds its rules. Every other Markdown file,
+including each page of the documentation site, keeps this standard.
+
 The project's controlled vocabulary is the `## Terms` table in `docs/specs/spec.md`. Read
 it before you write a domain word. When you need a word that the table does not hold, add
 a row to the table.

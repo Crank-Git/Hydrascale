@@ -4,64 +4,59 @@
 
 <h1 align="center">Hydrascale</h1>
 
-<p align="center">Run multiple Tailscale tailnets simultaneously on a single Linux machine.</p>
+<p align="center"><b>Run multiple Tailscale tailnets simultaneously on a single Linux machine.</b></p>
 
 <p align="center">
-  <a href="https://github.com/Crank-Git/Hydrascale/actions/workflows/ci.yml"><img src="https://github.com/Crank-Git/Hydrascale/actions/workflows/ci.yml/badge.svg?branch=dev" alt="The state of continuous integration"></a>
-  <img src="https://img.shields.io/badge/go-1.26-8d867d" alt="The Go version">
-  <img src="https://img.shields.io/badge/platform-linux-8d867d" alt="The platform">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8d867d" alt="The license"></a>
+  <a href="https://github.com/Crank-Git/Hydrascale/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Crank-Git/Hydrascale/ci.yml?branch=dev&style=flat-square&label=ci&labelColor=45413c"></a>
+  <a href="https://github.com/Crank-Git/Hydrascale/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Crank-Git/Hydrascale?style=flat-square&labelColor=45413c&color=c8ff2e"></a>
+  <img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/Crank-Git/Hydrascale?style=flat-square&label=go&labelColor=45413c&color=c8ff2e">
+  <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-linux-c8ff2e?style=flat-square&labelColor=45413c">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/Crank-Git/Hydrascale?style=flat-square&labelColor=45413c&color=c8ff2e"></a>
 </p>
 
 <p align="center">
-  <img src="docs/site/images/console-overview.png" alt="The Overview view of the console. One line states that 3 of 3 tailnets are healthy and reachable. A board holds one row per tailnet with its state, reachability, peers, paths, exit node, host access, and policy credential. Below it, a topology draws a dotted curve for each allowed path, and an events list holds the newest events. The names and the addresses are placeholders." width="900">
+  <a href="https://crank-git.github.io/Hydrascale/"><b>Docs</b></a> ·
+  <a href="#install"><b>Install</b></a> ·
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="https://github.com/Crank-Git/Hydrascale/releases"><b>Releases</b></a>
 </p>
 
-## What Hydrascale does
+<p align="center">
+  <img src="docs/site/images/console-overview.png" alt="The Overview view of the console: three healthy tailnets, the topology of their allowed paths, and recent events. Names and addresses are placeholders." width="720">
+</p>
 
-Hydrascale lets one Linux host join more than one tailnet at the same time. The daemon
-creates one network namespace for each tailnet, and it runs a separate `tailscaled` in
-each namespace. The traffic of one tailnet stays inside the network stack of its
-namespace. Overlapping IP ranges, separate firewall rules, and separate routing tables
-therefore work with no extra step.
+## Why Hydrascale
 
-The operator declares the tailnets in a YAML configuration file. The reconciler drives the
-live host toward that file. The DNS forwarder answers names across every tailnet, so the
-host reaches a peer by name.
+`tailscaled` holds one tailnet at a time. Fast user switching swaps between them, but it won't keep two up at once, and that's a problem when everyone you work with runs their own tailnet. Hydrascale keeps a Linux host on all of them simultaneously.
 
-The daemon serves a console on the loopback address. It enforces the local rules that the
-operator declares, and it reads, validates, and writes the policy that the control server
-of each tailnet holds.
+Each tailnet gets its own `tailscaled` in its own network namespace (`ns-<id>`), wired to the host by a veth pair and masqueraded out the host's interface. Every tailnet hands out addresses from the same `100.64.0.0/10` CGNAT range, so the namespaces are what keep overlapping addresses, routes, and exit nodes from colliding. Each `tailscaled` also gets its own UDP listen port (41641 plus its veth index), forwarded from the host, so peers can still reach each namespace directly.
+
+The hard part was names. MagicDNS lives inside each namespace, so the host can't resolve any of it on its own. Hydrascale publishes peer names to the host, either as a managed block in `/etc/hosts` or as per-tailnet routing domains in `systemd-resolved`, and sends each tailnet's split DNS domains to that tailnet's resolver.
 
 ## Requirements
 
-- **Linux.** A network namespace is a feature of the Linux kernel.
-- **Root.** `hydrascale init` refuses to run as any other account.
-- **Tailscale.** The commands `tailscaled` and `tailscale` must be in `$PATH`.
-- **iproute2.** The daemon runs `ip` to manage a namespace.
-- **iptables and ip6tables.** The `iptables` package of each distribution holds both
-  commands.
-- **IP forwarding.** Run `sudo sysctl -w net.ipv4.ip_forward=1`.
-- **Go 1.26 or later**, for a build from source only.
+- **Linux, as root.** `hydrascale init` refuses to run as anyone else.
+- **Tailscale**, with `tailscaled` and `tailscale` in `$PATH`.
+- **iproute2** (`ip`), and **iptables** plus **ip6tables**. Most distributions ship both in the `iptables` package.
+- **IP forwarding:** `sudo sysctl -w net.ipv4.ip_forward=1`.
+- **Go 1.26 or later**, only if you build from source.
 
-The [requirements page](https://crank-git.github.io/Hydrascale/get-started/requirements/)
-states the kernel options and the IPv6 requirements.
+Kernel options and the IPv6 requirements are on the
+[requirements page](https://crank-git.github.io/Hydrascale/get-started/requirements/).
 
 ## Install
 
-Install a released binary, or build the binary from source. Both ways put the binary at
-`/usr/local/bin/hydrascale`.
+Either way, the binary ends up at `/usr/local/bin/hydrascale`.
 
-To install a released binary, download the archive for the host from the
-[GitHub Releases](https://github.com/Crank-Git/Hydrascale/releases) page. Then unpack it
-and install the binary:
+From a release: grab the archive for your host from
+[GitHub Releases](https://github.com/Crank-Git/Hydrascale/releases), then:
 
 ```bash
 tar xzf hydrascale_*.tar.gz
 sudo install hydrascale /usr/local/bin/
 ```
 
-To build from source, clone the repository and build it:
+From source:
 
 ```bash
 git clone https://github.com/Crank-Git/Hydrascale.git
@@ -70,28 +65,22 @@ go build -o hydrascale ./cmd/hydrascale
 sudo install hydrascale /usr/local/bin/
 ```
 
-`go install` does not work. The module path is `hydrascale`, and the Go module proxy
-cannot fetch that path.
+`go install` won't work. The module path is just `hydrascale`, which the Go module proxy
+can't fetch.
 
 ## Quick start
 
-The interactive wizard is the shortest path. It does these steps:
-
-1. It runs the preflight checks.
-2. It writes the configuration file.
-3. It asks for an auth key, or for a login in the browser.
-4. It starts the first tailnet.
-5. It confirms that the tailnet authenticated.
-
-Start the wizard as root:
+The wizard is the shortest path. It runs the preflight checks, writes the config, asks
+for an auth key or a browser login, starts the first tailnet, and confirms it
+authenticated:
 
 ```bash
 sudo hydrascale init
 ```
 
-To configure the host without the wizard, do these steps.
+To set it up by hand instead:
 
-1. Write a configuration file at `/etc/hydrascale/config.yaml`:
+1. Write `/etc/hydrascale/config.yaml`:
 
     ```yaml
     version: 2
@@ -112,78 +101,72 @@ To configure the host without the wizard, do these steps.
       interval: 10s
     ```
 
-2. Apply the configuration one time:
+2. Apply it once with `sudo hydrascale apply`, or run the daemon with
+   `sudo hydrascale serve`. The daemon checks the host against the file on every tick
+   (every 10 seconds here) and fixes anything that drifted.
 
-    ```bash
-    sudo hydrascale apply
-    ```
+3. Check on it with `sudo hydrascale status`, or open the console at
+   `http://127.0.0.1:9443`.
 
-3. Or run the daemon, which reconciles on every tick:
+Give it about 20 seconds after a start before you trust `hydrascale status`. Until then,
+tailnets show `down` and `degraded`, which is normal. If one still says `down` after 60
+seconds, something is actually wrong.
 
-    ```bash
-    sudo hydrascale serve
-    ```
+`mode: enforce` denies every path that no rule allows. If this host already uses its
+tailnets, read [Local rules](https://crank-git.github.io/Hydrascale/concepts/local-rules/)
+before you start the daemon.
 
-4. Open the console at `http://127.0.0.1:9443`.
-
-5. Read the state:
-
-    ```bash
-    sudo hydrascale status
-    ```
-
-A tailnet needs about 20 seconds after a start of the daemon before `hydrascale status`
-reports `healthy` and `running`. An earlier read reports `down` and `degraded`, which is a
-normal state after a start. If a tailnet still reports `down` after 60 seconds, the
-tailnet has a real failure.
-
-The `access` block of this file sets the local rules. The mode `enforce` denies each path
-that no rule allows. If the host already uses its tailnets, read
-[Local rules](https://crank-git.github.io/Hydrascale/concepts/local-rules/) before you
-start the daemon.
+Once it's running, the rest of the CLI works per tailnet: `exec` runs any command inside
+a tailnet's namespace, `ping`, `ssh`, and `tailscale` do what you'd expect from there,
+`env` prints the shell environment for one, and `wrap` generates a systemd drop-in that
+runs a service inside one. `tui` opens a monitor against the running daemon, `diff`
+shows what `apply` would change, and `add`, `remove`, `list`, `install`, and `uninstall`
+manage the rest. Every command is on the
+[command line page](https://crank-git.github.io/Hydrascale/reference/command-line/).
 
 ## The console
 
 <p align="center">
-  <img src="docs/site/images/console-namespaces.png" alt="The Namespaces view of the console. A table holds one row per tailnet with its state, reachability, policy credential, peer count, address, and namespace. A panel on the right shows one selected tailnet: its namespace, address, MagicDNS name, host access, exit node, the list of its peers, and its recent events. The names and the addresses are placeholders." width="900">
+  <img src="docs/site/images/console-namespaces.png" alt="The Namespaces view of the console: one row per tailnet with its state, reachability, policy credential, peers, address, and namespace, and a detail panel for the selected tailnet. Names and addresses are placeholders." width="720">
 </p>
 
-The daemon serves the console on `127.0.0.1:9443`. The console shows the namespaces, the
-local rules, the upstream policy, and the event list. **Warning — the console has no
-authentication, and the daemon runs as root.** Any local account on the host reaches the
-console and drives the daemon. Read the
-[Security](https://crank-git.github.io/Hydrascale/security/console/) section before you
-start the daemon on a shared host.
+The daemon serves the console on `127.0.0.1:9443`: namespaces, local rules, upstream
+policy, and events. **Heads up:** the console has no authentication, and the daemon runs
+as root. Any local account on this host can open it and control the daemon. Read
+[Security](https://crank-git.github.io/Hydrascale/security/console/) before you run this
+on a shared machine.
 
 ## Documentation
 
-The [documentation site](https://crank-git.github.io/Hydrascale/) states every other
-topic.
+Everything else is on the [documentation site](https://crank-git.github.io/Hydrascale/).
 
-| Section | Holds |
+| Section | What's there |
 |---|---|
-| [Home](https://crank-git.github.io/Hydrascale/) | What Hydrascale does, and the reconciler. |
-| [Get started](https://crank-git.github.io/Hydrascale/get-started/) | The requirements, the install, and the quick start. |
-| [Guides](https://crank-git.github.io/Hydrascale/guides/) | The console views, the credentials, host access, and Headscale. |
-| [Concepts](https://crank-git.github.io/Hydrascale/concepts/) | The local rules, the upstream policy, DNS, and networking. |
-| [Reference](https://crank-git.github.io/Hydrascale/reference/) | The configuration file, the command line, the environment variables, the control API, the events, and the agent skills. |
-| [Operations](https://crank-git.github.io/Hydrascale/operations/) | Daemon mode, remote access, the upgrade, the uninstall, and troubleshooting. |
-| [Architecture](https://crank-git.github.io/Hydrascale/architecture/) | The namespaces, the veth pairs, and the managers of the reconciler. |
+| [Home](https://crank-git.github.io/Hydrascale/) | What Hydrascale does and how the reconciler works. |
+| [Get started](https://crank-git.github.io/Hydrascale/get-started/) | Requirements, install, and the quick start. |
+| [Guides](https://crank-git.github.io/Hydrascale/guides/) | Console views, credentials, host access, and Headscale. |
+| [Concepts](https://crank-git.github.io/Hydrascale/concepts/) | Local rules, upstream policy, DNS, and networking. |
+| [Reference](https://crank-git.github.io/Hydrascale/reference/) | Config file, command line, environment variables, control API, events, and agent skills. |
+| [Operations](https://crank-git.github.io/Hydrascale/operations/) | Daemon mode, remote access, upgrades, uninstall, and troubleshooting. |
+| [Architecture](https://crank-git.github.io/Hydrascale/architecture/) | Namespaces, veth pairs, and the reconciler's managers. |
 | [Security](https://crank-git.github.io/Hydrascale/security/) | The console risk, its four controls, and the security audit. |
 
 ## Agent skills
 
-A skill is one Markdown file that states how a coding agent does one task. The binary
-holds the skill set. Run this command as the account that runs the coding agent, without
-`sudo`:
+The binary ships a set of skills for coding agents, one Markdown file per task. Install
+them as the account that runs your agent, without `sudo`:
 
 ```bash
 hydrascale skills install
 ```
 
-The [Agent skills](https://crank-git.github.io/Hydrascale/reference/skills/) page states
-each skill and each flag.
+Each skill and flag is on the
+[Agent skills](https://crank-git.github.io/Hydrascale/reference/skills/) page.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).
+
+---
+
+<sub>Built by <a href="https://github.com/Crank-Git">Crank</a> · <a href="https://github.com/Crank-Git">More projects</a></sub>
