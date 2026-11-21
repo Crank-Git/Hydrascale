@@ -45,13 +45,13 @@ the new location of each fact.
 ## Functional requirements
 
 - **FR-readme-1** — `README.md` holds 220 lines or fewer.
-- **FR-readme-2** — `README.md` holds these sections, in this order: the header, What
-  Hydrascale does, Requirements, Install, Quick start, The console, Documentation, Agent
+- **FR-readme-2** — `README.md` holds these sections, in this order: the header, Why
+  Hydrascale, Requirements, Install, Quick start, The console, Documentation, Agent
   skills, License.
-- **FR-readme-3** — The header keeps the mark, the name, the one-line summary, and the
-  badges, and it holds one screenshot of the Overview view of the console below the
-  badges.
-- **FR-readme-4** — What Hydrascale does holds three paragraphs or fewer.
+- **FR-readme-3** — The header keeps the mark, the name, the one-line summary, the
+  badges, and a row of links (Docs, Install, Quick start, Releases), and it holds one
+  screenshot of the Overview view of the console below the links.
+- **FR-readme-4** — Why Hydrascale holds three paragraphs or fewer.
 - **FR-readme-5** — The console section holds one screenshot and one paragraph, and the
   paragraph states that the console has no authentication.
 - **FR-readme-6** — The Documentation section holds a table with one row per section of
@@ -63,7 +63,7 @@ the new location of each fact.
 - **FR-readme-9** — Every link of the README to a file of the repository names a file
   that exists.
 - **FR-readme-10** — `README.md` holds no fact that the site does not also state, apart
-  from the install and the quick start.
+  from the install, the quick start, and the reason for the project in Why Hydrascale.
 - **FR-readme-11** — Every screenshot in `README.md` comes from `docs/site/images/`.
 
 ## User flows
@@ -72,7 +72,7 @@ the new location of each fact.
 
 ```mermaid
 flowchart TD
-  A[Operator reads What Hydrascale does] --> B{Does it fit the host?}
+  A[Operator reads Why Hydrascale] --> B{Does it fit the host?}
   B -- no --> C[Operator leaves]
   B -- yes --> D[Requirements and Install]
   D --> E[Quick start]
@@ -81,7 +81,7 @@ flowchart TD
   G --> H[Site page of the topic]
 ```
 
-1. The operator reads What Hydrascale does.
+1. The operator reads Why Hydrascale.
 2. If the tool fits the host, the operator reads the requirements and installs it.
 3. The quick start brings the operator to a running daemon.
 4. For any other topic, the operator follows a row of the Documentation table.
